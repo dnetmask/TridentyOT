@@ -10,7 +10,7 @@ router = APIRouter(prefix="/api/inventory", tags=["inventory"])
 
 @router.get("/devices", response_model=list[DeviceOut])
 def list_devices(ot_only: bool = False, protocol: str | None = None, db: Session = Depends(get_db)):
-    query = db.query(Device)
+    query = db.query(Device).options(joinedload(Device.protocols))
     if ot_only:
         query = query.filter(Device.is_ot_suspected.is_(True))
     if protocol:

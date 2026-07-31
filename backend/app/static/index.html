@@ -314,7 +314,7 @@ async function loadDevices() {
       <td>${d.mac || '—'}</td>
       <td>${d.os_guess || '—'}</td>
       <td>${(d.os_confidence * 100).toFixed(0)}%</td>
-      <td>—</td>
+      <td>${d.protocol_count}</td>
       <td>${fmtDate(d.last_seen)}</td>
     </tr>`).join('');
 }

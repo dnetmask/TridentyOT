@@ -43,6 +43,7 @@ class DeviceOut(BaseModel):
     os_guess: str | None
     os_confidence: float
     is_ot_suspected: bool
+    protocol_count: int
     first_seen: datetime.datetime
     last_seen: datetime.datetime
 

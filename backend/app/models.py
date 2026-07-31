@@ -57,6 +57,10 @@ class Device(Base):
         back_populates="device", cascade="all, delete-orphan"
     )
 
+    @property
+    def protocol_count(self) -> int:
+        return len(self.protocols)
+
 
 class DeviceProtocol(Base):
     __tablename__ = "device_protocols"
