@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TridentyOT — Inventario y Vulnerabilidades</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: #121c2e;
+    --panel-2: #17233a;
+    --border: #23324d;
+    --text: #e6edf7;
+    --muted: #8ea0c0;
+    --accent: #3ba9ff;
+    --ok: #16a34a;
+    --crit: #dc2626;
+    --high: #ea580c;
+    --med: #d97706;
+    --low: #16a34a;
+    --info: #64748b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  header span { color: var(--muted); font-size: 13px; }
+  nav {
+    display: flex;
+    gap: 4px;
+    padding: 0 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  nav button {
+    background: none;
+    border: none;
+    color: var(--muted);
+    padding: 12px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    border-bottom: 2px solid transparent;
+  }
+  nav button.active { color: var(--text); border-bottom-color: var(--accent); }
+  main { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .card h2 { margin: 0 0 12px; font-size: 15px; color: var(--muted); font-weight: 600; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input, select {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  button.action {
+    background: var(--accent);
+    border: none;
+    color: #04121f;
+    font-weight: 600;
+    padding: 9px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button.action.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  button.action.danger { background: var(--crit); color: white; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:hover td { background: rgba(59, 169, 255, 0.05); }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: white;
+  }
+  .sev-critical { background: var(--crit); }
+  .sev-high { background: var(--high); }
+  .sev-medium { background: var(--med); }
+  .sev-low { background: var(--low); }
+  .sev-info, .sev-unknown { background: var(--info); }
+  .pill { background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 11px; margin: 2px; display: inline-block; }
+  .pill.ot { border-color: var(--high); color: var(--high); }
+  .muted { color: var(--muted); }
+  .empty { color: var(--muted); padding: 20px; text-align: center; }
+  .clickable { cursor: pointer; }
+  .device-detail { margin-top: 12px; }
+  .flex-between { display: flex; justify-content: space-between; align-items: center; }
+  .status-running { color: var(--accent); }
+  .status-completed, .status-stopped { color: var(--muted); }
+  .status-error { color: var(--crit); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>TridentyOT</h1>
+  <span>Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)</span>
+</header>
+
+<nav>
+  <button data-tab="capture" class="active">Captura</button>
+  <button data-tab="inventory">Inventario</button>
+  <button data-tab="vulns">Vulnerabilidades</button>
+</nav>
+
+<main>
+
+  <section id="tab-capture" class="tab active">
+    <div class="card">
+      <h2>Captura en vivo</h2>
+      <div class="row">
+        <div>
+          <label>Interfaz de red</label>
+          <select id="iface-select"><option value="">(cargando...)</option></select>
+        </div>
+        <div>
+          <label>Filtro BPF</label>
+          <input id="bpf-filter" value="ip or arp" size="24" />
+        </div>
+        <button class="action" id="start-live-btn">Iniciar captura</button>
+      </div>
+      <p class="muted" style="margin-top:10px">
+        Requiere que el proceso tenga permisos de captura raw (root o CAP_NET_RAW) y que libpcap
+        esté disponible en el host, además de estar conectado a un puerto SPAN/mirror o al segmento a inspeccionar.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>Analizar archivo .pcap / .pcapng</h2>
+      <div class="row">
+        <input type="file" id="pcap-file" accept=".pcap,.pcapng,.cap" />
+        <button class="action" id="upload-pcap-btn">Subir y analizar</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="flex-between">
+        <h2>Sesiones de captura</h2>
+        <button class="action secondary" id="refresh-sessions-btn">Actualizar</button>
+      </div>
+      <table>
+        <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>Origen</th><th>Estado</th><th>Paquetes</th><th>Inicio</th><th></th></tr></thead>
+        <tbody id="sessions-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-inventory" class="tab">
+    <div class="card">
+      <div class="flex-between">
+        <h2>Dispositivos detectados</h2>
+        <div class="row">
+          <label style="display:inline-flex;align-items:center;gap:6px;margin:0;">
+            <input type="checkbox" id="ot-only-checkbox" style="width:auto" /> Solo sospechosos de OT
+          </label>
+          <button class="action secondary" id="refresh-devices-btn">Actualizar</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>IP</th><th>MAC</th><th>SO estimado</th><th>Confianza</th><th>Protocolos</th><th>Últ. visto</th></tr></thead>
+        <tbody id="devices-body"><tr><td colspan="6" class="empty">Sin datos</td></tr></tbody>
+      </table>
+      <div id="device-detail" class="device-detail"></div>
+    </div>
+  </section>
+
+  <section id="tab-vulns" class="tab">
+    <div class="card">
+      <div class="flex-between">
+        <h2>Hallazgos de vulnerabilidades</h2>
+        <div class="row">
+          <select id="severity-filter">
+            <option value="">Todas las severidades</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+            <option value="info">Info</option>
+          </select>
+          <button class="action secondary" id="refresh-findings-btn">Actualizar</button>
+          <button class="action" id="scan-all-btn">Ejecutar escaneo completo</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Severidad</th><th>Dispositivo</th><th>Hallazgo</th><th>Fuente</th><th>Evidencia</th></tr></thead>
+        <tbody id="findings-body"><tr><td colspan="5" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch (e) {}
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString();
+}
+
+function sevBadge(sev) {
+  return `<span class="badge sev-${sev || 'unknown'}">${sev || 'unknown'}</span>`;
+}
+
+// ---------- Capture tab ----------
+async function loadInterfaces() {
+  const sel = $('#iface-select');
+  try {
+    const data = await api('/api/capture/interfaces');
+    sel.innerHTML = data.interfaces.map(i => `<option value="${i}">${i}</option>`).join('') || '<option value="">(ninguna disponible)</option>';
+  } catch (e) {
+    sel.innerHTML = '<option value="">(no se pudo listar interfaces)</option>';
+  }
+}
+
+async function loadSessions() {
+  const tbody = $('#sessions-body');
+  const sessions = await api('/api/capture/sessions');
+  if (!sessions.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin sesiones aún</td></tr>'; return; }
+  tbody.innerHTML = sessions.map(s => `
+    <tr>
+      <td>${s.id}</td><td>${s.name}</td><td>${s.source_type}</td><td>${s.source}</td>
+      <td class="status-${s.status}">${s.status}${s.error_message ? ' — ' + s.error_message : ''}</td>
+      <td>${s.packet_count}</td><td>${fmtDate(s.started_at)}</td>
+      <td>${s.status === 'running' && s.source_type === 'live' ? `<button class="action danger" onclick="stopLive(${s.id})">Detener</button>` : ''}</td>
+    </tr>`).join('');
+}
+
+async function stopLive(id) {
+  await api(`/api/capture/live/stop/${id}`, { method: 'POST' });
+  loadSessions();
+}
+
+$('#start-live-btn').addEventListener('click', async () => {
+  const iface = $('#iface-select').value;
+  if (!iface) { alert('Selecciona una interfaz'); return; }
+  try {
+    await api('/api/capture/live/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interface: iface, bpf_filter: $('#bpf-filter').value }),
+    });
+    loadSessions();
+  } catch (e) { alert('No se pudo iniciar la captura: ' + e.message); }
+});
+
+$('#upload-pcap-btn').addEventListener('click', async () => {
+  const fileInput = $('#pcap-file');
+  if (!fileInput.files.length) { alert('Selecciona un archivo .pcap'); return; }
+  const form = new FormData();
+  form.append('file', fileInput.files[0]);
+  try {
+    await api('/api/capture/pcap', { method: 'POST', body: form });
+    loadSessions();
+  } catch (e) { alert('No se pudo subir el archivo: ' + e.message); }
+});
+
+$('#refresh-sessions-btn').addEventListener('click', loadSessions);
+
+// ---------- Inventory tab ----------
+async function loadDevices() {
+  const tbody = $('#devices-body');
+  const otOnly = $('#ot-only-checkbox').checked;
+  const devices = await api('/api/inventory/devices' + (otOnly ? '?ot_only=true' : ''));
+  if (!devices.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">Sin dispositivos detectados aún</td></tr>'; return; }
+  tbody.innerHTML = devices.map(d => `
+    <tr class="clickable" onclick="showDeviceDetail(${d.id})">
+      <td>${d.ip || '—'} ${d.is_ot_suspected ? '<span class="pill ot">OT</span>' : ''}</td>
+      <td>${d.mac || '—'}</td>
+      <td>${d.os_guess || '—'}</td>
+      <td>${(d.os_confidence * 100).toFixed(0)}%</td>
+      <td>—</td>
+      <td>${fmtDate(d.last_seen)}</td>
+    </tr>`).join('');
+}
+
+async function showDeviceDetail(id) {
+  const device = await api(`/api/inventory/devices/${id}`);
+  const protoRows = device.protocols.map(p => `
+    <span class="pill ${p.category === 'OT' ? 'ot' : ''}">${p.protocol}:${p.port ?? '-'} (${p.role}, ${p.packet_count}x)</span>`).join(' ');
+  const findingRows = device.findings.map(f => `
+    <tr><td>${sevBadge(f.severity)}</td><td>${f.title}</td><td>${f.cve_id || f.rule_id || '—'}</td></tr>`).join('') ||
+    '<tr><td colspan="3" class="empty">Sin hallazgos (ejecuta un escaneo desde la pestaña Vulnerabilidades)</td></tr>';
+
+  $('#device-detail').innerHTML = `
+    <h2>Detalle: ${device.ip || device.mac}</h2>
+    <p><b>SO estimado:</b> ${device.os_guess || 'desconocido'} (confianza ${(device.os_confidence*100).toFixed(0)}%)</p>
+    <p><b>Protocolos/servicios:</b><br/>${protoRows || '<span class="muted">ninguno</span>'}</p>
+    <table>
+      <thead><tr><th>Severidad</th><th>Hallazgo</th><th>Ref.</th></tr></thead>
+      <tbody>${findingRows}</tbody>
+    </table>
+  `;
+}
+
+$('#refresh-devices-btn').addEventListener('click', loadDevices);
+$('#ot-only-checkbox').addEventListener('change', loadDevices);
+
+// ---------- Vulnerabilities tab ----------
+async function loadFindings() {
+  const tbody = $('#findings-body');
+  const sev = $('#severity-filter').value;
+  const findings = await api('/api/vuln/findings' + (sev ? `?severity=${sev}` : ''));
+  if (!findings.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty">Sin hallazgos. Ejecuta un escaneo.</td></tr>'; return; }
+  tbody.innerHTML = findings.map(f => `
+    <tr>
+      <td>${sevBadge(f.severity)}</td>
+      <td>#${f.device_id}</td>
+      <td><b>${f.title}</b><br/><span class="muted">${f.description}</span></td>
+      <td>${f.source}${f.cve_id ? ' · ' + f.cve_id : ''}</td>
+      <td class="muted">${f.evidence || '—'}</td>
+    </tr>`).join('');
+}
+
+$('#refresh-findings-btn').addEventListener('click', loadFindings);
+$('#severity-filter').addEventListener('change', loadFindings);
+$('#scan-all-btn').addEventListener('click', async () => {
+  $('#scan-all-btn').textContent = 'Escaneando...';
+  try {
+    await api('/api/vuln/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ use_nvd: true }),
+    });
+    await loadFindings();
+  } catch (e) { alert('Error en el escaneo: ' + e.message); }
+  finally { $('#scan-all-btn').textContent = 'Ejecutar escaneo completo'; }
+});
+
+// initial load
+loadInterfaces();
+loadSessions();
+loadDevices();
+loadFindings();
+setInterval(loadSessions, 5000);
+</script>
+</body>
+</html>
