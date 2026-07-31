@@ -39,7 +39,14 @@ class Device(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     mac: Mapped[str | None] = mapped_column(String(17), nullable=True, index=True)
     ip: Mapped[str | None] = mapped_column(String(45), nullable=True, index=True)
+
+    # hostname/vendor are auto-detected (DHCP/DNS/mDNS option 12, MAC OUI);
+    # custom_name/custom_vendor are manual overrides that always win when set,
+    # editable regardless of whether auto-detection found anything.
     hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    custom_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    vendor: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    custom_vendor: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     os_guess: Mapped[str | None] = mapped_column(String(128), nullable=True)
     os_confidence: Mapped[float] = mapped_column(Float, default=0.0)
@@ -60,6 +67,14 @@ class Device(Base):
     @property
     def protocol_count(self) -> int:
         return len(self.protocols)
+
+    @property
+    def display_name(self) -> str | None:
+        return self.custom_name or self.hostname
+
+    @property
+    def display_vendor(self) -> str | None:
+        return self.custom_vendor or self.vendor
 
 
 class DeviceProtocol(Base):
@@ -83,6 +98,53 @@ class DeviceProtocol(Base):
     device: Mapped[Device] = relationship(back_populates="protocols")
 
 
+class Flow(Base):
+    """A TCP/UDP 'conversation' between two devices -- who talks to whom,
+    over which protocol/port, aggregated across the whole capture rather
+    than one row per packet. device_a/device_b are normalized (a.id <
+    b.id) so both directions of a conversation land in a single row.
+    """
+
+    __tablename__ = "flows"
+    __table_args__ = (
+        UniqueConstraint(
+            "device_a_id", "device_b_id", "transport", "port", name="uq_flow_pair_transport_port"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_a_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
+    device_b_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
+    server_device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"))
+    transport: Mapped[str] = mapped_column(String(8))  # tcp|udp
+    port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    protocol: Mapped[str] = mapped_column(String(64))
+    category: Mapped[str] = mapped_column(String(8), default="IT")  # IT|OT
+    packet_count: Mapped[int] = mapped_column(Integer, default=0)
+    first_seen: Mapped[datetime.datetime] = mapped_column(default=utcnow)
+    last_seen: Mapped[datetime.datetime] = mapped_column(default=utcnow)
+
+    device_a: Mapped[Device] = relationship(foreign_keys=[device_a_id])
+    device_b: Mapped[Device] = relationship(foreign_keys=[device_b_id])
+    server_device: Mapped[Device] = relationship(foreign_keys=[server_device_id])
+
+    @property
+    def device_a_ip(self) -> str | None:
+        return self.device_a.ip if self.device_a else None
+
+    @property
+    def device_a_name(self) -> str | None:
+        return self.device_a.display_name if self.device_a else None
+
+    @property
+    def device_b_ip(self) -> str | None:
+        return self.device_b.ip if self.device_b else None
+
+    @property
+    def device_b_name(self) -> str | None:
+        return self.device_b.display_name if self.device_b else None
+
+
 class VulnerabilityFinding(Base):
     __tablename__ = "vulnerability_findings"
     __table_args__ = (
@@ -102,6 +164,14 @@ class VulnerabilityFinding(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
 
     device: Mapped[Device] = relationship(back_populates="findings")
+
+    @property
+    def device_ip(self) -> str | None:
+        return self.device.ip if self.device else None
+
+    @property
+    def device_name(self) -> str | None:
+        return self.device.display_name if self.device else None
 
 
 class CveCache(Base):

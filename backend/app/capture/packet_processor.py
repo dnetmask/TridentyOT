@@ -9,6 +9,8 @@ from scapy.layers.inet import ICMP, IP, TCP, UDP
 from scapy.layers.l2 import ARP, Ether
 from scapy.packet import Packet, Raw
 
+from app.fingerprint.hostname_detect import extract_hostname_hints
+
 MAX_PAYLOAD_BYTES = 256
 
 
@@ -29,6 +31,7 @@ class PacketRecord:
     is_syn: bool = False
     is_syn_ack: bool = False
     payload: bytes = b""
+    hostname_hints: list = field(default_factory=list)  # [(ip, hostname), ...]
 
 
 def _mac(pkt: Packet, field_name: str) -> str | None:
@@ -83,6 +86,7 @@ def process_packet(pkt: Packet) -> PacketRecord | None:
             record.dst_port = int(udp.dport)
             if pkt.haslayer(Raw):
                 record.payload = bytes(pkt[Raw].load)[:MAX_PAYLOAD_BYTES]
+            record.hostname_hints = extract_hostname_hints(pkt)
         elif pkt.haslayer(ICMP):
             record.transport = "icmp"
         else:

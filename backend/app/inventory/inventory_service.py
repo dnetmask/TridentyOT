@@ -17,7 +17,8 @@ from app.fingerprint.os_fingerprint import (
     parse_tcp_options,
 )
 from app.fingerprint.protocol_detect import ProtocolInfo, classify
-from app.models import Device, DeviceProtocol, utcnow
+from app.fingerprint.vendor_lookup import lookup_vendor
+from app.models import Device, DeviceProtocol, Flow, utcnow
 
 _PRINTABLE_BANNER_MIN_RATIO = 0.85
 
@@ -37,7 +38,25 @@ def _looks_like_text_banner(payload: bytes) -> str | None:
     return text.splitlines()[0][:256]
 
 
+def _is_real_unicast_mac(mac: str | None) -> bool:
+    """Broadcast/multicast addresses (ff:ff:ff:ff:ff:ff, 01:00:5e:.., etc.)
+    identify a link-layer destination class, never a specific host's own
+    hardware address -- e.g. an ARP/DHCP broadcast frame's destination, or
+    a multicast group like mDNS's 224.0.0.251. Recording one of those as a
+    device's mac would both be meaningless and (since a device's mac is
+    only ever set once) permanently block learning its real address."""
+    if not mac or mac.lower() == "00:00:00:00:00:00":
+        return False
+    try:
+        first_octet = int(mac.split(":")[0], 16)
+    except (ValueError, IndexError):
+        return False
+    return first_octet & 0x01 == 0  # multicast bit unset => unicast
+
+
 def get_or_create_device(session: Session, ip: str | None, mac: str | None) -> Device | None:
+    if mac is not None and not _is_real_unicast_mac(mac):
+        mac = None
     if not ip and not mac:
         return None
 
@@ -49,7 +68,7 @@ def get_or_create_device(session: Session, ip: str | None, mac: str | None) -> D
 
     now = utcnow()
     if device is None:
-        device = Device(ip=ip, mac=mac, first_seen=now, last_seen=now)
+        device = Device(ip=ip, mac=mac, vendor=lookup_vendor(mac), first_seen=now, last_seen=now)
         session.add(device)
         session.flush()
         return device
@@ -58,6 +77,8 @@ def get_or_create_device(session: Session, ip: str | None, mac: str | None) -> D
         device.mac = mac
     if ip and not device.ip:
         device.ip = ip
+    if device.vendor is None:
+        device.vendor = lookup_vendor(device.mac)
     device.last_seen = now
     return device
 
@@ -68,6 +89,20 @@ def apply_os_guess(device: Device, guess: OsGuess) -> None:
     device.os_guess = guess.label
     device.os_confidence = guess.confidence
     device.os_signature = guess.signature_name
+
+
+def apply_hostname_hints(session: Session, hints: list[tuple[str, str]]) -> None:
+    """Enriches already-known devices with an auto-detected hostname.
+
+    Only updates existing inventory entries -- never creates a device from
+    a DNS/mDNS/DHCP hint alone, so e.g. a client resolving some unrelated
+    public hostname doesn't pollute the inventory with a phantom "device"
+    for that public IP.
+    """
+    for ip, hostname in hints:
+        device = session.query(Device).filter(Device.ip == ip).one_or_none()
+        if device is not None and hostname:
+            device.hostname = hostname
 
 
 def upsert_protocol(
@@ -116,6 +151,51 @@ def upsert_protocol(
     return existing
 
 
+def upsert_flow(
+    session: Session,
+    device_x: Device,
+    device_y: Device,
+    server_device: Device,
+    transport: str,
+    port: int | None,
+    proto_info: ProtocolInfo,
+) -> Flow:
+    """Aggregates both directions of a TCP/UDP conversation between two
+    devices into a single row, normalized by device id so the reverse
+    direction doesn't create a duplicate."""
+    device_a, device_b = sorted((device_x, device_y), key=lambda d: d.id)
+
+    existing = (
+        session.query(Flow)
+        .filter(
+            Flow.device_a_id == device_a.id,
+            Flow.device_b_id == device_b.id,
+            Flow.transport == transport,
+            Flow.port == port,
+        )
+        .one_or_none()
+    )
+    now = utcnow()
+    if existing is None:
+        existing = Flow(
+            device_a_id=device_a.id,
+            device_b_id=device_b.id,
+            server_device_id=server_device.id,
+            transport=transport,
+            port=port,
+            protocol=proto_info.protocol,
+            category=proto_info.category,
+            packet_count=1,
+            first_seen=now,
+            last_seen=now,
+        )
+        session.add(existing)
+    else:
+        existing.packet_count += 1
+        existing.last_seen = now
+    return existing
+
+
 def _pick_server_side(record: PacketRecord) -> str:
     """Returns 'src' or 'dst' -- which endpoint is acting as the service."""
     if record.transport == "tcp":
@@ -145,8 +225,12 @@ def ingest_packet_record(session: Session, record: PacketRecord) -> None:
     if record.transport not in ("tcp", "udp", "icmp"):
         return
 
+    # Only ever learn a device's MAC from a packet where it is the *sender*.
+    # A frame's destination MAC is merely what the sender believes/resolved
+    # via its own ARP cache -- not an authoritative statement from that
+    # device about its own hardware address -- so it's never used here.
     src_device = get_or_create_device(session, ip=record.src_ip, mac=record.src_mac)
-    dst_device = get_or_create_device(session, ip=record.dst_ip, mac=record.dst_mac)
+    dst_device = get_or_create_device(session, ip=record.dst_ip, mac=None)
     if src_device is None or dst_device is None:
         return
     session.flush()
@@ -159,6 +243,10 @@ def ingest_packet_record(session: Session, record: PacketRecord) -> None:
         banner = _looks_like_text_banner(record.payload)
         proto_info = classify(server_port, payload=record.payload)
         upsert_protocol(session, server_device, proto_info, server_port, record.transport, "server", banner)
+        upsert_flow(session, src_device, dst_device, server_device, record.transport, server_port, proto_info)
+
+    if record.hostname_hints:
+        apply_hostname_hints(session, record.hostname_hints)
 
     if record.transport == "tcp" and (record.is_syn or record.is_syn_ack) and record.ttl is not None:
         opts = parse_tcp_options(record.tcp_options)

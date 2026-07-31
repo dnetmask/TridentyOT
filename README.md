@@ -8,13 +8,20 @@ La aplicación escucha tráfico en una interfaz de red (típicamente un puerto S
 switch, o una interfaz conectada al segmento a inspeccionar) o analiza un archivo `.pcap`/`.pcapng`
 ya capturado, y a partir de eso construye:
 
-1. **Inventario de dispositivos**: IP, MAC, primer/último visto.
+1. **Inventario de dispositivos**: IP, MAC, primer/último visto, más **nombre y fabricante**:
+   - Nombre auto-detectado desde tráfico DHCP (opción 12, Host Name) y respuestas DNS/mDNS tipo A;
+     si no se detecta queda en blanco.
+   - Fabricante auto-detectado por MAC (OUI) contra la base real de IEEE/Wireshark (~40k prefijos).
+   - Ambos son **editables manualmente** en cualquier momento (se detecten o no), sin perder el
+     valor auto-detectado como referencia.
 2. **Fingerprint pasivo de sistema operativo**: heurística basada en TTL inicial, tamaño de
    ventana TCP y opciones TCP del handshake (similar a p0f), sin enviar ningún tráfico activo.
 3. **Detección de protocolos/servicios**: por puerto conocido y por firma de los primeros bytes
    del payload (HTTP, TLS, SSH, FTP...), cubriendo tanto protocolos IT comunes como protocolos
    OT/ICS (Modbus, DNP3, S7comm, EtherNet/IP, BACnet, IEC-104, OPC UA, etc.).
-4. **Motor de vulnerabilidades**:
+4. **Flujos / conversaciones**: qué par de dispositivos conversó, por qué protocolo/puerto y
+   cuántos paquetes, agregado desde las sesiones TCP/UDP observadas (pestaña **Flujos**).
+5. **Motor de vulnerabilidades**:
    - **Reglas locales** (sin conexión a internet): protocolos inseguros por diseño (Telnet, FTP,
      SNMP, SMB sin verificar SMBv1, etc.), exposición de protocolos OT sin autenticación/cifrado,
      y notas sobre dispositivos con pila de red embebida (posibles PLC/RTU).
@@ -23,6 +30,7 @@ ya capturado, y a partir de eso construye:
      asociados. Los resultados se cachean en base de datos porque la API pública de NVD tiene un
      límite de tasa bajo (5 solicitudes/30s sin API key) y para seguir funcionando (desde caché)
      en redes OT sin salida a internet.
+   - Cada hallazgo muestra el nombre del equipo afectado (auto-detectado o manual), no solo su IP.
 
 ## Estructura
 
@@ -35,8 +43,8 @@ backend/
   Dockerfile         imagen de la app (Python 3.11 + FastAPI + Scapy + libpcap/tcpdump)
   app/
     capture/        captura en vivo (scapy AsyncSniffer) y carga de archivos pcap
-    fingerprint/     fingerprint pasivo de SO + detección de protocolos IT/OT
-    inventory/       construcción del inventario de dispositivos/servicios
+    fingerprint/     fingerprint de SO, protocolos, hostname (DHCP/DNS/mDNS) y fabricante (OUI)
+    inventory/       inventario de dispositivos/servicios y agregación de flujos TCP/UDP
     vuln/            reglas locales + cliente NVD + motor de escaneo
     api/             endpoints FastAPI
     static/          dashboard web (HTML/JS, sin build step)
@@ -148,6 +156,9 @@ curl -X POST http://localhost:8000/api/capture/live/start \
 
 ### Analizar un archivo .pcap existente
 
+Desde el dashboard (pestaña **Captura**) puedes arrastrar y soltar el archivo directamente sobre
+la zona de carga, o hacer clic para seleccionarlo. Por API:
+
 ```bash
 curl -F "file=@captura.pcap" http://localhost:8000/api/capture/pcap
 ```
@@ -195,3 +206,7 @@ un doble (mock) del cliente HTTP para no depender de la disponibilidad de intern
   observada corresponde al último salto/router, no al host origen).
 - La consulta a NVD depende de que el banner del servicio revele explícitamente producto y
   versión; sin ese dato, la vulnerabilidad "por versión" no se puede determinar de forma pasiva.
+- El nombre de equipo solo se auto-detecta si el dispositivo emite tráfico DHCP (opción hostname),
+  DNS o mDNS con su propio nombre durante la captura; si no, queda en blanco hasta que se edite
+  manualmente. La base de fabricantes por MAC solo cubre asignaciones OUI de bloque /24 (24 bits);
+  los bloques más pequeños (MA-M/MA-S) no se resuelven y devuelven fabricante en blanco.

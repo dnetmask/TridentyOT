@@ -36,11 +36,47 @@ def test_upload_pcap_builds_inventory_and_scan_finds_telnet(client, tmp_path):
     scan_resp = client.post("/api/vuln/scan", json={"use_nvd": False})
     assert scan_resp.status_code == 200
     findings = scan_resp.json()
-    assert any(f["device_id"] == server["id"] and "telnet" in f["title"] for f in findings)
+    telnet_finding = next(f for f in findings if f["device_id"] == server["id"] and "telnet" in f["title"])
+    assert telnet_finding["device_ip"] == "192.168.1.100"
 
     detail = client.get(f"/api/inventory/devices/{server['id']}").json()
     assert any(p["protocol"] == "telnet" for p in detail["protocols"])
     assert any("telnet" in f["title"] for f in detail["findings"])
+
+    flows = client.get("/api/inventory/flows").json()
+    assert len(flows) == 1
+    assert flows[0]["port"] == 23
+    assert flows[0]["protocol"] == "telnet"
+    assert {flows[0]["device_a_ip"], flows[0]["device_b_ip"]} == {"192.168.1.5", "192.168.1.100"}
+
+
+def test_patch_device_sets_and_clears_custom_name_and_vendor(client, tmp_path):
+    syn = Ether() / IP(src="10.5.0.5", dst="10.5.0.60", ttl=64) / TCP(sport=41000, dport=502, flags="S", window=1024)
+    pcap_path = tmp_path / "modbus.pcap"
+    wrpcap(str(pcap_path), [syn])
+    with open(pcap_path, "rb") as f:
+        client.post("/api/capture/pcap", files={"file": ("modbus.pcap", f, "application/vnd.tcpdump.pcap")})
+
+    devices = client.get("/api/inventory/devices").json()
+    plc = next(d for d in devices if d["ip"] == "10.5.0.60")
+    assert plc["display_name"] is None
+
+    resp = client.patch(f"/api/inventory/devices/{plc['id']}", json={"custom_name": "PLC Linea 3"})
+    assert resp.status_code == 200
+    updated = resp.json()
+    assert updated["custom_name"] == "PLC Linea 3"
+    assert updated["display_name"] == "PLC Linea 3"
+
+    resp = client.patch(f"/api/inventory/devices/{plc['id']}", json={"custom_name": None})
+    assert resp.status_code == 200
+    cleared = resp.json()
+    assert cleared["custom_name"] is None
+    assert cleared["display_name"] is None
+
+
+def test_patch_unknown_device_returns_404(client):
+    resp = client.patch("/api/inventory/devices/999999", json={"custom_name": "x"})
+    assert resp.status_code == 404
 
 
 def test_health_endpoint(client):

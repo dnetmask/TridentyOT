@@ -113,6 +113,24 @@
   .status-running { color: var(--accent); }
   .status-completed, .status-stopped { color: var(--muted); }
   .status-error { color: var(--crit); }
+  .manual-tag { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+  .edit-field { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .edit-field label { min-width: 90px; margin: 0; }
+  .edit-field input { flex: 1; max-width: 260px; }
+  .edit-field .hint { font-size: 11px; color: var(--muted); }
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    transition: border-color .15s, background .15s, color .15s;
+  }
+  .dropzone.dragover { border-color: var(--accent); background: rgba(59,169,255,0.08); color: var(--text); }
+  .dropzone b { color: var(--text); }
+  .flow-arrow { color: var(--muted); margin: 0 6px; }
+  .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
 </style>
 </head>
 <body>
@@ -125,6 +143,7 @@
 <nav>
   <button data-tab="capture" class="active">Captura</button>
   <button data-tab="inventory">Inventario</button>
+  <button data-tab="flows">Flujos</button>
   <button data-tab="vulns">Vulnerabilidades</button>
 </nav>
 
@@ -152,9 +171,11 @@
 
     <div class="card">
       <h2>Analizar archivo .pcap / .pcapng</h2>
-      <div class="row">
-        <input type="file" id="pcap-file" accept=".pcap,.pcapng,.cap" />
-        <button class="action" id="upload-pcap-btn">Subir y analizar</button>
+      <div id="pcap-dropzone" class="dropzone">
+        Arrastra aquí un archivo <b>.pcap</b>/<b>.pcapng</b>, o
+        <label for="pcap-file" style="color:var(--accent); cursor:pointer; text-decoration:underline;">selecciónalo</label>
+        <input type="file" id="pcap-file" accept=".pcap,.pcapng,.cap" style="display:none" />
+        <div id="pcap-file-name" class="muted" style="margin-top:8px;"></div>
       </div>
     </div>
 
@@ -182,10 +203,30 @@
         </div>
       </div>
       <table>
-        <thead><tr><th>IP</th><th>MAC</th><th>SO estimado</th><th>Confianza</th><th>Protocolos</th><th>Últ. visto</th></tr></thead>
-        <tbody id="devices-body"><tr><td colspan="6" class="empty">Sin datos</td></tr></tbody>
+        <thead><tr><th>IP</th><th>Nombre</th><th>Fabricante</th><th>MAC</th><th>SO estimado</th><th>Confianza</th><th>Protocolos</th><th>Últ. visto</th></tr></thead>
+        <tbody id="devices-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
       </table>
       <div id="device-detail" class="device-detail"></div>
+    </div>
+  </section>
+
+  <section id="tab-flows" class="tab">
+    <div class="card">
+      <div class="flex-between">
+        <h2>Flujos (sesiones TCP/UDP) — quién conversa con quién</h2>
+        <div class="row">
+          <select id="flow-category-filter">
+            <option value="">Todas las categorías</option>
+            <option value="OT">Solo OT</option>
+            <option value="IT">Solo IT</option>
+          </select>
+          <button class="action secondary" id="refresh-flows-btn">Actualizar</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Origen</th><th></th><th>Destino</th><th>Protocolo</th><th>Puerto</th><th>Transporte</th><th>Paquetes</th><th>Primero</th><th>Último</th></tr></thead>
+        <tbody id="flows-body"><tr><td colspan="9" class="empty">Sin datos</td></tr></tbody>
+      </table>
     </div>
   </section>
 
@@ -207,8 +248,8 @@
         </div>
       </div>
       <table>
-        <thead><tr><th>Severidad</th><th>Dispositivo</th><th>Hallazgo</th><th>Fuente</th><th>Evidencia</th></tr></thead>
-        <tbody id="findings-body"><tr><td colspan="5" class="empty">Sin datos</td></tr></tbody>
+        <thead><tr><th>Severidad</th><th>Dispositivo</th><th>Nombre</th><th>Hallazgo</th><th>Fuente</th><th>Evidencia</th></tr></thead>
+        <tbody id="findings-body"><tr><td colspan="6" class="empty">Sin datos</td></tr></tbody>
       </table>
     </div>
   </section>
@@ -219,14 +260,20 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+function activateTab(name) {
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + name));
+}
+
 document.querySelectorAll('nav button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-  });
+  btn.addEventListener('click', () => activateTab(btn.dataset.tab));
 });
+
+async function jumpToDevice(deviceId) {
+  activateTab('inventory');
+  await loadDevices();
+  showDeviceDetail(deviceId);
+}
 
 async function api(path, options) {
   const res = await fetch(path, options);
@@ -289,29 +336,61 @@ $('#start-live-btn').addEventListener('click', async () => {
   } catch (e) { alert('No se pudo iniciar la captura: ' + e.message); }
 });
 
-$('#upload-pcap-btn').addEventListener('click', async () => {
-  const fileInput = $('#pcap-file');
-  if (!fileInput.files.length) { alert('Selecciona un archivo .pcap'); return; }
+async function uploadPcapFile(file) {
+  if (!file) return;
+  const nameEl = $('#pcap-file-name');
+  nameEl.textContent = `Subiendo ${file.name}...`;
   const form = new FormData();
-  form.append('file', fileInput.files[0]);
+  form.append('file', file);
   try {
     await api('/api/capture/pcap', { method: 'POST', body: form });
+    nameEl.textContent = `${file.name} — subido, procesando...`;
     loadSessions();
-  } catch (e) { alert('No se pudo subir el archivo: ' + e.message); }
+  } catch (e) {
+    nameEl.textContent = '';
+    alert('No se pudo subir el archivo: ' + e.message);
+  }
+}
+
+$('#pcap-file').addEventListener('change', (e) => uploadPcapFile(e.target.files[0]));
+
+const dropzone = $('#pcap-dropzone');
+['dragenter', 'dragover'].forEach(evt => dropzone.addEventListener(evt, (e) => {
+  e.preventDefault(); e.stopPropagation();
+  dropzone.classList.add('dragover');
+}));
+['dragleave', 'dragend'].forEach(evt => dropzone.addEventListener(evt, (e) => {
+  e.preventDefault(); e.stopPropagation();
+  dropzone.classList.remove('dragover');
+}));
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault(); e.stopPropagation();
+  dropzone.classList.remove('dragover');
+  const file = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (!file) return;
+  if (!/\.(pcap|pcapng|cap)$/i.test(file.name)) {
+    alert('Solo se aceptan archivos .pcap, .pcapng o .cap');
+    return;
+  }
+  uploadPcapFile(file);
 });
 
 $('#refresh-sessions-btn').addEventListener('click', loadSessions);
 
 // ---------- Inventory tab ----------
+let currentDeviceId = null;
+
 async function loadDevices() {
   const tbody = $('#devices-body');
   const otOnly = $('#ot-only-checkbox').checked;
   const devices = await api('/api/inventory/devices' + (otOnly ? '?ot_only=true' : ''));
-  if (!devices.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">Sin dispositivos detectados aún</td></tr>'; return; }
+  if (!devices.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin dispositivos detectados aún</td></tr>'; return; }
   tbody.innerHTML = devices.map(d => `
     <tr class="clickable" onclick="showDeviceDetail(${d.id})">
       <td>${d.ip || '—'} ${d.is_ot_suspected ? '<span class="pill ot">OT</span>' : ''}</td>
-      <td>${d.mac || '—'}</td>
+      <td>${d.display_name || '<span class="muted">—</span>'}${d.custom_name ? '<span class="manual-tag">manual</span>' : ''}</td>
+      <td>${d.display_vendor || '<span class="muted">—</span>'}${d.custom_vendor ? '<span class="manual-tag">manual</span>' : ''}</td>
+      <td class="mono">${d.mac || '—'}</td>
       <td>${d.os_guess || '—'}</td>
       <td>${(d.os_confidence * 100).toFixed(0)}%</td>
       <td>${d.protocol_count}</td>
@@ -320,6 +399,7 @@ async function loadDevices() {
 }
 
 async function showDeviceDetail(id) {
+  currentDeviceId = id;
   const device = await api(`/api/inventory/devices/${id}`);
   const protoRows = device.protocols.map(p => `
     <span class="pill ${p.category === 'OT' ? 'ot' : ''}">${p.protocol}:${p.port ?? '-'} (${p.role}, ${p.packet_count}x)</span>`).join(' ');
@@ -329,6 +409,20 @@ async function showDeviceDetail(id) {
 
   $('#device-detail').innerHTML = `
     <h2>Detalle: ${device.ip || device.mac}</h2>
+    <div class="edit-field">
+      <label>Nombre</label>
+      <input id="edit-name" value="${device.custom_name || ''}" placeholder="${device.hostname || 'sin detectar — escribe uno'}" />
+      <span class="hint">${device.hostname ? `auto: ${device.hostname}` : 'no detectado automáticamente'}</span>
+    </div>
+    <div class="edit-field">
+      <label>Fabricante</label>
+      <input id="edit-vendor" value="${device.custom_vendor || ''}" placeholder="${device.vendor || 'sin detectar — escribe uno'}" />
+      <span class="hint">${device.vendor ? `auto: ${device.vendor}` : 'no detectado automáticamente'}</span>
+    </div>
+    <div class="row" style="margin-bottom:14px;">
+      <button class="action" id="save-device-btn">Guardar</button>
+      <button class="action secondary" id="reset-device-btn">Restablecer a automático</button>
+    </div>
     <p><b>SO estimado:</b> ${device.os_guess || 'desconocido'} (confianza ${(device.os_confidence*100).toFixed(0)}%)</p>
     <p><b>Protocolos/servicios:</b><br/>${protoRows || '<span class="muted">ninguno</span>'}</p>
     <table>
@@ -336,10 +430,59 @@ async function showDeviceDetail(id) {
       <tbody>${findingRows}</tbody>
     </table>
   `;
+
+  $('#save-device-btn').addEventListener('click', () => saveDeviceOverrides(id));
+  $('#reset-device-btn').addEventListener('click', () => saveDeviceOverrides(id, true));
+}
+
+async function saveDeviceOverrides(id, reset = false) {
+  const body = reset
+    ? { custom_name: null, custom_vendor: null }
+    : {
+        custom_name: $('#edit-name').value.trim() || null,
+        custom_vendor: $('#edit-vendor').value.trim() || null,
+      };
+  try {
+    await api(`/api/inventory/devices/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    await loadDevices();
+    await showDeviceDetail(id);
+  } catch (e) { alert('No se pudo guardar: ' + e.message); }
 }
 
 $('#refresh-devices-btn').addEventListener('click', loadDevices);
 $('#ot-only-checkbox').addEventListener('change', loadDevices);
+
+// ---------- Flows tab ----------
+async function loadFlows() {
+  const tbody = $('#flows-body');
+  const cat = $('#flow-category-filter').value;
+  const flows = await api('/api/inventory/flows' + (cat ? `?category=${cat}` : ''));
+  if (!flows.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin flujos detectados aún</td></tr>'; return; }
+  tbody.innerHTML = flows.map(f => {
+    const aLabel = f.device_a_name || f.device_a_ip || `#${f.device_a_id}`;
+    const bLabel = f.device_b_name || f.device_b_ip || `#${f.device_b_id}`;
+    const aIsServer = f.server_device_id === f.device_a_id;
+    return `
+    <tr>
+      <td>${aLabel}${aIsServer ? ' <span class="pill">servidor</span>' : ''}</td>
+      <td class="flow-arrow">${aIsServer ? '&larr;' : '&rarr;'}</td>
+      <td>${bLabel}${!aIsServer ? ' <span class="pill">servidor</span>' : ''}</td>
+      <td>${f.protocol}${f.category === 'OT' ? ' <span class="pill ot">OT</span>' : ''}</td>
+      <td>${f.port ?? '—'}</td>
+      <td>${f.transport}</td>
+      <td>${f.packet_count}</td>
+      <td class="muted">${fmtDate(f.first_seen)}</td>
+      <td class="muted">${fmtDate(f.last_seen)}</td>
+    </tr>`;
+  }).join('');
+}
+
+$('#refresh-flows-btn').addEventListener('click', loadFlows);
+$('#flow-category-filter').addEventListener('change', loadFlows);
 
 // ---------- Vulnerabilities tab ----------
 async function loadFindings() {
@@ -350,7 +493,8 @@ async function loadFindings() {
   tbody.innerHTML = findings.map(f => `
     <tr>
       <td>${sevBadge(f.severity)}</td>
-      <td>#${f.device_id}</td>
+      <td class="clickable" onclick="jumpToDevice(${f.device_id})">${f.device_ip || '#' + f.device_id}</td>
+      <td>${f.device_name || '<span class="muted">—</span>'}</td>
       <td><b>${f.title}</b><br/><span class="muted">${f.description}</span></td>
       <td>${f.source}${f.cve_id ? ' · ' + f.cve_id : ''}</td>
       <td class="muted">${f.evidence || '—'}</td>
@@ -376,6 +520,7 @@ $('#scan-all-btn').addEventListener('click', async () => {
 loadInterfaces();
 loadSessions();
 loadDevices();
+loadFlows();
 loadFindings();
 setInterval(loadSessions, 5000);
 </script>

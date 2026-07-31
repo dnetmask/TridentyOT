@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
 from app.models import Device, VulnerabilityFinding
@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/vuln", tags=["vulnerabilities"])
 
 @router.get("/findings", response_model=list[VulnerabilityFindingOut])
 def list_findings(severity: str | None = None, device_id: int | None = None, db: Session = Depends(get_db)):
-    query = db.query(VulnerabilityFinding)
+    query = db.query(VulnerabilityFinding).options(joinedload(VulnerabilityFinding.device))
     if severity:
         query = query.filter(VulnerabilityFinding.severity == severity)
     if device_id:

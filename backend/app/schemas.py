@@ -22,6 +22,8 @@ class VulnerabilityFindingOut(BaseModel):
 
     id: int
     device_id: int
+    device_ip: str | None
+    device_name: str | None
     source: str
     rule_id: str | None
     cve_id: str | None
@@ -40,6 +42,11 @@ class DeviceOut(BaseModel):
     mac: str | None
     ip: str | None
     hostname: str | None
+    custom_name: str | None
+    display_name: str | None
+    vendor: str | None
+    custom_vendor: str | None
+    display_vendor: str | None
     os_guess: str | None
     os_confidence: float
     is_ot_suspected: bool
@@ -51,6 +58,35 @@ class DeviceOut(BaseModel):
 class DeviceDetailOut(DeviceOut):
     protocols: list[DeviceProtocolOut] = []
     findings: list[VulnerabilityFindingOut] = []
+
+
+class DeviceUpdateRequest(BaseModel):
+    """PATCH semantics: only fields present in the request body are applied
+    (see routes_inventory.py, which uses exclude_unset). Sending an explicit
+    null clears the override back to the auto-detected value."""
+
+    custom_name: str | None = None
+    custom_vendor: str | None = None
+
+
+class FlowOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    device_a_id: int
+    device_a_ip: str | None
+    device_a_name: str | None
+    device_b_id: int
+    device_b_ip: str | None
+    device_b_name: str | None
+    server_device_id: int
+    transport: str
+    port: int | None
+    protocol: str
+    category: str
+    packet_count: int
+    first_seen: datetime.datetime
+    last_seen: datetime.datetime
 
 
 class CaptureSessionOut(BaseModel):
