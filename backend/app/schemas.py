@@ -1,6 +1,7 @@
 import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DeviceProtocolOut(BaseModel):
@@ -113,3 +114,35 @@ class StartLiveCaptureRequest(BaseModel):
 class ScanRequest(BaseModel):
     device_id: int | None = None
     use_nvd: bool = True
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    role: str
+    created_at: datetime.datetime
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    token: str
+    user: UserOut
+
+
+class UserCreateRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=4, max_length=256)
+    role: Literal["editor", "viewer"]
+
+
+class UserUpdateRequest(BaseModel):
+    """PATCH semantics: only fields present in the request body are applied."""
+
+    password: str | None = Field(default=None, min_length=4, max_length=256)
+    role: Literal["editor", "viewer"] | None = None

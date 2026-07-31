@@ -5,10 +5,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.api.routes_auth import router as auth_router
 from app.api.routes_capture import router as capture_router
 from app.api.routes_inventory import router as inventory_router
+from app.api.routes_users import router as users_router
 from app.api.routes_vulns import router as vulns_router
-from app.capture.live_capture import live_capture_manager
+from app.auth.seed import seed_default_admin
+from app.capture.live_capture import live_capture_manager, mark_orphaned_live_sessions_stopped
 from app.db import init_db
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -17,6 +20,8 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    seed_default_admin()
+    mark_orphaned_live_sessions_stopped()
     yield
     live_capture_manager.stop_all()
 
@@ -38,6 +43,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
+app.include_router(users_router)
 app.include_router(capture_router)
 app.include_router(inventory_router)
 app.include_router(vulns_router)

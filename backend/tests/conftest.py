@@ -8,6 +8,8 @@ os.environ.setdefault("TRIDENTYOT_DATABASE_URL", f"sqlite:///{tempfile.mkdtemp(p
 
 import pytest  # noqa: E402
 
+from app.auth.seed import seed_default_admin  # noqa: E402
+from app.config import DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USERNAME  # noqa: E402
 from app.db import Base, SessionLocal, engine, init_db  # noqa: E402
 
 
@@ -15,6 +17,7 @@ from app.db import Base, SessionLocal, engine, init_db  # noqa: E402
 def _reset_db():
     Base.metadata.drop_all(bind=engine)
     init_db()
+    seed_default_admin()
     yield
 
 
@@ -28,9 +31,50 @@ def db_session():
 
 
 @pytest.fixture
-def client():
+def anonymous_client():
+    """A TestClient with no Authorization header at all, for exercising
+    401s and the login flow itself."""
     from fastapi.testclient import TestClient
 
     from app.main import app
 
     return TestClient(app)
+
+
+def _login(anon_client, username: str, password: str) -> str:
+    resp = anon_client.post("/api/auth/login", json={"username": username, "password": password})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["token"]
+
+
+@pytest.fixture
+def client():
+    """Pre-authenticated as the default seeded editor (admin/admin) --
+    matches how almost every existing test actually uses the API. A
+    separate TestClient instance from `anonymous_client` (not a mutated
+    view of it), so a test can safely request both."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    authed = TestClient(app)
+    token = _login(authed, DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD)
+    authed.headers.update({"Authorization": f"Bearer {token}"})
+    return authed
+
+
+@pytest.fixture
+def make_client():
+    """Factory for a client authenticated as an arbitrary user, e.g. a
+    freshly created viewer -- used to test role-based restrictions."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    def _make(username: str, password: str) -> "TestClient":
+        anon = TestClient(app)
+        token = _login(anon, username, password)
+        anon.headers.update({"Authorization": f"Bearer {token}"})
+        return anon
+
+    return _make

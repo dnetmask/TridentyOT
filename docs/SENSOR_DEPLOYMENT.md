@@ -72,14 +72,19 @@ de la lista.
 
 ## Seguridad (crítico en un sensor real)
 
-TridentyOT **no incluye autenticación** en el dashboard ni en la API — es una decisión de diseño
-para mantenerlo simple en laboratorio/demo, pero significa que cualquiera con acceso de red al
-puerto 8000 puede ver el inventario completo, iniciar/detener capturas y disparar escaneos. Antes
-de desplegarlo como sensor real:
+TridentyOT incluye autenticación por usuario/contraseña con dos perfiles: **editor** (control
+total: capturas, escaneos, edición de inventario, gestión de usuarios) y **visualizador**
+(solo lectura). Al arrancar por primera vez se crea automáticamente el usuario `admin` con
+contraseña `admin` y perfil editor.
 
-- **No publiques el puerto 8000 en la VLAN que estás monitoreando ni en internet.** Restringe el
-  acceso por firewall/ACL a una red de gestión de confianza.
+- **Cambia la contraseña del usuario `admin` inmediatamente** después del primer despliegue
+  (pestaña "Usuarios" del dashboard, o `PATCH /api/users/{id}`), y crea cuentas individuales
+  con el perfil mínimo necesario (visualizador para quien solo necesita consultar).
+- La sesión se maneja con un token bearer (expira a los 7 días por defecto, configurable con
+  `TRIDENTYOT_SESSION_LIFETIME_SECONDS`); no hay integración con SSO/LDAP.
+- Aun con autenticación, **no publiques el puerto 8000 en la VLAN que estás monitoreando ni en
+  internet**. Restringe el acceso por firewall/ACL a una red de gestión de confianza.
 - Si necesitas acceso remoto, hazlo por VPN o túnel SSH (`ssh -L 8000:localhost:8000 ...`), no por
   exposición directa.
-- Si varias personas necesitan acceso al dashboard, pon un reverse proxy (nginx/Caddy) delante
-  con autenticación básica o SSO, en vez de exponer TridentyOT directamente.
+- Si varias personas necesitan acceso al dashboard, un reverse proxy (nginx/Caddy) delante sigue
+  siendo recomendable para TLS y logging adicional, aunque ya no es la única barrera de acceso.

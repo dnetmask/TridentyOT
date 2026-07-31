@@ -19,6 +19,7 @@
     --med: #d97706;
     --low: #16a34a;
     --info: #64748b;
+    --sidebar-w: 220px;
   }
   * { box-sizing: border-box; }
   body {
@@ -27,32 +28,53 @@
     background: var(--bg);
     color: var(--text);
   }
-  header {
-    padding: 18px 24px;
-    border-bottom: 1px solid var(--border);
+
+  /* ---------- logo ---------- */
+  .logo-mark { display: block; }
+  .logo-lockup { display: flex; align-items: center; gap: 10px; }
+  .logo-lockup .wordmark { font-size: 16px; font-weight: 800; letter-spacing: 0.01em; white-space: nowrap; }
+  .logo-lockup .wordmark .accent { color: var(--accent); }
+
+  /* ---------- app shell: sidebar + content ---------- */
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: var(--sidebar-w);
+    flex: none;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
     display: flex;
-    align-items: baseline;
-    gap: 12px;
+    flex-direction: column;
+    padding: 18px 14px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
   }
-  header h1 { font-size: 18px; margin: 0; }
-  header span { color: var(--muted); font-size: 13px; }
-  nav {
-    display: flex;
-    gap: 4px;
-    padding: 0 24px;
-    border-bottom: 1px solid var(--border);
+  .sidebar .brand { padding: 4px 6px 18px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+  .sidebar .brand .subtitle { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+  .sidebar nav { display: flex; flex-direction: column; gap: 2px; }
+  .sidebar nav button {
+    display: flex; align-items: center; gap: 10px;
+    background: none; border: none; text-align: left;
+    color: var(--muted); padding: 10px 12px; border-radius: 8px;
+    cursor: pointer; font-size: 13.5px; width: 100%;
   }
-  nav button {
-    background: none;
-    border: none;
-    color: var(--muted);
-    padding: 12px 16px;
-    cursor: pointer;
-    font-size: 14px;
-    border-bottom: 2px solid transparent;
+  .sidebar nav button:hover { background: var(--panel-2); color: var(--text); }
+  .sidebar nav button.active { background: var(--panel-2); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
+  .sidebar .spacer { flex: 1; }
+  .sidebar .user-box {
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+    font-size: 12.5px;
   }
-  nav button.active { color: var(--text); border-bottom-color: var(--accent); }
-  main { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
+  .sidebar .user-box .uname { font-weight: 700; }
+  .sidebar .user-box .urole {
+    display: inline-block; margin-top: 3px; padding: 1px 7px; border-radius: 999px;
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.03em;
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+  }
+  .sidebar .user-box button { margin-top: 10px; width: 100%; }
+
+  main { flex: 1; padding: 24px 28px; max-width: 1200px; }
   .tab { display: none; }
   .tab.active { display: block; }
   .card {
@@ -85,6 +107,7 @@
   }
   button.action.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
   button.action.danger { background: var(--crit); color: white; }
+  button.action:disabled { opacity: 0.5; cursor: not-allowed; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px; border-bottom: 1px solid var(--border); }
   td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
@@ -131,26 +154,102 @@
   .dropzone b { color: var(--text); }
   .flow-arrow { color: var(--muted); margin: 0 6px; }
   .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+  .viewer-note {
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--muted);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    margin-bottom: 14px;
+  }
+  .hidden { display: none !important; }
+
+  /* ---------- login screen ---------- */
+  #login-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+  }
+  #login-screen .login-card {
+    width: 320px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 26px;
+  }
+  #login-screen .login-logo { display: flex; justify-content: center; margin-bottom: 18px; }
+  #login-screen h1 { font-size: 15px; text-align: center; margin: 0 0 20px; color: var(--muted); font-weight: 600; }
+  #login-screen label { margin-top: 12px; }
+  #login-screen input { width: 100%; margin-top: 4px; }
+  #login-screen button { width: 100%; margin-top: 18px; }
+  #login-error { color: var(--crit); font-size: 12.5px; margin-top: 10px; min-height: 16px; }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>TridentyOT</h1>
-  <span>Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)</span>
-</header>
+<!-- ============ LOGIN SCREEN ============ -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <svg class="logo-mark" width="40" height="46" viewBox="0 0 40 46" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 2 L8 20 Q8 26 14 28 L14 46" stroke="#3ba9ff" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <path d="M32 2 L32 20 Q32 26 26 28 L26 46" stroke="#3ba9ff" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <path d="M20 2 L20 46" stroke="#0b1220" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+        <path d="M11 22 L29 22" stroke="#0b1220" stroke-width="3" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <h1>Ingresa a TridentyOT</h1>
+    <form id="login-form">
+      <label>Usuario</label>
+      <input id="login-username" autocomplete="username" required />
+      <label>Contraseña</label>
+      <input id="login-password" type="password" autocomplete="current-password" required />
+      <div id="login-error"></div>
+      <button type="submit" class="action">Entrar</button>
+    </form>
+  </div>
+</div>
 
-<nav>
-  <button data-tab="capture" class="active">Captura</button>
-  <button data-tab="inventory">Inventario</button>
-  <button data-tab="flows">Flujos</button>
-  <button data-tab="vulns">Vulnerabilidades</button>
-</nav>
+<!-- ============ APP SHELL ============ -->
+<div class="app-shell hidden" id="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo-lockup">
+        <svg class="logo-mark" width="26" height="30" viewBox="0 0 40 46" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M8 2 L8 20 Q8 26 14 28 L14 46" stroke="#3ba9ff" stroke-width="3.4" fill="none" stroke-linecap="round"/>
+          <path d="M32 2 L32 20 Q32 26 26 28 L26 46" stroke="#3ba9ff" stroke-width="3.4" fill="none" stroke-linecap="round"/>
+          <path d="M20 2 L20 46" stroke="#e6edf7" stroke-width="4" fill="none" stroke-linecap="round"/>
+          <path d="M11 22 L29 22" stroke="#e6edf7" stroke-width="3.4" stroke-linecap="round"/>
+        </svg>
+        <div class="wordmark">TRIDENTY<span class="accent">OT</span></div>
+      </div>
+      <div class="subtitle">Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)</div>
+    </div>
 
-<main>
+    <nav>
+      <button data-tab="capture" class="active">Captura</button>
+      <button data-tab="inventory">Inventario</button>
+      <button data-tab="flows">Flujos</button>
+      <button data-tab="vulns">Vulnerabilidades</button>
+      <button data-tab="users" id="nav-users">Usuarios</button>
+    </nav>
+
+    <div class="spacer"></div>
+
+    <div class="user-box">
+      <div class="uname" id="current-username">—</div>
+      <div class="urole" id="current-role">—</div>
+      <button class="action secondary" id="logout-btn">Cerrar sesión</button>
+    </div>
+  </aside>
+
+  <main>
 
   <section id="tab-capture" class="tab active">
-    <div class="card">
+    <div class="card editor-only">
       <h2>Captura en vivo</h2>
       <div class="row">
         <div>
@@ -169,7 +268,7 @@
       </p>
     </div>
 
-    <div class="card">
+    <div class="card editor-only">
       <h2>Analizar archivo .pcap / .pcapng</h2>
       <div id="pcap-dropzone" class="dropzone">
         Arrastra aquí un archivo <b>.pcap</b>/<b>.pcapng</b>, o
@@ -184,6 +283,7 @@
         <h2>Sesiones de captura</h2>
         <button class="action secondary" id="refresh-sessions-btn">Actualizar</button>
       </div>
+      <div class="viewer-note viewer-only hidden">Perfil visualizador: solo lectura, no puedes iniciar/detener capturas ni subir archivos.</div>
       <table>
         <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>Origen</th><th>Estado</th><th>Paquetes</th><th>Inicio</th><th></th></tr></thead>
         <tbody id="sessions-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
@@ -244,7 +344,7 @@
             <option value="info">Info</option>
           </select>
           <button class="action secondary" id="refresh-findings-btn">Actualizar</button>
-          <button class="action" id="scan-all-btn">Ejecutar escaneo completo</button>
+          <button class="action editor-only" id="scan-all-btn">Ejecutar escaneo completo</button>
         </div>
       </div>
       <table>
@@ -254,18 +354,153 @@
     </div>
   </section>
 
-</main>
+  <section id="tab-users" class="tab">
+    <div class="card">
+      <h2>Crear usuario</h2>
+      <div class="row">
+        <div>
+          <label>Usuario</label>
+          <input id="new-user-username" />
+        </div>
+        <div>
+          <label>Contraseña</label>
+          <input id="new-user-password" type="password" />
+        </div>
+        <div>
+          <label>Perfil</label>
+          <select id="new-user-role">
+            <option value="viewer">Visualizador</option>
+            <option value="editor">Editor</option>
+          </select>
+        </div>
+        <button class="action" id="create-user-btn">Crear</button>
+      </div>
+      <div id="create-user-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="flex-between">
+        <h2>Usuarios</h2>
+        <button class="action secondary" id="refresh-users-btn">Actualizar</button>
+      </div>
+      <table>
+        <thead><tr><th>Usuario</th><th>Perfil</th><th>Creado</th><th></th></tr></thead>
+        <tbody id="users-body"><tr><td colspan="4" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  </main>
+</div>
 
 <script>
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
-function activateTab(name) {
-  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + name));
+let currentUser = null;
+
+function isEditor() {
+  return !!currentUser && currentUser.role === 'editor';
 }
 
-document.querySelectorAll('nav button').forEach(btn => {
+function applyRoleVisibility() {
+  const editor = isEditor();
+  $$('.editor-only').forEach(el => el.classList.toggle('hidden', !editor));
+  $$('.viewer-only').forEach(el => el.classList.toggle('hidden', editor));
+  $('#nav-users').classList.toggle('hidden', !editor);
+}
+
+// ---------- auth ----------
+function getToken() {
+  return localStorage.getItem('tridentyot_token');
+}
+
+function setToken(token) {
+  if (token) localStorage.setItem('tridentyot_token', token);
+  else localStorage.removeItem('tridentyot_token');
+}
+
+function showLoginScreen() {
+  $('#app-shell').classList.add('hidden');
+  $('#login-screen').classList.remove('hidden');
+}
+
+function showAppShell() {
+  $('#login-screen').classList.add('hidden');
+  $('#app-shell').classList.remove('hidden');
+}
+
+async function api(path, options = {}) {
+  const headers = Object.assign({}, options.headers || {});
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(path, Object.assign({}, options, { headers }));
+  if (res.status === 401) {
+    setToken(null);
+    currentUser = null;
+    showLoginScreen();
+    throw new Error('Sesión expirada');
+  }
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch (e) {}
+    throw new Error(detail);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+async function bootstrapAfterLogin() {
+  currentUser = await api('/api/auth/me');
+  $('#current-username').textContent = currentUser.username;
+  $('#current-role').textContent = currentUser.role === 'editor' ? 'Editor' : 'Visualizador';
+  applyRoleVisibility();
+  showAppShell();
+  loadInterfaces();
+  loadSessions();
+  loadDevices();
+  loadFlows();
+  loadFindings();
+  if (isEditor()) loadUsers();
+}
+
+$('#login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const username = $('#login-username').value.trim();
+  const password = $('#login-password').value;
+  $('#login-error').textContent = '';
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || 'No se pudo iniciar sesión');
+    }
+    const data = await res.json();
+    setToken(data.token);
+    await bootstrapAfterLogin();
+  } catch (err) {
+    $('#login-error').textContent = err.message;
+  }
+});
+
+$('#logout-btn').addEventListener('click', async () => {
+  try { await api('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+  setToken(null);
+  currentUser = null;
+  showLoginScreen();
+});
+
+function activateTab(name) {
+  $$('.sidebar nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  $$('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + name));
+}
+
+$$('.sidebar nav button').forEach(btn => {
   btn.addEventListener('click', () => activateTab(btn.dataset.tab));
 });
 
@@ -273,16 +508,6 @@ async function jumpToDevice(deviceId) {
   activateTab('inventory');
   await loadDevices();
   showDeviceDetail(deviceId);
-}
-
-async function api(path, options) {
-  const res = await fetch(path, options);
-  if (!res.ok) {
-    let detail = res.statusText;
-    try { detail = (await res.json()).detail || detail; } catch (e) {}
-    throw new Error(detail);
-  }
-  return res.json();
 }
 
 function fmtDate(iso) {
@@ -309,18 +534,32 @@ async function loadSessions() {
   const tbody = $('#sessions-body');
   const sessions = await api('/api/capture/sessions');
   if (!sessions.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin sesiones aún</td></tr>'; return; }
+  const editor = isEditor();
   tbody.innerHTML = sessions.map(s => `
     <tr>
       <td>${s.id}</td><td>${s.name}</td><td>${s.source_type}</td><td>${s.source}</td>
       <td class="status-${s.status}">${s.status}${s.error_message ? ' — ' + s.error_message : ''}</td>
       <td>${s.packet_count}</td><td>${fmtDate(s.started_at)}</td>
-      <td>${s.status === 'running' && s.source_type === 'live' ? `<button class="action danger" onclick="stopLive(${s.id})">Detener</button>` : ''}</td>
+      <td>
+        ${editor && s.status === 'running' && s.source_type === 'live' ? `<button class="action danger" onclick="stopLive(${s.id})">Detener</button>` : ''}
+        ${editor ? `<button class="action secondary" onclick="deleteSession(${s.id})">Borrar</button>` : ''}
+      </td>
     </tr>`).join('');
 }
 
 async function stopLive(id) {
-  await api(`/api/capture/live/stop/${id}`, { method: 'POST' });
-  loadSessions();
+  try {
+    await api(`/api/capture/live/stop/${id}`, { method: 'POST' });
+    loadSessions();
+  } catch (e) { alert('No se pudo detener: ' + e.message); }
+}
+
+async function deleteSession(id) {
+  if (!confirm('¿Borrar esta sesión de captura? Esta acción no se puede deshacer.')) return;
+  try {
+    await api(`/api/capture/sessions/${id}`, { method: 'DELETE' });
+    loadSessions();
+  } catch (e) { alert('No se pudo borrar: ' + e.message); }
 }
 
 $('#start-live-btn').addEventListener('click', async () => {
@@ -357,7 +596,7 @@ $('#pcap-file').addEventListener('change', (e) => uploadPcapFile(e.target.files[
 const dropzone = $('#pcap-dropzone');
 ['dragenter', 'dragover'].forEach(evt => dropzone.addEventListener(evt, (e) => {
   e.preventDefault(); e.stopPropagation();
-  dropzone.classList.add('dragover');
+  if (isEditor()) dropzone.classList.add('dragover');
 }));
 ['dragleave', 'dragend'].forEach(evt => dropzone.addEventListener(evt, (e) => {
   e.preventDefault(); e.stopPropagation();
@@ -366,6 +605,7 @@ const dropzone = $('#pcap-dropzone');
 dropzone.addEventListener('drop', (e) => {
   e.preventDefault(); e.stopPropagation();
   dropzone.classList.remove('dragover');
+  if (!isEditor()) return;
   const file = e.dataTransfer.files && e.dataTransfer.files[0];
   if (!file) return;
   if (!/\.(pcap|pcapng|cap)$/i.test(file.name)) {
@@ -407,22 +647,24 @@ async function showDeviceDetail(id) {
     <tr><td>${sevBadge(f.severity)}</td><td>${f.title}</td><td>${f.cve_id || f.rule_id || '—'}</td></tr>`).join('') ||
     '<tr><td colspan="3" class="empty">Sin hallazgos (ejecuta un escaneo desde la pestaña Vulnerabilidades)</td></tr>';
 
+  const editor = isEditor();
   $('#device-detail').innerHTML = `
     <h2>Detalle: ${device.ip || device.mac}</h2>
     <div class="edit-field">
       <label>Nombre</label>
-      <input id="edit-name" value="${device.custom_name || ''}" placeholder="${device.hostname || 'sin detectar — escribe uno'}" />
+      <input id="edit-name" value="${device.custom_name || ''}" placeholder="${device.hostname || 'sin detectar — escribe uno'}" ${editor ? '' : 'disabled'} />
       <span class="hint">${device.hostname ? `auto: ${device.hostname}` : 'no detectado automáticamente'}</span>
     </div>
     <div class="edit-field">
       <label>Fabricante</label>
-      <input id="edit-vendor" value="${device.custom_vendor || ''}" placeholder="${device.vendor || 'sin detectar — escribe uno'}" />
+      <input id="edit-vendor" value="${device.custom_vendor || ''}" placeholder="${device.vendor || 'sin detectar — escribe uno'}" ${editor ? '' : 'disabled'} />
       <span class="hint">${device.vendor ? `auto: ${device.vendor}` : 'no detectado automáticamente'}</span>
     </div>
+    ${editor ? `
     <div class="row" style="margin-bottom:14px;">
       <button class="action" id="save-device-btn">Guardar</button>
       <button class="action secondary" id="reset-device-btn">Restablecer a automático</button>
-    </div>
+    </div>` : ''}
     <p><b>SO estimado:</b> ${device.os_guess || 'desconocido'} (confianza ${(device.os_confidence*100).toFixed(0)}%)</p>
     <p><b>Protocolos/servicios:</b><br/>${protoRows || '<span class="muted">ninguno</span>'}</p>
     <table>
@@ -431,8 +673,10 @@ async function showDeviceDetail(id) {
     </table>
   `;
 
-  $('#save-device-btn').addEventListener('click', () => saveDeviceOverrides(id));
-  $('#reset-device-btn').addEventListener('click', () => saveDeviceOverrides(id, true));
+  if (editor) {
+    $('#save-device-btn').addEventListener('click', () => saveDeviceOverrides(id));
+    $('#reset-device-btn').addEventListener('click', () => saveDeviceOverrides(id, true));
+  }
 }
 
 async function saveDeviceOverrides(id, reset = false) {
@@ -489,7 +733,7 @@ async function loadFindings() {
   const tbody = $('#findings-body');
   const sev = $('#severity-filter').value;
   const findings = await api('/api/vuln/findings' + (sev ? `?severity=${sev}` : ''));
-  if (!findings.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty">Sin hallazgos. Ejecuta un escaneo.</td></tr>'; return; }
+  if (!findings.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">Sin hallazgos. Ejecuta un escaneo.</td></tr>'; return; }
   tbody.innerHTML = findings.map(f => `
     <tr>
       <td>${sevBadge(f.severity)}</td>
@@ -516,13 +760,91 @@ $('#scan-all-btn').addEventListener('click', async () => {
   finally { $('#scan-all-btn').textContent = 'Ejecutar escaneo completo'; }
 });
 
-// initial load
-loadInterfaces();
-loadSessions();
-loadDevices();
-loadFlows();
-loadFindings();
-setInterval(loadSessions, 5000);
+// ---------- Users tab (editor only) ----------
+async function loadUsers() {
+  if (!isEditor()) return;
+  const tbody = $('#users-body');
+  const users = await api('/api/users');
+  tbody.innerHTML = users.map(u => `
+    <tr>
+      <td>${u.username}${u.id === currentUser.id ? ' <span class="pill">tú</span>' : ''}</td>
+      <td>
+        <select onchange="changeUserRole(${u.id}, this.value)" ${u.id === currentUser.id ? 'disabled' : ''}>
+          <option value="viewer" ${u.role === 'viewer' ? 'selected' : ''}>Visualizador</option>
+          <option value="editor" ${u.role === 'editor' ? 'selected' : ''}>Editor</option>
+        </select>
+      </td>
+      <td class="muted">${fmtDate(u.created_at)}</td>
+      <td>
+        <button class="action secondary" onclick="resetUserPassword(${u.id})">Restablecer contraseña</button>
+        <button class="action danger" onclick="deleteUser(${u.id})" ${u.id === currentUser.id ? 'disabled' : ''}>Eliminar</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin usuarios</td></tr>';
+}
+
+async function changeUserRole(id, role) {
+  try {
+    await api(`/api/users/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role }),
+    });
+    loadUsers();
+  } catch (e) {
+    alert('No se pudo cambiar el perfil: ' + e.message);
+    loadUsers();
+  }
+}
+
+async function resetUserPassword(id) {
+  const password = prompt('Nueva contraseña (mínimo 4 caracteres):');
+  if (!password) return;
+  try {
+    await api(`/api/users/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    alert('Contraseña actualizada.');
+  } catch (e) { alert('No se pudo actualizar la contraseña: ' + e.message); }
+}
+
+async function deleteUser(id) {
+  if (!confirm('¿Eliminar este usuario?')) return;
+  try {
+    await api(`/api/users/${id}`, { method: 'DELETE' });
+    loadUsers();
+  } catch (e) { alert('No se pudo eliminar: ' + e.message); }
+}
+
+$('#refresh-users-btn').addEventListener('click', loadUsers);
+$('#create-user-btn').addEventListener('click', async () => {
+  const username = $('#new-user-username').value.trim();
+  const password = $('#new-user-password').value;
+  const role = $('#new-user-role').value;
+  $('#create-user-error').textContent = '';
+  try {
+    await api('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, role }),
+    });
+    $('#new-user-username').value = '';
+    $('#new-user-password').value = '';
+    loadUsers();
+  } catch (e) { $('#create-user-error').textContent = e.message; }
+});
+
+// ---------- boot ----------
+(async function boot() {
+  if (!getToken()) { showLoginScreen(); return; }
+  try {
+    await bootstrapAfterLogin();
+    setInterval(loadSessions, 5000);
+  } catch (e) {
+    showLoginScreen();
+  }
+})();
 </script>
 </body>
 </html>

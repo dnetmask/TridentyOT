@@ -18,3 +18,11 @@ NVD_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("NVD_REQUEST_TIMEOUT_SECONDS"
 # sensor focused on traffic relevant to inventory/fingerprinting.
 DEFAULT_LIVE_CAPTURE_FILTER = os.environ.get("TRIDENTYOT_DEFAULT_FILTER", "ip or arp")
 LIVE_CAPTURE_SNAPLEN = int(os.environ.get("TRIDENTYOT_SNAPLEN", 65535))
+
+# How long a login session (bearer token) stays valid.
+SESSION_LIFETIME_SECONDS = int(os.environ.get("TRIDENTYOT_SESSION_LIFETIME_SECONDS", 7 * 24 * 3600))
+
+# Username/password for the account auto-created on first startup if no
+# users exist yet. Change the password immediately after first login.
+DEFAULT_ADMIN_USERNAME = os.environ.get("TRIDENTYOT_DEFAULT_ADMIN_USERNAME", "admin")
+DEFAULT_ADMIN_PASSWORD = os.environ.get("TRIDENTYOT_DEFAULT_ADMIN_PASSWORD", "admin")

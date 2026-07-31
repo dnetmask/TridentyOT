@@ -1,0 +1,3 @@
+ROLE_EDITOR = "editor"
+ROLE_VIEWER = "viewer"
+ROLES = (ROLE_EDITOR, ROLE_VIEWER)
