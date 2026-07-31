@@ -27,7 +27,9 @@ ya capturado, y a partir de eso construye:
 ## Estructura
 
 ```
+docker-compose.yml   despliegue de un solo servicio, con volumen persistente
 backend/
+  Dockerfile         imagen de la app (Python 3.11 + FastAPI + Scapy + libpcap/tcpdump)
   app/
     capture/        captura en vivo (scapy AsyncSniffer) y carga de archivos pcap
     fingerprint/     fingerprint pasivo de SO + detección de protocolos IT/OT
@@ -48,6 +50,8 @@ backend/
 
 ## Instalación y ejecución
 
+### Opción A: Python + uvicorn (desarrollo)
+
 ```bash
 cd backend
 python3 -m venv .venv
@@ -60,7 +64,47 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 Abre `http://localhost:8000` para el dashboard. La documentación interactiva de la API está en
 `http://localhost:8000/docs`.
 
-### Captura en vivo
+### Opción B: Docker Compose (recomendado para desplegar)
+
+```bash
+docker compose up -d --build
+```
+
+Esto construye la imagen desde `backend/Dockerfile` (Python 3.11 + FastAPI + Scapy + libpcap/tcpdump)
+y publica el dashboard/API en `http://localhost:8000`. La base de datos SQLite y los archivos
+`.pcap` subidos quedan en el volumen con nombre `tridentyot_data`, por lo que sobreviven a
+`docker compose down` y a reinicios del contenedor (verificado: los dispositivos y hallazgos siguen
+ahí después de un `docker restart`).
+
+```bash
+docker compose logs -f tridentyot   # ver logs
+docker compose down                 # detener (agrega -v para borrar también los datos persistidos)
+```
+
+Variables de entorno (ver tabla más abajo) se definen en `docker-compose.yml` bajo `environment:`,
+o en un archivo `.env` junto a él (por ejemplo `NVD_API_KEY=...`, leído automáticamente por
+Docker Compose).
+
+#### Captura en vivo dentro de Docker
+
+Por defecto el contenedor corre en la red *bridge* de Docker, así que solo ve su propia interfaz
+virtual, no las interfaces reales del host. El **análisis de archivos `.pcap` subidos funciona
+igual en cualquier modo de red**, sin cambios; pero para escuchar tráfico real (un puerto
+SPAN/mirror, por ejemplo) hay que exponer una interfaz real del host al contenedor. La forma más
+simple es cambiar a la red del host en `docker-compose.yml`:
+
+```yaml
+services:
+  tridentyot:
+    network_mode: host   # ve todas las interfaces del host directamente
+    # ports:             # quitar/comentar: no aplica con network_mode: host
+    #   - "8000:8000"
+```
+
+El servicio ya incluye `cap_add: [NET_RAW, NET_ADMIN]` en `docker-compose.yml`, necesario para que
+Scapy pueda abrir sockets raw sea cual sea el modo de red usado.
+
+### Captura en vivo sin Docker
 
 Requiere privilegios de captura. Dos formas típicas de darlos sin correr todo como root:
 
