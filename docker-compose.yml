@@ -1,0 +1,34 @@
+services:
+  tridentyot:
+    build:
+      context: ./backend
+    image: tridentyot:latest
+    container_name: tridentyot
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - tridentyot_data:/data
+    environment:
+      TRIDENTYOT_DATA_DIR: /data
+      # Optional NVD API key: raises the public rate limit from 5 to 50
+      # requests/30s. Leave unset to use the (slower, still functional)
+      # unauthenticated limit.
+      NVD_API_KEY: ${NVD_API_KEY:-}
+    # Needed only for *live* packet capture (raw sockets), not for
+    # uploading/analyzing .pcap files. Harmless to leave on otherwise.
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    # In the default bridge network the container only sees its own
+    # virtual interface (eth0), not the host's real NICs. To capture
+    # traffic from an actual host interface or SPAN/mirror port, switch to
+    # host networking instead (see README.md "Despliegue con Docker"):
+    #
+    #   network_mode: host
+    #
+    # network_mode: host replaces container-level port publishing, so the
+    # `ports:` mapping above must be removed when you enable it.
+
+volumes:
+  tridentyot_data:

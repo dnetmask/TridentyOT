@@ -1,0 +1,19 @@
+# Override for deploying TridentyOT as a live-capture sensor on a Linux
+# host with Docker Engine (physical box or VM) plugged into a SPAN/mirror
+# port. NOT for Docker Desktop (macOS/Windows) -- its engine runs inside a
+# VM with no direct access to the host's real network interfaces, so
+# network_mode: host there only reaches the VM's own virtual NIC.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.linux-sensor.yml up -d --build
+#
+# See docs/SENSOR_DEPLOYMENT.md for the full setup (SPAN port wiring,
+# starting a capture, security hardening).
+
+services:
+  tridentyot:
+    network_mode: host
+    # network_mode: host shares the container's network stack with the
+    # Linux host directly, so per-container port publishing is invalid --
+    # the app is simply reachable on the host's own :8000.
+    ports: !reset []

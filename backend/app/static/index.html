@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TridentyOT — Inventario y Vulnerabilidades</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: #121c2e;
+    --panel-2: #17233a;
+    --border: #23324d;
+    --text: #e6edf7;
+    --muted: #8ea0c0;
+    --accent: #3ba9ff;
+    --ok: #16a34a;
+    --crit: #dc2626;
+    --high: #ea580c;
+    --med: #d97706;
+    --low: #16a34a;
+    --info: #64748b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  header span { color: var(--muted); font-size: 13px; }
+  nav {
+    display: flex;
+    gap: 4px;
+    padding: 0 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  nav button {
+    background: none;
+    border: none;
+    color: var(--muted);
+    padding: 12px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    border-bottom: 2px solid transparent;
+  }
+  nav button.active { color: var(--text); border-bottom-color: var(--accent); }
+  main { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .card h2 { margin: 0 0 12px; font-size: 15px; color: var(--muted); font-weight: 600; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input, select {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  button.action {
+    background: var(--accent);
+    border: none;
+    color: #04121f;
+    font-weight: 600;
+    padding: 9px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button.action.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  button.action.danger { background: var(--crit); color: white; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:hover td { background: rgba(59, 169, 255, 0.05); }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: white;
+  }
+  .sev-critical { background: var(--crit); }
+  .sev-high { background: var(--high); }
+  .sev-medium { background: var(--med); }
+  .sev-low { background: var(--low); }
+  .sev-info, .sev-unknown { background: var(--info); }
+  .pill { background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 11px; margin: 2px; display: inline-block; }
+  .pill.ot { border-color: var(--high); color: var(--high); }
+  .muted { color: var(--muted); }
+  .empty { color: var(--muted); padding: 20px; text-align: center; }
+  .clickable { cursor: pointer; }
+  .device-detail { margin-top: 12px; }
+  .flex-between { display: flex; justify-content: space-between; align-items: center; }
+  .status-running { color: var(--accent); }
+  .status-completed, .status-stopped { color: var(--muted); }
+  .status-error { color: var(--crit); }
+  .manual-tag { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+  .edit-field { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .edit-field label { min-width: 90px; margin: 0; }
+  .edit-field input { flex: 1; max-width: 260px; }
+  .edit-field .hint { font-size: 11px; color: var(--muted); }
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    transition: border-color .15s, background .15s, color .15s;
+  }
+  .dropzone.dragover { border-color: var(--accent); background: rgba(59,169,255,0.08); color: var(--text); }
+  .dropzone b { color: var(--text); }
+  .flow-arrow { color: var(--muted); margin: 0 6px; }
+  .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>TridentyOT</h1>
+  <span>Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)</span>
+</header>
+
+<nav>
+  <button data-tab="capture" class="active">Captura</button>
+  <button data-tab="inventory">Inventario</button>
+  <button data-tab="flows">Flujos</button>
+  <button data-tab="vulns">Vulnerabilidades</button>
+</nav>
+
+<main>
+
+  <section id="tab-capture" class="tab active">
+    <div class="card">
+      <h2>Captura en vivo</h2>
+      <div class="row">
+        <div>
+          <label>Interfaz de red</label>
+          <select id="iface-select"><option value="">(cargando...)</option></select>
+        </div>
+        <div>
+          <label>Filtro BPF</label>
+          <input id="bpf-filter" value="ip or arp" size="24" />
+        </div>
+        <button class="action" id="start-live-btn">Iniciar captura</button>
+      </div>
+      <p class="muted" style="margin-top:10px">
+        Requiere que el proceso tenga permisos de captura raw (root o CAP_NET_RAW) y que libpcap
+        esté disponible en el host, además de estar conectado a un puerto SPAN/mirror o al segmento a inspeccionar.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>Analizar archivo .pcap / .pcapng</h2>
+      <div id="pcap-dropzone" class="dropzone">
+        Arrastra aquí un archivo <b>.pcap</b>/<b>.pcapng</b>, o
+        <label for="pcap-file" style="color:var(--accent); cursor:pointer; text-decoration:underline;">selecciónalo</label>
+        <input type="file" id="pcap-file" accept=".pcap,.pcapng,.cap" style="display:none" />
+        <div id="pcap-file-name" class="muted" style="margin-top:8px;"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="flex-between">
+        <h2>Sesiones de captura</h2>
+        <button class="action secondary" id="refresh-sessions-btn">Actualizar</button>
+      </div>
+      <table>
+        <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>Origen</th><th>Estado</th><th>Paquetes</th><th>Inicio</th><th></th></tr></thead>
+        <tbody id="sessions-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-inventory" class="tab">
+    <div class="card">
+      <div class="flex-between">
+        <h2>Dispositivos detectados</h2>
+        <div class="row">
+          <label style="display:inline-flex;align-items:center;gap:6px;margin:0;">
+            <input type="checkbox" id="ot-only-checkbox" style="width:auto" /> Solo sospechosos de OT
+          </label>
+          <button class="action secondary" id="refresh-devices-btn">Actualizar</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>IP</th><th>Nombre</th><th>Fabricante</th><th>MAC</th><th>SO estimado</th><th>Confianza</th><th>Protocolos</th><th>Últ. visto</th></tr></thead>
+        <tbody id="devices-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
+      </table>
+      <div id="device-detail" class="device-detail"></div>
+    </div>
+  </section>
+
+  <section id="tab-flows" class="tab">
+    <div class="card">
+      <div class="flex-between">
+        <h2>Flujos (sesiones TCP/UDP) — quién conversa con quién</h2>
+        <div class="row">
+          <select id="flow-category-filter">
+            <option value="">Todas las categorías</option>
+            <option value="OT">Solo OT</option>
+            <option value="IT">Solo IT</option>
+          </select>
+          <button class="action secondary" id="refresh-flows-btn">Actualizar</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Origen</th><th></th><th>Destino</th><th>Protocolo</th><th>Puerto</th><th>Transporte</th><th>Paquetes</th><th>Primero</th><th>Último</th></tr></thead>
+        <tbody id="flows-body"><tr><td colspan="9" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-vulns" class="tab">
+    <div class="card">
+      <div class="flex-between">
+        <h2>Hallazgos de vulnerabilidades</h2>
+        <div class="row">
+          <select id="severity-filter">
+            <option value="">Todas las severidades</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+            <option value="info">Info</option>
+          </select>
+          <button class="action secondary" id="refresh-findings-btn">Actualizar</button>
+          <button class="action" id="scan-all-btn">Ejecutar escaneo completo</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Severidad</th><th>Dispositivo</th><th>Nombre</th><th>Hallazgo</th><th>Fuente</th><th>Evidencia</th></tr></thead>
+        <tbody id="findings-body"><tr><td colspan="6" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+function activateTab(name) {
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + name));
+}
+
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+});
+
+async function jumpToDevice(deviceId) {
+  activateTab('inventory');
+  await loadDevices();
+  showDeviceDetail(deviceId);
+}
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch (e) {}
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString();
+}
+
+function sevBadge(sev) {
+  return `<span class="badge sev-${sev || 'unknown'}">${sev || 'unknown'}</span>`;
+}
+
+// ---------- Capture tab ----------
+async function loadInterfaces() {
+  const sel = $('#iface-select');
+  try {
+    const data = await api('/api/capture/interfaces');
+    sel.innerHTML = data.interfaces.map(i => `<option value="${i}">${i}</option>`).join('') || '<option value="">(ninguna disponible)</option>';
+  } catch (e) {
+    sel.innerHTML = '<option value="">(no se pudo listar interfaces)</option>';
+  }
+}
+
+async function loadSessions() {
+  const tbody = $('#sessions-body');
+  const sessions = await api('/api/capture/sessions');
+  if (!sessions.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin sesiones aún</td></tr>'; return; }
+  tbody.innerHTML = sessions.map(s => `
+    <tr>
+      <td>${s.id}</td><td>${s.name}</td><td>${s.source_type}</td><td>${s.source}</td>
+      <td class="status-${s.status}">${s.status}${s.error_message ? ' — ' + s.error_message : ''}</td>
+      <td>${s.packet_count}</td><td>${fmtDate(s.started_at)}</td>
+      <td>${s.status === 'running' && s.source_type === 'live' ? `<button class="action danger" onclick="stopLive(${s.id})">Detener</button>` : ''}</td>
+    </tr>`).join('');
+}
+
+async function stopLive(id) {
+  await api(`/api/capture/live/stop/${id}`, { method: 'POST' });
+  loadSessions();
+}
+
+$('#start-live-btn').addEventListener('click', async () => {
+  const iface = $('#iface-select').value;
+  if (!iface) { alert('Selecciona una interfaz'); return; }
+  try {
+    await api('/api/capture/live/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interface: iface, bpf_filter: $('#bpf-filter').value }),
+    });
+    loadSessions();
+  } catch (e) { alert('No se pudo iniciar la captura: ' + e.message); }
+});
+
+async function uploadPcapFile(file) {
+  if (!file) return;
+  const nameEl = $('#pcap-file-name');
+  nameEl.textContent = `Subiendo ${file.name}...`;
+  const form = new FormData();
+  form.append('file', file);
+  try {
+    await api('/api/capture/pcap', { method: 'POST', body: form });
+    nameEl.textContent = `${file.name} — subido, procesando...`;
+    loadSessions();
+  } catch (e) {
+    nameEl.textContent = '';
+    alert('No se pudo subir el archivo: ' + e.message);
+  }
+}
+
+$('#pcap-file').addEventListener('change', (e) => uploadPcapFile(e.target.files[0]));
+
+const dropzone = $('#pcap-dropzone');
+['dragenter', 'dragover'].forEach(evt => dropzone.addEventListener(evt, (e) => {
+  e.preventDefault(); e.stopPropagation();
+  dropzone.classList.add('dragover');
+}));
+['dragleave', 'dragend'].forEach(evt => dropzone.addEventListener(evt, (e) => {
+  e.preventDefault(); e.stopPropagation();
+  dropzone.classList.remove('dragover');
+}));
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault(); e.stopPropagation();
+  dropzone.classList.remove('dragover');
+  const file = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (!file) return;
+  if (!/\.(pcap|pcapng|cap)$/i.test(file.name)) {
+    alert('Solo se aceptan archivos .pcap, .pcapng o .cap');
+    return;
+  }
+  uploadPcapFile(file);
+});
+
+$('#refresh-sessions-btn').addEventListener('click', loadSessions);
+
+// ---------- Inventory tab ----------
+let currentDeviceId = null;
+
+async function loadDevices() {
+  const tbody = $('#devices-body');
+  const otOnly = $('#ot-only-checkbox').checked;
+  const devices = await api('/api/inventory/devices' + (otOnly ? '?ot_only=true' : ''));
+  if (!devices.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin dispositivos detectados aún</td></tr>'; return; }
+  tbody.innerHTML = devices.map(d => `
+    <tr class="clickable" onclick="showDeviceDetail(${d.id})">
+      <td>${d.ip || '—'} ${d.is_ot_suspected ? '<span class="pill ot">OT</span>' : ''}</td>
+      <td>${d.display_name || '<span class="muted">—</span>'}${d.custom_name ? '<span class="manual-tag">manual</span>' : ''}</td>
+      <td>${d.display_vendor || '<span class="muted">—</span>'}${d.custom_vendor ? '<span class="manual-tag">manual</span>' : ''}</td>
+      <td class="mono">${d.mac || '—'}</td>
+      <td>${d.os_guess || '—'}</td>
+      <td>${(d.os_confidence * 100).toFixed(0)}%</td>
+      <td>${d.protocol_count}</td>
+      <td>${fmtDate(d.last_seen)}</td>
+    </tr>`).join('');
+}
+
+async function showDeviceDetail(id) {
+  currentDeviceId = id;
+  const device = await api(`/api/inventory/devices/${id}`);
+  const protoRows = device.protocols.map(p => `
+    <span class="pill ${p.category === 'OT' ? 'ot' : ''}">${p.protocol}:${p.port ?? '-'} (${p.role}, ${p.packet_count}x)</span>`).join(' ');
+  const findingRows = device.findings.map(f => `
+    <tr><td>${sevBadge(f.severity)}</td><td>${f.title}</td><td>${f.cve_id || f.rule_id || '—'}</td></tr>`).join('') ||
+    '<tr><td colspan="3" class="empty">Sin hallazgos (ejecuta un escaneo desde la pestaña Vulnerabilidades)</td></tr>';
+
+  $('#device-detail').innerHTML = `
+    <h2>Detalle: ${device.ip || device.mac}</h2>
+    <div class="edit-field">
+      <label>Nombre</label>
+      <input id="edit-name" value="${device.custom_name || ''}" placeholder="${device.hostname || 'sin detectar — escribe uno'}" />
+      <span class="hint">${device.hostname ? `auto: ${device.hostname}` : 'no detectado automáticamente'}</span>
+    </div>
+    <div class="edit-field">
+      <label>Fabricante</label>
+      <input id="edit-vendor" value="${device.custom_vendor || ''}" placeholder="${device.vendor || 'sin detectar — escribe uno'}" />
+      <span class="hint">${device.vendor ? `auto: ${device.vendor}` : 'no detectado automáticamente'}</span>
+    </div>
+    <div class="row" style="margin-bottom:14px;">
+      <button class="action" id="save-device-btn">Guardar</button>
+      <button class="action secondary" id="reset-device-btn">Restablecer a automático</button>
+    </div>
+    <p><b>SO estimado:</b> ${device.os_guess || 'desconocido'} (confianza ${(device.os_confidence*100).toFixed(0)}%)</p>
+    <p><b>Protocolos/servicios:</b><br/>${protoRows || '<span class="muted">ninguno</span>'}</p>
+    <table>
+      <thead><tr><th>Severidad</th><th>Hallazgo</th><th>Ref.</th></tr></thead>
+      <tbody>${findingRows}</tbody>
+    </table>
+  `;
+
+  $('#save-device-btn').addEventListener('click', () => saveDeviceOverrides(id));
+  $('#reset-device-btn').addEventListener('click', () => saveDeviceOverrides(id, true));
+}
+
+async function saveDeviceOverrides(id, reset = false) {
+  const body = reset
+    ? { custom_name: null, custom_vendor: null }
+    : {
+        custom_name: $('#edit-name').value.trim() || null,
+        custom_vendor: $('#edit-vendor').value.trim() || null,
+      };
+  try {
+    await api(`/api/inventory/devices/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    await loadDevices();
+    await showDeviceDetail(id);
+  } catch (e) { alert('No se pudo guardar: ' + e.message); }
+}
+
+$('#refresh-devices-btn').addEventListener('click', loadDevices);
+$('#ot-only-checkbox').addEventListener('change', loadDevices);
+
+// ---------- Flows tab ----------
+async function loadFlows() {
+  const tbody = $('#flows-body');
+  const cat = $('#flow-category-filter').value;
+  const flows = await api('/api/inventory/flows' + (cat ? `?category=${cat}` : ''));
+  if (!flows.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin flujos detectados aún</td></tr>'; return; }
+  tbody.innerHTML = flows.map(f => {
+    const aLabel = f.device_a_name || f.device_a_ip || `#${f.device_a_id}`;
+    const bLabel = f.device_b_name || f.device_b_ip || `#${f.device_b_id}`;
+    const aIsServer = f.server_device_id === f.device_a_id;
+    return `
+    <tr>
+      <td>${aLabel}${aIsServer ? ' <span class="pill">servidor</span>' : ''}</td>
+      <td class="flow-arrow">${aIsServer ? '&larr;' : '&rarr;'}</td>
+      <td>${bLabel}${!aIsServer ? ' <span class="pill">servidor</span>' : ''}</td>
+      <td>${f.protocol}${f.category === 'OT' ? ' <span class="pill ot">OT</span>' : ''}</td>
+      <td>${f.port ?? '—'}</td>
+      <td>${f.transport}</td>
+      <td>${f.packet_count}</td>
+      <td class="muted">${fmtDate(f.first_seen)}</td>
+      <td class="muted">${fmtDate(f.last_seen)}</td>
+    </tr>`;
+  }).join('');
+}
+
+$('#refresh-flows-btn').addEventListener('click', loadFlows);
+$('#flow-category-filter').addEventListener('change', loadFlows);
+
+// ---------- Vulnerabilities tab ----------
+async function loadFindings() {
+  const tbody = $('#findings-body');
+  const sev = $('#severity-filter').value;
+  const findings = await api('/api/vuln/findings' + (sev ? `?severity=${sev}` : ''));
+  if (!findings.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty">Sin hallazgos. Ejecuta un escaneo.</td></tr>'; return; }
+  tbody.innerHTML = findings.map(f => `
+    <tr>
+      <td>${sevBadge(f.severity)}</td>
+      <td class="clickable" onclick="jumpToDevice(${f.device_id})">${f.device_ip || '#' + f.device_id}</td>
+      <td>${f.device_name || '<span class="muted">—</span>'}</td>
+      <td><b>${f.title}</b><br/><span class="muted">${f.description}</span></td>
+      <td>${f.source}${f.cve_id ? ' · ' + f.cve_id : ''}</td>
+      <td class="muted">${f.evidence || '—'}</td>
+    </tr>`).join('');
+}
+
+$('#refresh-findings-btn').addEventListener('click', loadFindings);
+$('#severity-filter').addEventListener('change', loadFindings);
+$('#scan-all-btn').addEventListener('click', async () => {
+  $('#scan-all-btn').textContent = 'Escaneando...';
+  try {
+    await api('/api/vuln/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ use_nvd: true }),
+    });
+    await loadFindings();
+  } catch (e) { alert('Error en el escaneo: ' + e.message); }
+  finally { $('#scan-all-btn').textContent = 'Ejecutar escaneo completo'; }
+});
+
+// initial load
+loadInterfaces();
+loadSessions();
+loadDevices();
+loadFlows();
+loadFindings();
+setInterval(loadSessions, 5000);
+</script>
+</body>
+</html>
