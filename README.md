@@ -183,6 +183,15 @@ curl -X POST http://localhost:8000/api/vuln/scan \
 | `NVD_CACHE_TTL_SECONDS` | Tiempo de vida del caché de resultados de NVD | 86400 (24h) |
 | `TRIDENTYOT_DEFAULT_FILTER` | Filtro BPF por defecto para captura en vivo | `ip or arp` |
 
+## Actualizar una instalación existente
+
+Al iniciar, la app agrega automáticamente a la base de datos cualquier columna nueva que una
+versión más reciente del código haya introducido (por ejemplo, `custom_name`/`vendor` en
+dispositivos), sin borrar ni tocar los datos ya existentes. Basta con actualizar el código
+(`git pull` / reconstruir la imagen Docker) y reiniciar — no hace falta borrar la base de datos.
+Esto cubre columnas nuevas, que es como ha evolucionado el esquema hasta ahora; un cambio más
+profundo (renombrar o eliminar una columna) sí requeriría una migración manual.
+
 ## Tests
 
 ```bash
