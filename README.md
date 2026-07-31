@@ -27,7 +27,10 @@ ya capturado, y a partir de eso construye:
 ## Estructura
 
 ```
-docker-compose.yml   despliegue de un solo servicio, con volumen persistente
+docker-compose.yml              despliegue de un solo servicio, con volumen persistente
+docker-compose.linux-sensor.yml override: network_mode host, para sensor real (ver docs/)
+docs/
+  SENSOR_DEPLOYMENT.md          despliegue como sensor en un host Linux + puerto SPAN/mirror
 backend/
   Dockerfile         imagen de la app (Python 3.11 + FastAPI + Scapy + libpcap/tcpdump)
   app/
@@ -89,20 +92,43 @@ Docker Compose).
 
 Por defecto el contenedor corre en la red *bridge* de Docker, así que solo ve su propia interfaz
 virtual, no las interfaces reales del host. El **análisis de archivos `.pcap` subidos funciona
-igual en cualquier modo de red**, sin cambios; pero para escuchar tráfico real (un puerto
-SPAN/mirror, por ejemplo) hay que exponer una interfaz real del host al contenedor. La forma más
-simple es cambiar a la red del host en `docker-compose.yml`:
+igual en cualquier modo de red y en cualquier sistema operativo**, sin cambios.
 
-```yaml
-services:
-  tridentyot:
-    network_mode: host   # ve todas las interfaces del host directamente
-    # ports:             # quitar/comentar: no aplica con network_mode: host
-    #   - "8000:8000"
+Para escuchar tráfico real (un puerto SPAN/mirror, por ejemplo) el contenedor necesita
+`network_mode: host`, incluido ya en el override `docker-compose.linux-sensor.yml`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.linux-sensor.yml up -d --build
 ```
+
+> **Importante — Docker Desktop (macOS/Windows):** `network_mode: host` **no** da acceso a las
+> interfaces de red reales de tu Mac/Windows con Docker Desktop, porque su motor corre dentro de
+> una VM propia con su propia red interna — el contenedor vería la red de esa VM, no tu Wi-Fi/
+> Ethernet físico. En Mac/Windows con Docker Desktop, la única forma práctica de "capturar en
+> vivo" es capturar con herramientas nativas del SO (`tcpdump`/Wireshark) y subir el `.pcap`
+> resultante al dashboard. `network_mode: host` sí funciona de forma nativa en **Docker Engine
+> sobre Linux** (físico o VM) — ver [`docs/SENSOR_DEPLOYMENT.md`](docs/SENSOR_DEPLOYMENT.md) para
+> el despliegue completo como sensor conectado a un puerto SPAN/mirror, incluyendo
+> recomendaciones de seguridad (la app no trae autenticación integrada).
 
 El servicio ya incluye `cap_add: [NET_RAW, NET_ADMIN]` en `docker-compose.yml`, necesario para que
 Scapy pueda abrir sockets raw sea cual sea el modo de red usado.
+
+**Flujo en Docker Desktop (macOS/Windows) con `tcpdump`/Wireshark nativo del SO:**
+
+```bash
+# 1) levanta TridentyOT normalmente (Opción B de arriba)
+docker compose up -d --build
+
+# 2) captura tráfico real con herramientas nativas de macOS (fuera de Docker)
+sudo tcpdump -i en0 -w captura.pcap        # Ctrl+C para detener
+#   (en Windows: usa Wireshark y exporta como .pcap/.pcapng)
+
+# 3) sube la captura a TridentyOT para análisis
+curl -F "file=@captura.pcap" http://localhost:8000/api/capture/pcap
+```
+
+`en0` suele ser el Wi-Fi en Mac (`networksetup -listallhardwareports` para confirmar el nombre).
 
 ### Captura en vivo sin Docker
 
