@@ -1,15 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
+from app.auth.deps import get_current_user, require_editor
 from app.db import get_db
-from app.models import Device, DeviceProtocol, Flow
+from app.models import Device, DeviceProtocol, Flow, User
 from app.schemas import DeviceDetailOut, DeviceOut, DeviceUpdateRequest, FlowOut
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"])
 
 
 @router.get("/devices", response_model=list[DeviceOut])
-def list_devices(ot_only: bool = False, protocol: str | None = None, db: Session = Depends(get_db)):
+def list_devices(
+    ot_only: bool = False,
+    protocol: str | None = None,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
     query = db.query(Device).options(joinedload(Device.protocols))
     if ot_only:
         query = query.filter(Device.is_ot_suspected.is_(True))
@@ -19,7 +25,7 @@ def list_devices(ot_only: bool = False, protocol: str | None = None, db: Session
 
 
 @router.get("/devices/{device_id}", response_model=DeviceDetailOut)
-def get_device(device_id: int, db: Session = Depends(get_db)):
+def get_device(device_id: int, db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
     device = (
         db.query(Device)
         .options(joinedload(Device.protocols), joinedload(Device.findings))
@@ -32,7 +38,9 @@ def get_device(device_id: int, db: Session = Depends(get_db)):
 
 
 @router.patch("/devices/{device_id}", response_model=DeviceDetailOut)
-def update_device(device_id: int, payload: DeviceUpdateRequest, db: Session = Depends(get_db)):
+def update_device(
+    device_id: int, payload: DeviceUpdateRequest, db: Session = Depends(get_db), _user: User = Depends(require_editor)
+):
     device = (
         db.query(Device)
         .options(joinedload(Device.protocols), joinedload(Device.findings))
@@ -54,7 +62,12 @@ def update_device(device_id: int, payload: DeviceUpdateRequest, db: Session = De
 
 
 @router.get("/flows", response_model=list[FlowOut])
-def list_flows(device_id: int | None = None, category: str | None = None, db: Session = Depends(get_db)):
+def list_flows(
+    device_id: int | None = None,
+    category: str | None = None,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
     query = db.query(Flow).options(
         joinedload(Flow.device_a), joinedload(Flow.device_b), joinedload(Flow.server_device)
     )

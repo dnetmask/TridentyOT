@@ -7,6 +7,7 @@ CAP_NET_RAW+CAP_NET_ADMIN on Linux, e.g. via `setcap` on the python
 interpreter) and, in most environments, that tcpdump/libpcap is installed.
 """
 
+import datetime
 import threading
 
 from scapy.sendrecv import AsyncSniffer
@@ -63,3 +64,24 @@ class LiveCaptureManager:
 
 
 live_capture_manager = LiveCaptureManager()
+
+
+def mark_orphaned_live_sessions_stopped() -> None:
+    """Called once at app startup. `live_capture_manager` is always empty
+    at this point -- it's a fresh in-memory object -- so any live capture
+    session still marked "running" in the database is necessarily a leftover
+    from a previous process (e.g. the server was restarted or crashed while
+    a capture was active). Left alone, the "Detener" button for one of these
+    used to 409 forever, since there was never a real sniffer left to stop.
+    """
+    with session_scope() as db:
+        orphaned = (
+            db.query(CaptureSession)
+            .filter(CaptureSession.source_type == "live", CaptureSession.status == "running")
+            .all()
+        )
+        now = datetime.datetime.now(datetime.timezone.utc)
+        for session_obj in orphaned:
+            session_obj.status = "stopped"
+            session_obj.ended_at = now
+            session_obj.error_message = "Interrumpida: el servidor se reinició mientras esta captura estaba activa."

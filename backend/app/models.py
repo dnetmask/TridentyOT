@@ -69,6 +69,10 @@ class Device(Base):
         return len(self.protocols)
 
     @property
+    def protocol_names(self) -> list[str]:
+        return sorted({p.protocol for p in self.protocols})
+
+    @property
     def display_name(self) -> str | None:
         return self.custom_name or self.hostname
 
@@ -181,3 +185,28 @@ class CveCache(Base):
     keyword: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     response_json: Mapped[str] = mapped_column(Text)
     fetched_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    password_salt: Mapped[str] = mapped_column(String(32))
+    password_hash: Mapped[str] = mapped_column(String(64))
+    role: Mapped[str] = mapped_column(String(16))  # "editor" | "viewer"
+    created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
+
+    tokens: Mapped[list["AuthToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+class AuthToken(Base):
+    __tablename__ = "auth_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
+    expires_at: Mapped[datetime.datetime] = mapped_column()
+
+    user: Mapped[User] = relationship(back_populates="tokens")

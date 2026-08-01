@@ -31,6 +31,9 @@ ya capturado, y a partir de eso construye:
      límite de tasa bajo (5 solicitudes/30s sin API key) y para seguir funcionando (desde caché)
      en redes OT sin salida a internet.
    - Cada hallazgo muestra el nombre del equipo afectado (auto-detectado o manual), no solo su IP.
+6. **Usuarios y control de acceso**: login con usuario/contraseña, dos perfiles —**editor**
+   (control total) y **visualizador** (solo lectura)—. Al primer arranque se crea el usuario
+   `admin`/`admin` (perfil editor); cámbialo cuanto antes desde la pestaña **Usuarios**.
 
 ## Estructura
 
@@ -117,7 +120,7 @@ docker compose -f docker-compose.yml -f docker-compose.linux-sensor.yml up -d --
 > resultante al dashboard. `network_mode: host` sí funciona de forma nativa en **Docker Engine
 > sobre Linux** (físico o VM) — ver [`docs/SENSOR_DEPLOYMENT.md`](docs/SENSOR_DEPLOYMENT.md) para
 > el despliegue completo como sensor conectado a un puerto SPAN/mirror, incluyendo
-> recomendaciones de seguridad (la app no trae autenticación integrada).
+> recomendaciones de seguridad y gestión de usuarios.
 
 El servicio ya incluye `cap_add: [NET_RAW, NET_ADMIN]` en `docker-compose.yml`, necesario para que
 Scapy pueda abrir sockets raw sea cual sea el modo de red usado.
@@ -182,6 +185,9 @@ curl -X POST http://localhost:8000/api/vuln/scan \
 | `NVD_API_KEY` | API key de NVD (opcional, sube el límite de tasa a 50 req/30s) | — |
 | `NVD_CACHE_TTL_SECONDS` | Tiempo de vida del caché de resultados de NVD | 86400 (24h) |
 | `TRIDENTYOT_DEFAULT_FILTER` | Filtro BPF por defecto para captura en vivo | `ip or arp` |
+| `TRIDENTYOT_SESSION_LIFETIME_SECONDS` | Duración del token de sesión antes de expirar | 604800 (7 días) |
+| `TRIDENTYOT_DEFAULT_ADMIN_USERNAME` | Usuario admin creado en el primer arranque (si no hay usuarios) | `admin` |
+| `TRIDENTYOT_DEFAULT_ADMIN_PASSWORD` | Contraseña de ese admin inicial — **cámbiala tras el primer login** | `admin` |
 
 ## Actualizar una instalación existente
 
