@@ -600,7 +600,13 @@ async function deleteSession(id) {
   if (!confirm('¿Borrar esta sesión de captura? Esta acción no se puede deshacer.')) return;
   try {
     await api(`/api/capture/sessions/${id}`, { method: 'DELETE' });
+    // Deleting a session also removes whatever it contributed to the shared
+    // inventory (devices, protocols, flows, findings), so those tabs' cached
+    // data needs a refresh too, not just the sessions list.
     loadSessions();
+    loadDevices();
+    loadFlows();
+    loadFindings();
   } catch (e) { alert('No se pudo borrar: ' + e.message); }
 }
 
@@ -627,6 +633,9 @@ async function uploadPcapFile(file) {
     await api('/api/capture/pcap', { method: 'POST', body: form });
     nameEl.textContent = `${file.name} — subido, procesando...`;
     loadSessions();
+    loadDevices();
+    loadFlows();
+    loadFindings();
   } catch (e) {
     nameEl.textContent = '';
     alert('No se pudo subir el archivo: ' + e.message);
