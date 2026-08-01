@@ -7,6 +7,7 @@ identifies the last-hop router, not the true origin host, which is an
 inherent limitation of any purely passive single-point capture.
 """
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.capture.packet_processor import PacketRecord
@@ -18,7 +19,7 @@ from app.fingerprint.os_fingerprint import (
 )
 from app.fingerprint.protocol_detect import ProtocolInfo, classify
 from app.fingerprint.vendor_lookup import lookup_vendor
-from app.models import Device, DeviceProtocol, Flow, utcnow
+from app.models import Device, DeviceProtocol, Flow, VulnerabilityFinding, utcnow
 
 _PRINTABLE_BANNER_MIN_RATIO = 0.85
 
@@ -54,7 +55,9 @@ def _is_real_unicast_mac(mac: str | None) -> bool:
     return first_octet & 0x01 == 0  # multicast bit unset => unicast
 
 
-def get_or_create_device(session: Session, ip: str | None, mac: str | None) -> Device | None:
+def get_or_create_device(
+    session: Session, ip: str | None, mac: str | None, capture_session_id: int | None = None
+) -> Device | None:
     if mac is not None and not _is_real_unicast_mac(mac):
         mac = None
     if not ip and not mac:
@@ -68,7 +71,14 @@ def get_or_create_device(session: Session, ip: str | None, mac: str | None) -> D
 
     now = utcnow()
     if device is None:
-        device = Device(ip=ip, mac=mac, vendor=lookup_vendor(mac), first_seen=now, last_seen=now)
+        device = Device(
+            ip=ip,
+            mac=mac,
+            vendor=lookup_vendor(mac),
+            capture_session_id=capture_session_id,
+            first_seen=now,
+            last_seen=now,
+        )
         session.add(device)
         session.flush()
         return device
@@ -113,6 +123,7 @@ def upsert_protocol(
     transport: str,
     role: str,
     banner: str | None = None,
+    capture_session_id: int | None = None,
 ) -> DeviceProtocol:
     existing = (
         session.query(DeviceProtocol)
@@ -135,6 +146,7 @@ def upsert_protocol(
             category=proto_info.category,
             banner=banner,
             packet_count=1,
+            capture_session_id=capture_session_id,
             first_seen=now,
             last_seen=now,
         )
@@ -159,6 +171,7 @@ def upsert_flow(
     transport: str,
     port: int | None,
     proto_info: ProtocolInfo,
+    capture_session_id: int | None = None,
 ) -> Flow:
     """Aggregates both directions of a TCP/UDP conversation between two
     devices into a single row, normalized by device id so the reverse
@@ -186,6 +199,7 @@ def upsert_flow(
             protocol=proto_info.protocol,
             category=proto_info.category,
             packet_count=1,
+            capture_session_id=capture_session_id,
             first_seen=now,
             last_seen=now,
         )
@@ -227,9 +241,11 @@ _CDP_LLDP_GUESS = OsGuess(
 )
 
 
-def ingest_packet_record(session: Session, record: PacketRecord) -> None:
+def ingest_packet_record(
+    session: Session, record: PacketRecord, capture_session_id: int | None = None
+) -> None:
     if record.transport == "arp":
-        get_or_create_device(session, ip=record.src_ip, mac=record.src_mac)
+        get_or_create_device(session, ip=record.src_ip, mac=record.src_mac, capture_session_id=capture_session_id)
         return
 
     if record.transport in ("cdp", "lldp"):
@@ -237,7 +253,7 @@ def ingest_packet_record(session: Session, record: PacketRecord) -> None:
         # themselves -- no IP layer involved, so the device is keyed by MAC
         # alone (it'll be merged with an IP-keyed row later if the same MAC
         # is ever seen sending ordinary IP traffic; see get_or_create_device).
-        device = get_or_create_device(session, ip=None, mac=record.src_mac)
+        device = get_or_create_device(session, ip=None, mac=record.src_mac, capture_session_id=capture_session_id)
         if device is not None:
             if record.l2_hostname:
                 device.hostname = record.l2_hostname
@@ -253,8 +269,10 @@ def ingest_packet_record(session: Session, record: PacketRecord) -> None:
     # A frame's destination MAC is merely what the sender believes/resolved
     # via its own ARP cache -- not an authoritative statement from that
     # device about its own hardware address -- so it's never used here.
-    src_device = get_or_create_device(session, ip=record.src_ip, mac=record.src_mac)
-    dst_device = get_or_create_device(session, ip=record.dst_ip, mac=None)
+    src_device = get_or_create_device(
+        session, ip=record.src_ip, mac=record.src_mac, capture_session_id=capture_session_id
+    )
+    dst_device = get_or_create_device(session, ip=record.dst_ip, mac=None, capture_session_id=capture_session_id)
     if src_device is None or dst_device is None:
         return
     session.flush()
@@ -266,8 +284,26 @@ def ingest_packet_record(session: Session, record: PacketRecord) -> None:
 
         banner = _looks_like_text_banner(record.payload)
         proto_info = classify(server_port, payload=record.payload)
-        upsert_protocol(session, server_device, proto_info, server_port, record.transport, "server", banner)
-        upsert_flow(session, src_device, dst_device, server_device, record.transport, server_port, proto_info)
+        upsert_protocol(
+            session,
+            server_device,
+            proto_info,
+            server_port,
+            record.transport,
+            "server",
+            banner,
+            capture_session_id=capture_session_id,
+        )
+        upsert_flow(
+            session,
+            src_device,
+            dst_device,
+            server_device,
+            record.transport,
+            server_port,
+            proto_info,
+            capture_session_id=capture_session_id,
+        )
 
     if record.hostname_hints:
         apply_hostname_hints(session, record.hostname_hints)
@@ -287,3 +323,47 @@ def ingest_packet_record(session: Session, record: PacketRecord) -> None:
         guess = fingerprint_tcp_syn(tcp_sig)
         # ttl/window always describe the packet's sender, i.e. src_device
         apply_os_guess(src_device, guess)
+
+
+def purge_capture_session(session: Session, capture_session_id: int) -> None:
+    """Removes everything a capture session contributed to the shared
+    inventory when it's deleted: its own DeviceProtocol/Flow rows, and any
+    Device it first discovered that -- after removing those rows -- no
+    other session's protocols/flows still reference, so a device seen by
+    more than one capture survives deleting just one of them. A removed
+    device's vulnerability findings go with it.
+
+    A device/protocol/flow is attributed to whichever session *first*
+    observed it; a later session re-observing the exact same protocol/flow
+    only bumps its packet count rather than re-attributing it, so deleting
+    that first session also removes evidence a later session merely
+    corroborated. This is a deliberate simplification -- full multi-session
+    provenance would need a many-to-many audit trail this app doesn't keep.
+    """
+    session.query(DeviceProtocol).filter(DeviceProtocol.capture_session_id == capture_session_id).delete(
+        synchronize_session=False
+    )
+    session.query(Flow).filter(Flow.capture_session_id == capture_session_id).delete(synchronize_session=False)
+
+    candidate_ids = [
+        row[0] for row in session.query(Device.id).filter(Device.capture_session_id == capture_session_id).all()
+    ]
+    for device_id in candidate_ids:
+        remaining_protocols = session.query(DeviceProtocol).filter(DeviceProtocol.device_id == device_id).count()
+        remaining_flows = (
+            session.query(Flow)
+            .filter(
+                or_(
+                    Flow.device_a_id == device_id,
+                    Flow.device_b_id == device_id,
+                    Flow.server_device_id == device_id,
+                )
+            )
+            .count()
+        )
+        if remaining_protocols or remaining_flows:
+            continue
+        session.query(VulnerabilityFinding).filter(VulnerabilityFinding.device_id == device_id).delete(
+            synchronize_session=False
+        )
+        session.query(Device).filter(Device.id == device_id).delete(synchronize_session=False)

@@ -27,6 +27,7 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
+    zoom: 95%;
   }
 
   /* ---------- logo ---------- */
@@ -145,6 +146,8 @@
   .table-scroll { overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
   .table-scroll table { width: 100%; border-collapse: collapse; }
   .table-scroll thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  .table-scroll tbody tr:nth-child(even) td { background: rgba(255, 255, 255, 0.055); }
+  .table-scroll tbody tr:hover td { background: rgba(59, 169, 255, 0.08); }
   .protocol-list { font-size: 12px; color: var(--muted); }
   .clickable { cursor: pointer; }
   .device-detail { margin-top: 12px; }
@@ -302,7 +305,7 @@
         <h2>Dispositivos detectados</h2>
         <div class="row">
           <label style="display:inline-flex;align-items:center;gap:6px;margin:0;">
-            <input type="checkbox" id="ot-only-checkbox" style="width:auto" /> Solo sospechosos de OT
+            <input type="checkbox" id="ot-only-checkbox" style="width:auto" /> Solo dispositivos OT
           </label>
           <button class="action secondary" id="refresh-devices-btn">Actualizar</button>
         </div>
@@ -635,7 +638,7 @@ $('#refresh-sessions-btn').addEventListener('click', loadSessions);
 let currentDeviceId = null;
 let allDevices = [];
 
-function fitTableScroll(wrapperId, rowsToShow = 10) {
+function fitTableScroll(wrapperId, rowsToShow = 7) {
   const wrapper = document.getElementById(wrapperId);
   if (!wrapper) return;
   const table = wrapper.querySelector('table');
@@ -658,7 +661,7 @@ function renderDeviceStats() {
   const otCount = allDevices.filter(d => d.is_ot_suspected).length;
   $('#inventory-stats').innerHTML = `
     <div class="stat-tile"><div class="stat-num">${total}</div><div class="stat-label">Dispositivos detectados</div></div>
-    <div class="stat-tile"><div class="stat-num ot">${otCount}</div><div class="stat-label">Sospechosos de OT</div></div>
+    <div class="stat-tile"><div class="stat-num ot">${otCount}</div><div class="stat-label">Dispositivos OT</div></div>
   `;
 }
 

@@ -3,7 +3,7 @@ from scapy.layers.dns import DNS, DNSRR
 from scapy.layers.inet import IP, UDP
 from scapy.layers.l2 import Ether
 from scapy.layers.netbios import NBNSHeader, NBNSRegistrationRequest
-from scapy.layers.smb import BRWS_HostAnnouncement, BRWS_LocalMasterAnnouncement, NBTDatagram, SMB_Header, SMBTransaction_Request
+from scapy.layers.smb import NBTDatagram
 from scapy.utils import rdpcap, wrpcap
 
 from app.fingerprint.hostname_detect import (
@@ -11,7 +11,7 @@ from app.fingerprint.hostname_detect import (
     extract_dns_hostnames,
     extract_hostname_hints,
     extract_nbns_hostname,
-    extract_smb_browser_hostname,
+    extract_nbt_datagram_hostname,
 )
 
 
@@ -72,39 +72,27 @@ def test_extract_nbns_hostname_ignores_non_registration_packets():
     assert extract_nbns_hostname(query) is None
 
 
-def test_extract_smb_browser_hostname_from_host_announcement(tmp_path):
-    brws = BRWS_HostAnnouncement(ServerName=b"FILESERVER01", Comment=b"Engineering share")
-    txn = SMBTransaction_Request(Name="\\MAILSLOT\\BROWSE", Data=bytes(brws))
+def test_extract_nbt_datagram_hostname_from_source_name(tmp_path):
+    """Matches Wireshark's "NetBIOS Datagram Service" tree exactly: Source
+    IP, Source name (with its <suffix>), Destination name."""
     pkt = (
         Ether()
-        / IP(src="10.10.1.50", dst="10.10.1.255")
+        / IP(src="192.168.0.105", dst="192.168.0.255")
         / UDP(sport=138, dport=138)
-        / NBTDatagram()
-        / SMB_Header(Command=0x25)
-        / txn
+        / NBTDatagram(
+            SourceName="DESKTOP-JGVDMBA",
+            SUFFIX1="file server service",
+            DestinationName="WORKGROUP",
+            SUFFIX2="workstation",
+        )
     )
-    pkt = _roundtrip(pkt, tmp_path, "browser.pcap")
-    assert extract_smb_browser_hostname(pkt) == ("10.10.1.50", "FILESERVER01")
+    pkt = _roundtrip(pkt, tmp_path, "nbt_datagram.pcap")
+    assert extract_nbt_datagram_hostname(pkt) == ("192.168.0.105", "DESKTOP-JGVDMBA")
 
 
-def test_extract_smb_browser_hostname_from_local_master_announcement(tmp_path):
-    brws = BRWS_LocalMasterAnnouncement(ServerName=b"DC01", Comment=b"Domain Controller")
-    txn = SMBTransaction_Request(Name="\\MAILSLOT\\BROWSE", Data=bytes(brws))
-    pkt = (
-        Ether()
-        / IP(src="10.10.1.51", dst="10.10.1.255")
-        / UDP(sport=138, dport=138)
-        / NBTDatagram()
-        / SMB_Header(Command=0x25)
-        / txn
-    )
-    pkt = _roundtrip(pkt, tmp_path, "browser2.pcap")
-    assert extract_smb_browser_hostname(pkt) == ("10.10.1.51", "DC01")
-
-
-def test_extract_smb_browser_hostname_ignores_unrelated_udp():
+def test_extract_nbt_datagram_hostname_ignores_unrelated_udp():
     pkt = Ether() / IP(src="10.10.1.5", dst="10.10.1.1") / UDP(sport=53000, dport=53) / DNS(qr=0)
-    assert extract_smb_browser_hostname(pkt) is None
+    assert extract_nbt_datagram_hostname(pkt) is None
 
 
 def test_extract_hostname_hints_combines_both_sources(tmp_path):

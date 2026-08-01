@@ -32,7 +32,7 @@ class LiveCaptureManager:
                 capture_session = db.get(CaptureSession, capture_session_id)
                 if capture_session is None or capture_session.status != "running":
                     return
-                ingest_packet_record(db, record)
+                ingest_packet_record(db, record, capture_session_id=capture_session_id)
                 capture_session.packet_count += 1
 
         try:

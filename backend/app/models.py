@@ -54,6 +54,13 @@ class Device(Base):
 
     is_ot_suspected: Mapped[bool] = mapped_column(default=False)
 
+    # The capture session that *first* discovered this device -- used to
+    # remove it when that session is deleted, provided no other session's
+    # protocols/flows still reference it (see inventory_service.purge_capture_session).
+    capture_session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("capture_sessions.id"), nullable=True, index=True
+    )
+
     first_seen: Mapped[datetime.datetime] = mapped_column(default=utcnow)
     last_seen: Mapped[datetime.datetime] = mapped_column(default=utcnow)
 
@@ -96,6 +103,10 @@ class DeviceProtocol(Base):
     category: Mapped[str] = mapped_column(String(8), default="IT")  # IT|OT
     banner: Mapped[str | None] = mapped_column(String(512), nullable=True)
     packet_count: Mapped[int] = mapped_column(Integer, default=0)
+    # The capture session that first observed this protocol -- see Device.capture_session_id.
+    capture_session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("capture_sessions.id"), nullable=True, index=True
+    )
     first_seen: Mapped[datetime.datetime] = mapped_column(default=utcnow)
     last_seen: Mapped[datetime.datetime] = mapped_column(default=utcnow)
 
@@ -125,6 +136,10 @@ class Flow(Base):
     protocol: Mapped[str] = mapped_column(String(64))
     category: Mapped[str] = mapped_column(String(8), default="IT")  # IT|OT
     packet_count: Mapped[int] = mapped_column(Integer, default=0)
+    # The capture session that first observed this flow -- see Device.capture_session_id.
+    capture_session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("capture_sessions.id"), nullable=True, index=True
+    )
     first_seen: Mapped[datetime.datetime] = mapped_column(default=utcnow)
     last_seen: Mapped[datetime.datetime] = mapped_column(default=utcnow)
 

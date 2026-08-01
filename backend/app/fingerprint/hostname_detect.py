@@ -18,10 +18,12 @@ Four independent sources, all cheap to check on every packet:
   DHCP option 12 -- a Windows/Samba host broadcasting its own short
   ("partial", 15-byte-max) NetBIOS computer name while claiming/refreshing
   it on the network.
-- SMB "Computer Browser" service Host/Local Master Announcements (legacy
-  NetBIOS Datagram Service, UDP/138): periodic broadcasts every
-  Windows/Samba file-sharing host sends, carrying its own NetBIOS computer
-  name in the clear alongside OS version info.
+- NetBIOS Datagram Service header (UDP/138): every single NBT datagram --
+  Computer Browser announcements, NETLOGON broadcasts, anything sent over
+  this service -- carries the sender's own NetBIOS name in its "Source
+  name" field (what Wireshark's "NetBIOS Datagram Service" tree shows,
+  e.g. "DESKTOP-JGVDMBA<20> (Server service)"), regardless of what's in
+  the payload above it.
 """
 
 from scapy.layers.inet import IP
@@ -43,12 +45,11 @@ except ImportError:  # pragma: no cover - scapy always ships this layer
     NBNSRegistrationRequest = None
 
 try:
-    from scapy.layers.smb import BRWS_HostAnnouncement, BRWS_LocalMasterAnnouncement, SMBTransaction_Request
+    from scapy.layers.smb import NBTDatagram
 except ImportError:  # pragma: no cover - scapy always ships this layer
-    BRWS_HostAnnouncement = BRWS_LocalMasterAnnouncement = SMBTransaction_Request = None
+    NBTDatagram = None
 
 _A_RECORD = 1
-_BROWSER_MAILSLOTS = (b"\\MAILSLOT\\BROWSE", b"\\MAILSLOT\\LANMAN")
 
 
 def _decode(value) -> str:
@@ -107,26 +108,14 @@ def extract_nbns_hostname(pkt: Packet) -> tuple[str, str] | None:
     return None
 
 
-def extract_smb_browser_hostname(pkt: Packet) -> tuple[str, str] | None:
-    """Returns (ip, hostname) from an SMB Computer Browser service Host or
-    Local Master Announcement (NetBIOS Datagram Service, UDP/138).
-
-    BRWS_HostAnnouncement/BRWS_LocalMasterAnnouncement are dissected out as
-    the *value* of SMBTransaction_Request.Data (based on the mailslot name),
-    not as a normal encapsulated sub-layer -- so they must be reached via
-    that field directly rather than pkt.haslayer()/pkt[...]."""
-    if SMBTransaction_Request is None or not pkt.haslayer(SMBTransaction_Request) or not pkt.haslayer(IP):
+def extract_nbt_datagram_hostname(pkt: Packet) -> tuple[str, str] | None:
+    """Returns (ip, hostname) from the "Source name" of a NetBIOS Datagram
+    Service header (UDP/138) -- present on every such packet, not just
+    Computer Browser announcements."""
+    if NBTDatagram is None or not pkt.haslayer(NBTDatagram) or not pkt.haslayer(IP):
         return None
 
-    txn = pkt[SMBTransaction_Request]
-    if txn.Name not in _BROWSER_MAILSLOTS:
-        return None
-
-    data = txn.Data
-    if not isinstance(data, (BRWS_HostAnnouncement, BRWS_LocalMasterAnnouncement)):
-        return None
-
-    name = _decode(data.ServerName).rstrip("\x00").strip()
+    name = _decode(pkt[NBTDatagram].SourceName).strip()
     src_ip = pkt[IP].src
     if name and src_ip and src_ip != "0.0.0.0":
         return (src_ip, name)
@@ -136,7 +125,7 @@ def extract_smb_browser_hostname(pkt: Packet) -> tuple[str, str] | None:
 def extract_hostname_hints(pkt: Packet) -> list[tuple[str, str]]:
     """All (ip, hostname) hints found in this single packet."""
     hints = extract_dns_hostnames(pkt)
-    for extractor in (extract_dhcp_hostname, extract_nbns_hostname, extract_smb_browser_hostname):
+    for extractor in (extract_dhcp_hostname, extract_nbns_hostname, extract_nbt_datagram_hostname):
         hint = extractor(pkt)
         if hint:
             hints.append(hint)

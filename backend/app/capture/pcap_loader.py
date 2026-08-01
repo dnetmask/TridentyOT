@@ -21,7 +21,7 @@ def process_pcap_file(db_session: Session, filepath: str, capture_session: Captu
             for pkt in reader:
                 record = process_packet(pkt)
                 if record is not None:
-                    ingest_packet_record(db_session, record)
+                    ingest_packet_record(db_session, record, capture_session_id=capture_session.id)
                 count += 1
         capture_session.packet_count = count
         capture_session.status = "completed"
