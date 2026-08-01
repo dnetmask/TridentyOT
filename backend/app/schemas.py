@@ -101,6 +101,7 @@ class CaptureSessionOut(BaseModel):
     bpf_filter: str
     status: str
     packet_count: int
+    dropped_count: int
     error_message: str | None
     started_at: datetime.datetime
     ended_at: datetime.datetime | None

@@ -27,6 +27,11 @@ class CaptureSession(Base):
     bpf_filter: Mapped[str] = mapped_column(String(255), default="")
     status: Mapped[str] = mapped_column(String(16), default="running")  # running|stopped|completed|error
     packet_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Live captures only: packets pulled off the wire but discarded because
+    # the ingest queue was full (the DB-write side couldn't keep up) -- see
+    # app/capture/live_capture.py. Always 0 for a pcap upload, which has no
+    # producer/consumer split to drop anything from.
+    dropped_count: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
     ended_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)

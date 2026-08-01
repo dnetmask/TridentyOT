@@ -1,7 +1,7 @@
 import logging
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import DATABASE_URL
@@ -10,6 +10,26 @@ logger = logging.getLogger(__name__)
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
+
+if DATABASE_URL.startswith("sqlite"):
+    # Default SQLite (rollback-journal + synchronous=FULL) fsyncs on every
+    # commit and blocks all readers while a write transaction is open --
+    # fine for occasional writes, but live capture now batches many
+    # ingest_packet_record() calls per commit (see live_capture.py) and the
+    # API still needs to serve Inventory/Flows reads concurrently while
+    # that's happening. WAL lets readers proceed against the last
+    # checkpointed state during a writer's transaction; NORMAL still
+    # fsyncs at WAL checkpoints, just not on every single commit -- an
+    # acceptable durability trade for a monitoring tool (a hard crash could
+    # lose the last few ms of buffered writes, never a corrupt DB).
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
+
+
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 

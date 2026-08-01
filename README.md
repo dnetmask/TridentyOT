@@ -168,6 +168,17 @@ curl -X POST http://localhost:8000/api/capture/live/start \
   -d '{"interface": "eth0", "bpf_filter": "ip or arp"}'
 ```
 
+#### Cómo procesa la captura en vivo
+
+La lectura del cable y la escritura en base de datos corren en **hilos separados, conectados por
+una cola**: el hilo de Scapy solo diseca cada paquete (CPU pura) y lo encola; un hilo consumidor
+aparte drena la cola por lotes (hasta 500 paquetes o 200ms, lo que ocurra primero) y hace **una
+sola transacción de base de datos por lote**, en vez de una por paquete. Si el consumidor no da
+abasto y la cola (acotada a 20.000 elementos) se llena, los paquetes de más se descartan mientras
+se cuentan -- nunca en silencio -- en `dropped_count` de la sesión de captura (visible por API en
+`GET /api/capture/sessions/{id}`). Un `dropped_count` que crece de forma sostenida es la señal de
+que el segmento capturado tiene más tráfico del que este proceso puede ingerir en tiempo real.
+
 ### Analizar un archivo .pcap existente
 
 Desde el dashboard (pestaña **Captura**) puedes arrastrar y soltar el archivo directamente sobre
@@ -243,3 +254,8 @@ un doble (mock) del cliente HTTP para no depender de la disponibilidad de intern
 - Un dispositivo que solo aparece como destino de un intento de conexión sin respuesta (p. ej. un
   SYN a un puerto cerrado/filtrado) se inventaría igual que uno con tráfico bidireccional
   confirmado -- hoy no hay una distinción de "confianza" entre ambos casos (ver hoja de ruta).
+- La captura en vivo procesa en un solo hilo consumidor (ver "Cómo procesa la captura en vivo"
+  arriba); en un segmento con volumen sostenido muy por encima de lo que ese hilo puede ingerir,
+  `dropped_count` empieza a crecer. La base de eso es el propio parsing en Python/Scapy, así que
+  paralelizar a varios procesos consumidores (particionados por IP) es la vía de escala, no un
+  cambio de librería de captura.
