@@ -11,6 +11,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.capture.packet_processor import PacketRecord
+from app.fingerprint.ip_scope import is_real_unicast_ip
 from app.fingerprint.os_fingerprint import (
     OsGuess,
     TcpSignature,
@@ -60,6 +61,8 @@ def get_or_create_device(
 ) -> Device | None:
     if mac is not None and not _is_real_unicast_mac(mac):
         mac = None
+    if ip is not None and not is_real_unicast_ip(ip):
+        ip = None
     if not ip and not mac:
         return None
 
@@ -108,11 +111,27 @@ def apply_hostname_hints(session: Session, hints: list[tuple[str, str]]) -> None
     a DNS/mDNS/DHCP hint alone, so e.g. a client resolving some unrelated
     public hostname doesn't pollute the inventory with a phantom "device"
     for that public IP.
+
+    A hostname string already claimed by a *different* device is never a
+    real per-host identity -- it's a shared/group name (a NetBIOS
+    workgroup/domain announced with the group bit unset, e.g.) that some
+    upstream extractor let through. Once a second IP tries to claim it,
+    that's proof it's shared: both are cleared rather than showing a name
+    that's misleading either way.
     """
     for ip, hostname in hints:
+        if not hostname:
+            continue
         device = session.query(Device).filter(Device.ip == ip).one_or_none()
-        if device is not None and hostname:
-            device.hostname = hostname
+        if device is None or hostname == device.hostname:
+            continue
+
+        other = session.query(Device).filter(Device.hostname == hostname, Device.ip != ip).one_or_none()
+        if other is not None:
+            other.hostname = None
+            continue
+
+        device.hostname = hostname
 
 
 def upsert_protocol(
@@ -269,15 +288,19 @@ def ingest_packet_record(
     # A frame's destination MAC is merely what the sender believes/resolved
     # via its own ARP cache -- not an authoritative statement from that
     # device about its own hardware address -- so it's never used here.
+    # A destination that isn't a real host -- a multicast group (mDNS,
+    # SSDP), the limited broadcast address, etc. -- never becomes a
+    # dst_device (see get_or_create_device/is_real_unicast_ip). That's not a
+    # reason to throw away everything this packet says about its *source*:
+    # only the two-device-dependent bookkeeping below (protocol-as-server,
+    # flow) actually needs a real device on both ends.
     src_device = get_or_create_device(
         session, ip=record.src_ip, mac=record.src_mac, capture_session_id=capture_session_id
     )
     dst_device = get_or_create_device(session, ip=record.dst_ip, mac=None, capture_session_id=capture_session_id)
-    if src_device is None or dst_device is None:
-        return
     session.flush()
 
-    if record.transport in ("tcp", "udp"):
+    if src_device is not None and dst_device is not None and record.transport in ("tcp", "udp"):
         server_side = _pick_server_side(record)
         server_device = src_device if server_side == "src" else dst_device
         server_port = record.src_port if server_side == "src" else record.dst_port
@@ -308,7 +331,12 @@ def ingest_packet_record(
     if record.hostname_hints:
         apply_hostname_hints(session, record.hostname_hints)
 
-    if record.transport == "tcp" and (record.is_syn or record.is_syn_ack) and record.ttl is not None:
+    if (
+        src_device is not None
+        and record.transport == "tcp"
+        and (record.is_syn or record.is_syn_ack)
+        and record.ttl is not None
+    ):
         opts = parse_tcp_options(record.tcp_options)
         tcp_sig = TcpSignature(
             ttl=record.ttl,

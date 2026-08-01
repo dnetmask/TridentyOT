@@ -97,13 +97,61 @@ def test_destination_mac_is_never_learned_as_device_identity(db_session):
 def test_broadcast_and_multicast_macs_are_never_recorded(db_session):
     from scapy.layers.inet import UDP
 
-    pkt = Ether(src="ff:ff:ff:ff:ff:ff") / IP(src="255.255.255.255", dst="10.0.0.1") / UDP(sport=67, dport=68)
+    pkt = Ether(src="ff:ff:ff:ff:ff:ff") / IP(src="10.0.0.60", dst="10.0.0.1") / UDP(sport=67, dport=68)
     ingest_packet_record(db_session, process_packet(pkt))
     db_session.commit()
 
-    device = db_session.query(Device).filter(Device.ip == "255.255.255.255").one()
+    device = db_session.query(Device).filter(Device.ip == "10.0.0.60").one()
     assert device.mac is None
     assert device.vendor is None
+
+
+def test_broadcast_and_multicast_ips_never_become_devices(db_session):
+    """255.255.255.255 (limited broadcast), an mDNS/SSDP-style multicast
+    group, and the DHCP pre-lease 0.0.0.0 are never a specific device's own
+    address -- inventoried them and they'd just be junk rows, never a real
+    asset (see is_real_unicast_ip)."""
+    for src_ip in ("255.255.255.255", "224.0.0.251", "0.0.0.0"):
+        pkt = Ether() / IP(src=src_ip, dst="10.0.0.1") / UDP(sport=5353, dport=5353)
+        ingest_packet_record(db_session, process_packet(pkt))
+    db_session.commit()
+
+    for src_ip in ("255.255.255.255", "224.0.0.251", "0.0.0.0"):
+        assert db_session.query(Device).filter(Device.ip == src_ip).one_or_none() is None
+
+    # the real destination is unaffected
+    assert db_session.query(Device).filter(Device.ip == "10.0.0.1").one_or_none() is not None
+
+
+def test_apply_hostname_hints_clears_a_name_shared_by_two_ips(db_session):
+    """A NetBIOS group/domain name (e.g. "WORKGROUP" registered with the
+    group bit unset by some stacks) slips past extract_nbns_hostname's own
+    checks: this is the backstop. Once a *second* IP claims a name the
+    first one already has, that proves it's shared, not a real per-host
+    identity -- so both get cleared instead of one keeping a misleading
+    name that arrived first by chance of packet ordering."""
+    from app.inventory.inventory_service import apply_hostname_hints
+
+    first = Ether() / IP(src="10.0.2.10", dst="10.0.2.1", ttl=64) / TCP(sport=445, dport=51000, flags="SA", window=1024)
+    second = Ether() / IP(src="10.0.2.11", dst="10.0.2.1", ttl=64) / TCP(sport=445, dport=51001, flags="SA", window=1024)
+    ingest_packet_record(db_session, process_packet(first))
+    ingest_packet_record(db_session, process_packet(second))
+    db_session.commit()
+
+    apply_hostname_hints(db_session, [("10.0.2.10", "WORKGROUP")])
+    db_session.commit()
+    assert db_session.query(Device).filter(Device.ip == "10.0.2.10").one().hostname == "WORKGROUP"
+
+    apply_hostname_hints(db_session, [("10.0.2.11", "WORKGROUP")])
+    db_session.commit()
+
+    assert db_session.query(Device).filter(Device.ip == "10.0.2.10").one().hostname is None
+    assert db_session.query(Device).filter(Device.ip == "10.0.2.11").one().hostname is None
+
+    # a real, unique-per-host name still applies normally afterwards
+    apply_hostname_hints(db_session, [("10.0.2.11", "KR63203-HMI01")])
+    db_session.commit()
+    assert db_session.query(Device).filter(Device.ip == "10.0.2.11").one().hostname == "KR63203-HMI01"
 
 
 def test_hostname_hint_enriches_existing_device_but_never_creates_one(db_session):

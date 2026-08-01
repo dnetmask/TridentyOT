@@ -88,3 +88,29 @@ def test_health_endpoint(client):
 def test_list_interfaces_endpoint_does_not_crash(client):
     resp = client.get("/api/capture/interfaces")
     assert resp.status_code in (200, 500)
+
+
+def test_public_ip_device_excluded_from_inventory_but_kept_in_flows_and_findings(client, tmp_path):
+    """A device out on the public internet was never an asset of *this*
+    network -- it shouldn't clutter Inventory -- but the LAN device that
+    reached it, and that conversation/finding, are still real and must
+    keep showing up in Flows and Vulnerabilities."""
+    syn = Ether() / IP(src="10.0.3.5", dst="8.8.8.8", ttl=64) / TCP(sport=41000, dport=23, flags="S", window=1024)
+    pcap_path = tmp_path / "public.pcap"
+    wrpcap(str(pcap_path), [syn])
+    with open(pcap_path, "rb") as f:
+        client.post("/api/capture/pcap", files={"file": ("public.pcap", f, "application/vnd.tcpdump.pcap")})
+
+    devices = client.get("/api/inventory/devices").json()
+    assert {d["ip"] for d in devices} == {"10.0.3.5"}
+
+    devices_incl_public = client.get("/api/inventory/devices?include_public=true").json()
+    assert {d["ip"] for d in devices_incl_public} == {"10.0.3.5", "8.8.8.8"}
+
+    flows = client.get("/api/inventory/flows").json()
+    assert len(flows) == 1
+    assert {flows[0]["device_a_ip"], flows[0]["device_b_ip"]} == {"10.0.3.5", "8.8.8.8"}
+
+    scan_findings = client.post("/api/vuln/scan", json={"use_nvd": False}).json()
+    public_device_id = next(d["id"] for d in devices_incl_public if d["ip"] == "8.8.8.8")
+    assert any(f["device_id"] == public_device_id and "telnet" in f["title"].lower() for f in scan_findings)

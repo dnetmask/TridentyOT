@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from scapy.layers.inet import ICMP, IP, TCP, UDP
 from scapy.layers.l2 import ARP, Ether
-from scapy.packet import Packet, Raw
+from scapy.packet import Packet
 
 from app.fingerprint.hostname_detect import extract_hostname_hints
 
@@ -121,20 +121,33 @@ def process_packet(pkt: Packet) -> PacketRecord | None:
             record.tcp_flags = flags
             record.is_syn = "S" in flags and "A" not in flags
             record.is_syn_ack = "S" in flags and "A" in flags
-            if pkt.haslayer(Raw):
-                record.payload = bytes(pkt[Raw].load)[:MAX_PAYLOAD_BYTES]
+            # bytes(tcp.payload) rather than pkt[Raw].load: some well-known
+            # ports (e.g. 139, once scapy.layers.netbios/smb are imported
+            # for hostname_detect) get their own scapy sub-dissector bound
+            # onto TCP, splitting what's really one contiguous payload into
+            # typed sub-layers (NBTSession/_SMBGeneric/Raw). pkt[Raw].load
+            # would then only be whatever tail scapy couldn't parse into
+            # those -- bytes(tcp.payload) always reassembles the full,
+            # original wire bytes regardless of how deep that dissection went.
+            record.payload = bytes(tcp.payload)[:MAX_PAYLOAD_BYTES]
         elif pkt.haslayer(UDP):
             udp = pkt[UDP]
             record.transport = "udp"
             record.src_port = int(udp.sport)
             record.dst_port = int(udp.dport)
-            if pkt.haslayer(Raw):
-                record.payload = bytes(pkt[Raw].load)[:MAX_PAYLOAD_BYTES]
-            record.hostname_hints = extract_hostname_hints(pkt)
+            record.payload = bytes(udp.payload)[:MAX_PAYLOAD_BYTES]
         elif pkt.haslayer(ICMP):
             record.transport = "icmp"
         else:
             return None
+
+        # Hostname extraction needs the *full* payload (e.g. a NetBIOS
+        # Session Request on TCP/139), so it runs against the original pkt
+        # here rather than the possibly-truncated record.payload above --
+        # and for both transports, not just UDP, since SMB/NetBIOS session
+        # hostnames ride over TCP.
+        if record.transport in ("tcp", "udp"):
+            record.hostname_hints = extract_hostname_hints(pkt)
 
         return record
 

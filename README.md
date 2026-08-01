@@ -10,12 +10,19 @@ ya capturado, y a partir de eso construye:
 
 1. **Inventario de dispositivos**: IP, MAC, primer/último visto, más **nombre y fabricante**:
    - Nombre auto-detectado desde tráfico DHCP (opción 12, Host Name), respuestas DNS/mDNS tipo A,
-     auto-anuncios NetBIOS/SMB (NBNS Name Registration y el servicio "Computer Browser" de
-     Windows/Samba) y, para switches/routers, CDP y LLDP; si no se detecta queda en blanco.
+     auto-anuncios NetBIOS/SMB (NBNS Name Registration, el servicio "Computer Browser" de
+     Windows/Samba, y el *Calling Name* del handshake NetBIOS Session Service en TCP/139) y, para
+     switches/routers, CDP y LLDP; si no se detecta queda en blanco. Un nombre de grupo/dominio
+     NetBIOS (p. ej. "WORKGROUP") nunca se muestra como el nombre propio de un equipo.
    - Fabricante auto-detectado por MAC (OUI) contra la base real de IEEE/Wireshark (~40k prefijos).
    - Switches/routers identificados solo por CDP/LLDP (sin tráfico IP propio en el segmento
      capturado) se inventarían igual, quedan marcados como **Network appliance** y se fusionan
      automáticamente con su registro por IP si luego se les ve tráfico IP con la misma MAC.
+   - Solo se listan activos de **la propia red local** (IP privada/link-local, o sin IP para un
+     equipo identificado solo por MAC vía CDP/LLDP): un host con IP pública nunca aparece como
+     activo del inventario, aunque las conversaciones hacia él y sus hallazgos de vulnerabilidad
+     siguen visibles en **Flujos** y **Vulnerabilidades** (`GET /api/inventory/devices` acepta
+     `?include_public=true` para listarlo también ahí).
    - Todo es **editable manualmente** en cualquier momento (se detecte o no), sin perder el
      valor auto-detectado como referencia.
 2. **Fingerprint pasivo de sistema operativo**: heurística basada en TTL inicial, tamaño de
@@ -226,7 +233,13 @@ un doble (mock) del cliente HTTP para no depender de la disponibilidad de intern
 - La consulta a NVD depende de que el banner del servicio revele explícitamente producto y
   versión; sin ese dato, la vulnerabilidad "por versión" no se puede determinar de forma pasiva.
 - El nombre de equipo solo se auto-detecta si el dispositivo emite alguno de los tráficos que se
-  escuchan pasivamente (DHCP opción hostname, DNS/mDNS, NBNS/SMB, o CDP/LLDP para switches/routers)
-  con su propio nombre durante la captura; si no, queda en blanco hasta que se edite manualmente.
+  escuchan pasivamente (DHCP opción hostname, DNS/mDNS, NBNS/SMB/NetBIOS Session Service, o
+  CDP/LLDP para switches/routers) con su propio nombre durante la captura; si no, queda en blanco
+  hasta que se edite manualmente. Un equipo que solo hace SMB directo por TCP/445 (sin el
+  envoltorio NetBIOS de TCP/139 ni ningún broadcast propio) tampoco tiene hoy una fuente pasiva de
+  nombre disponible.
   La base de fabricantes por MAC solo cubre asignaciones OUI de bloque /24 (24 bits); los bloques
   más pequeños (MA-M/MA-S) no se resuelven y devuelven fabricante en blanco.
+- Un dispositivo que solo aparece como destino de un intento de conexión sin respuesta (p. ej. un
+  SYN a un puerto cerrado/filtrado) se inventaría igual que uno con tráfico bidireccional
+  confirmado -- hoy no hay una distinción de "confianza" entre ambos casos (ver hoja de ruta).
