@@ -217,9 +217,33 @@ def _pick_server_side(record: PacketRecord) -> str:
     return "dst"
 
 
+_CDP_LLDP_GUESS = OsGuess(
+    os_family="Network device",
+    label="Network appliance (router/switch/firewall)",
+    confidence=1.0,
+    signature_name="cdp_lldp_announcement",
+    initial_ttl_guess=255,
+    hop_estimate=0,
+)
+
+
 def ingest_packet_record(session: Session, record: PacketRecord) -> None:
     if record.transport == "arp":
         get_or_create_device(session, ip=record.src_ip, mac=record.src_mac)
+        return
+
+    if record.transport in ("cdp", "lldp"):
+        # CDP/LLDP are self-announcements switches/routers send about
+        # themselves -- no IP layer involved, so the device is keyed by MAC
+        # alone (it'll be merged with an IP-keyed row later if the same MAC
+        # is ever seen sending ordinary IP traffic; see get_or_create_device).
+        device = get_or_create_device(session, ip=None, mac=record.src_mac)
+        if device is not None:
+            if record.l2_hostname:
+                device.hostname = record.l2_hostname
+            # An explicit CDP/LLDP announcement is a stronger signal than the
+            # passive TCP-SYN heuristic, so it always outranks it.
+            apply_os_guess(device, _CDP_LLDP_GUESS)
         return
 
     if record.transport not in ("tcp", "udp", "icmp"):

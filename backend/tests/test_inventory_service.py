@@ -1,5 +1,14 @@
-from scapy.layers.inet import IP, TCP
-from scapy.layers.l2 import Ether
+from scapy.contrib.cdp import CDPMsgDeviceID, CDPv2_HDR
+from scapy.contrib.lldp import (
+    LLDPDUChassisID,
+    LLDPDUEndOfLLDPDU,
+    LLDPDUPortID,
+    LLDPDUSystemName,
+    LLDPDUTimeToLive,
+)
+from scapy.layers.inet import IP, TCP, UDP
+from scapy.layers.l2 import LLC, SNAP, Ether
+from scapy.layers.netbios import NBNSHeader, NBNSRegistrationRequest
 
 from app.capture.packet_processor import process_packet
 from app.inventory.inventory_service import ingest_packet_record
@@ -149,3 +158,80 @@ def test_flow_created_and_aggregated_for_tcp_conversation(db_session):
     assert flow.server_device_id == server.id
     assert {flow.device_a_id, flow.device_b_id} == {client.id, server.id}
     assert flow.device_a_id < flow.device_b_id  # normalized ordering
+
+
+def test_nbns_registration_enriches_existing_device_hostname(db_session):
+    tcp_pkt = Ether() / IP(src="10.0.0.40", dst="10.0.0.5", ttl=64) / TCP(sport=502, dport=51000, flags="SA", window=1024)
+    ingest_packet_record(db_session, process_packet(tcp_pkt))
+
+    nbns_pkt = (
+        Ether()
+        / IP(src="10.0.0.40", dst="10.0.0.255")
+        / UDP(sport=137, dport=137)
+        / NBNSHeader(OPCODE=0x5, NM_FLAGS=0x11)
+        / NBNSRegistrationRequest(QUESTION_NAME="ENGWORKSTATION", SUFFIX="workstation", NB_ADDRESS="10.0.0.40")
+    )
+    ingest_packet_record(db_session, process_packet(nbns_pkt))
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "10.0.0.40").one()
+    assert device.hostname == "ENGWORKSTATION"
+
+
+def test_cdp_announcement_creates_network_device_by_mac(db_session):
+    pkt = (
+        Ether(src="aa:bb:cc:dd:ee:ff", dst="01:00:0c:cc:cc:cc")
+        / LLC()
+        / SNAP(OUI=0xC, code=0x2000)
+        / CDPv2_HDR(msg=[CDPMsgDeviceID(val=b"switch1.corp.local")])
+    )
+    ingest_packet_record(db_session, process_packet(Ether(bytes(pkt))))
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.mac == "aa:bb:cc:dd:ee:ff").one()
+    assert device.ip is None
+    assert device.hostname == "switch1.corp.local"
+    assert device.os_guess == "Network appliance (router/switch/firewall)"
+    assert device.os_confidence == 1.0
+
+
+def test_lldp_announcement_creates_network_device_by_mac(db_session):
+    pkt = (
+        Ether(src="10:22:33:44:55:66", dst="01:80:c2:00:00:0e", type=0x88CC)
+        / LLDPDUChassisID(subtype=4, id=b"\x10\x22\x33\x44\x55\x66")
+        / LLDPDUPortID(subtype=1, id=b"Gi0/1")
+        / LLDPDUTimeToLive(ttl=120)
+        / LLDPDUSystemName(system_name=b"switch2-access")
+        / LLDPDUEndOfLLDPDU()
+    )
+    ingest_packet_record(db_session, process_packet(Ether(bytes(pkt))))
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.mac == "10:22:33:44:55:66").one()
+    assert device.ip is None
+    assert device.hostname == "switch2-access"
+    assert device.os_guess == "Network appliance (router/switch/firewall)"
+
+
+def test_cdp_discovered_switch_merges_with_later_ip_traffic(db_session):
+    """A switch first seen only via CDP (no IP) should be enriched, not
+    duplicated, once the same MAC is later seen sending real IP traffic."""
+    cdp_pkt = (
+        Ether(src="aa:bb:cc:dd:ee:ff", dst="01:00:0c:cc:cc:cc")
+        / LLC()
+        / SNAP(OUI=0xC, code=0x2000)
+        / CDPv2_HDR(msg=[CDPMsgDeviceID(val=b"switch1.corp.local")])
+    )
+    ingest_packet_record(db_session, process_packet(Ether(bytes(cdp_pkt))))
+    db_session.commit()
+
+    ip_pkt = Ether(src="aa:bb:cc:dd:ee:ff") / IP(src="10.0.0.9", dst="10.0.0.5", ttl=255) / TCP(
+        sport=22, dport=51000, flags="SA", window=4096
+    )
+    ingest_packet_record(db_session, process_packet(ip_pkt))
+    db_session.commit()
+
+    devices = db_session.query(Device).filter(Device.mac == "aa:bb:cc:dd:ee:ff").all()
+    assert len(devices) == 1
+    assert devices[0].ip == "10.0.0.9"
+    assert devices[0].hostname == "switch1.corp.local"
