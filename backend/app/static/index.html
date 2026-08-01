@@ -149,6 +149,15 @@
   .table-scroll tbody tr:nth-child(even) td { background: rgba(255, 255, 255, 0.055); }
   .table-scroll tbody tr:hover td { background: rgba(59, 169, 255, 0.08); }
   .protocol-list { font-size: 12px; color: var(--muted); }
+  .columns-panel {
+    position: absolute; top: 100%; right: 0; margin-top: 6px; z-index: 5;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; display: flex; flex-direction: column; gap: 6px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.35); min-width: 160px;
+  }
+  .columns-panel-title { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 2px; }
+  .columns-panel label { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 0; }
+  .columns-panel input { width: auto; }
   .clickable { cursor: pointer; }
   .device-detail { margin-top: 12px; }
   .flex-between { display: flex; justify-content: space-between; align-items: center; }
@@ -303,17 +312,33 @@
     <div class="card">
       <div class="flex-between">
         <h2>Dispositivos detectados</h2>
-        <div class="row">
+        <div class="row" style="position:relative;">
           <label style="display:inline-flex;align-items:center;gap:6px;margin:0;">
             <input type="checkbox" id="ot-only-checkbox" style="width:auto" /> Solo dispositivos OT
           </label>
+          <button class="action secondary" id="columns-btn">Columnas</button>
           <button class="action secondary" id="refresh-devices-btn">Actualizar</button>
+          <div id="columns-panel" class="columns-panel hidden">
+            <div class="columns-panel-title">Columnas visibles</div>
+            <label><input type="checkbox" data-col-toggle="ip" checked /> IP</label>
+            <label><input type="checkbox" data-col-toggle="nombre" checked /> Nombre</label>
+            <label><input type="checkbox" data-col-toggle="fabricante" checked /> Fabricante</label>
+            <label><input type="checkbox" data-col-toggle="mac" checked /> MAC</label>
+            <label><input type="checkbox" data-col-toggle="so" checked /> SO estimado</label>
+            <label><input type="checkbox" data-col-toggle="confianza" checked /> Confianza</label>
+            <label><input type="checkbox" data-col-toggle="protocolos" checked /> Protocolos</label>
+            <label><input type="checkbox" data-col-toggle="visto" checked /> Últ. visto</label>
+          </div>
         </div>
       </div>
       <div class="stat-row" id="inventory-stats"></div>
       <div class="table-scroll" id="devices-scroll">
         <table>
-          <thead><tr><th>IP</th><th>Nombre</th><th>Fabricante</th><th>MAC</th><th>SO estimado</th><th>Confianza</th><th>Protocolos</th><th>Últ. visto</th></tr></thead>
+          <thead><tr>
+            <th data-col="ip">IP</th><th data-col="nombre">Nombre</th><th data-col="fabricante">Fabricante</th>
+            <th data-col="mac">MAC</th><th data-col="so">SO estimado</th><th data-col="confianza">Confianza</th>
+            <th data-col="protocolos">Protocolos</th><th data-col="visto">Últ. visto</th>
+          </tr></thead>
           <tbody id="devices-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
         </table>
       </div>
@@ -676,15 +701,16 @@ function renderDevicesTable() {
   }
   tbody.innerHTML = devices.map(d => `
     <tr class="clickable" onclick="showDeviceDetail(${d.id})">
-      <td>${d.ip || '—'} ${d.is_ot_suspected ? '<span class="pill ot">OT</span>' : ''}</td>
-      <td>${d.display_name || '<span class="muted">—</span>'}${d.custom_name ? '<span class="manual-tag">manual</span>' : ''}</td>
-      <td>${d.display_vendor || '<span class="muted">—</span>'}${d.custom_vendor ? '<span class="manual-tag">manual</span>' : ''}</td>
-      <td class="mono">${d.mac || '—'}</td>
-      <td>${d.os_guess || '—'}</td>
-      <td>${(d.os_confidence * 100).toFixed(0)}%</td>
-      <td class="protocol-list">${(d.protocol_names && d.protocol_names.length) ? d.protocol_names.join(', ') : '<span class="muted">—</span>'}</td>
-      <td>${fmtDate(d.last_seen)}</td>
+      <td data-col="ip">${d.ip || '—'} ${d.is_ot_suspected ? '<span class="pill ot">OT</span>' : ''}</td>
+      <td data-col="nombre">${d.display_name || '<span class="muted">—</span>'}${d.custom_name ? '<span class="manual-tag">manual</span>' : ''}</td>
+      <td data-col="fabricante">${d.display_vendor || '<span class="muted">—</span>'}${d.custom_vendor ? '<span class="manual-tag">manual</span>' : ''}</td>
+      <td data-col="mac" class="mono">${d.mac || '—'}</td>
+      <td data-col="so">${d.os_guess || '—'}</td>
+      <td data-col="confianza">${(d.os_confidence * 100).toFixed(0)}%</td>
+      <td data-col="protocolos" class="protocol-list">${(d.protocol_names && d.protocol_names.length) ? d.protocol_names.join(', ') : '<span class="muted">—</span>'}</td>
+      <td data-col="visto">${fmtDate(d.last_seen)}</td>
     </tr>`).join('');
+  applyColumnVisibility();
   fitTableScroll('devices-scroll');
 }
 
@@ -749,6 +775,55 @@ async function saveDeviceOverrides(id, reset = false) {
 
 $('#refresh-devices-btn').addEventListener('click', loadDevices);
 $('#ot-only-checkbox').addEventListener('change', renderDevicesTable);
+
+// ---------- Inventory column visibility (persisted per-browser) ----------
+const COLUMNS_STORAGE_KEY = 'tridentyot_inventory_columns';
+
+function loadColumnPrefs() {
+  try {
+    return JSON.parse(localStorage.getItem(COLUMNS_STORAGE_KEY)) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveColumnPrefs(prefs) {
+  localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(prefs));
+}
+
+function applyColumnVisibility() {
+  const prefs = loadColumnPrefs();
+  $$('#columns-panel input[data-col-toggle]').forEach(cb => {
+    const col = cb.dataset.colToggle;
+    const visible = prefs[col] !== false;
+    cb.checked = visible;
+    $$(`#devices-scroll [data-col="${col}"]`).forEach(cell => {
+      cell.style.display = visible ? '' : 'none';
+    });
+  });
+}
+
+$('#columns-btn').addEventListener('click', () => {
+  $('#columns-panel').classList.toggle('hidden');
+});
+
+document.addEventListener('click', (e) => {
+  const panel = $('#columns-panel');
+  if (!panel.classList.contains('hidden') && !panel.contains(e.target) && e.target !== $('#columns-btn')) {
+    panel.classList.add('hidden');
+  }
+});
+
+$$('#columns-panel input[data-col-toggle]').forEach(cb => {
+  cb.addEventListener('change', () => {
+    const prefs = loadColumnPrefs();
+    prefs[cb.dataset.colToggle] = cb.checked;
+    saveColumnPrefs(prefs);
+    applyColumnVisibility();
+  });
+});
+
+applyColumnVisibility();
 
 // ---------- Flows tab ----------
 let allFlows = [];
