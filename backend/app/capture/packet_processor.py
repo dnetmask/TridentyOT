@@ -11,6 +11,16 @@ from scapy.packet import Packet, Raw
 
 from app.fingerprint.hostname_detect import extract_hostname_hints
 
+try:
+    from scapy.contrib.cdp import CDPMsgDeviceID, CDPv2_HDR
+except ImportError:  # pragma: no cover - scapy always ships this contrib layer
+    CDPv2_HDR = CDPMsgDeviceID = None
+
+try:
+    from scapy.contrib.lldp import LLDPDUSystemName
+except ImportError:  # pragma: no cover - scapy always ships this contrib layer
+    LLDPDUSystemName = None
+
 MAX_PAYLOAD_BYTES = 256
 
 
@@ -21,7 +31,7 @@ class PacketRecord:
     dst_mac: str | None = None
     src_ip: str | None = None
     dst_ip: str | None = None
-    transport: str | None = None  # "tcp" | "udp" | "icmp" | "arp"
+    transport: str | None = None  # "tcp" | "udp" | "icmp" | "arp" | "cdp" | "lldp"
     src_port: int | None = None
     dst_port: int | None = None
     ttl: int | None = None
@@ -32,11 +42,30 @@ class PacketRecord:
     is_syn_ack: bool = False
     payload: bytes = b""
     hostname_hints: list = field(default_factory=list)  # [(ip, hostname), ...]
+    # Self-reported device name from a CDP/LLDP announcement -- these are L2-only
+    # frames (no IP layer), so unlike hostname_hints this identifies src_mac,
+    # not an IP.
+    l2_hostname: str | None = None
 
 
 def _mac(pkt: Packet, field_name: str) -> str | None:
     if pkt.haslayer(Ether):
         return getattr(pkt[Ether], field_name, None)
+    return None
+
+
+def _decode(value) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="ignore")
+    return str(value)
+
+
+def _cdp_device_id(pkt: Packet) -> str | None:
+    """The switch/router's own name, from a CDP Device ID TLV."""
+    for msg in pkt[CDPv2_HDR].msg:
+        if isinstance(msg, CDPMsgDeviceID):
+            name = _decode(msg.val).strip().rstrip("\x00")
+            return name or None
     return None
 
 
@@ -47,6 +76,21 @@ def process_packet(pkt: Packet) -> PacketRecord | None:
         src_mac=_mac(pkt, "src"),
         dst_mac=_mac(pkt, "dst"),
     )
+
+    # CDP/LLDP are pure L2 discovery frames (no IP layer) that switches and
+    # routers send about themselves -- the only passive way to identify
+    # network infrastructure that never originates ordinary IP traffic on
+    # the monitored segment.
+    if CDPv2_HDR is not None and pkt.haslayer(CDPv2_HDR):
+        record.transport = "cdp"
+        record.l2_hostname = _cdp_device_id(pkt)
+        return record
+
+    if LLDPDUSystemName is not None and pkt.haslayer(LLDPDUSystemName):
+        record.transport = "lldp"
+        name = _decode(pkt[LLDPDUSystemName].system_name).strip()
+        record.l2_hostname = name or None
+        return record
 
     if pkt.haslayer(ARP):
         arp = pkt[ARP]
