@@ -52,6 +52,7 @@ class DeviceOut(BaseModel):
     os_confidence: float
     is_ot_suspected: bool
     protocol_count: int
+    protocol_names: list[str] = []
     first_seen: datetime.datetime
     last_seen: datetime.datetime
 

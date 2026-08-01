@@ -69,6 +69,10 @@ class Device(Base):
         return len(self.protocols)
 
     @property
+    def protocol_names(self) -> list[str]:
+        return sorted({p.protocol for p in self.protocols})
+
+    @property
     def display_name(self) -> str | None:
         return self.custom_name or self.hostname
 

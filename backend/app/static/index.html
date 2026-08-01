@@ -30,8 +30,9 @@
   }
 
   /* ---------- logo ---------- */
-  .logo-mark { display: block; }
-  .logo-lockup { display: flex; align-items: center; gap: 10px; }
+  .logo-mark { display: block; max-width: 100%; height: auto; }
+  .logo-lockup { display: flex; align-items: center; gap: 10px; max-width: 100%; }
+  .logo-lockup .logo-full { max-width: 100%; width: auto; height: auto; display: block; }
   .logo-lockup .wordmark { font-size: 16px; font-weight: 800; letter-spacing: 0.01em; white-space: nowrap; }
   .logo-lockup .wordmark .accent { color: var(--accent); }
 
@@ -130,6 +131,21 @@
   .pill.ot { border-color: var(--high); color: var(--high); }
   .muted { color: var(--muted); }
   .empty { color: var(--muted); padding: 20px; text-align: center; }
+  .stat-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 14px; }
+  .stat-tile {
+    flex: 1; min-width: 160px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px;
+  }
+  .stat-tile .stat-num { font-size: 22px; font-weight: 800; color: var(--text); line-height: 1.2; }
+  .stat-tile .stat-num.crit { color: var(--crit); }
+  .stat-tile .stat-num.high { color: var(--high); }
+  .stat-tile .stat-num.ot { color: var(--high); }
+  .stat-tile .stat-label { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .table-scroll { overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+  .table-scroll table { width: 100%; border-collapse: collapse; }
+  .table-scroll thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  .protocol-list { font-size: 12px; color: var(--muted); }
   .clickable { cursor: pointer; }
   .device-detail { margin-top: 12px; }
   .flex-between { display: flex; justify-content: space-between; align-items: center; }
@@ -291,10 +307,13 @@
           <button class="action secondary" id="refresh-devices-btn">Actualizar</button>
         </div>
       </div>
-      <table>
-        <thead><tr><th>IP</th><th>Nombre</th><th>Fabricante</th><th>MAC</th><th>SO estimado</th><th>Confianza</th><th>Protocolos</th><th>Últ. visto</th></tr></thead>
-        <tbody id="devices-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
-      </table>
+      <div class="stat-row" id="inventory-stats"></div>
+      <div class="table-scroll" id="devices-scroll">
+        <table>
+          <thead><tr><th>IP</th><th>Nombre</th><th>Fabricante</th><th>MAC</th><th>SO estimado</th><th>Confianza</th><th>Protocolos</th><th>Últ. visto</th></tr></thead>
+          <tbody id="devices-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
+        </table>
+      </div>
       <div id="device-detail" class="device-detail"></div>
     </div>
   </section>
@@ -312,6 +331,7 @@
           <button class="action secondary" id="refresh-flows-btn">Actualizar</button>
         </div>
       </div>
+      <div class="stat-row" id="flows-stats"></div>
       <table>
         <thead><tr><th>Origen</th><th></th><th>Destino</th><th>Protocolo</th><th>Puerto</th><th>Transporte</th><th>Paquetes</th><th>Primero</th><th>Último</th></tr></thead>
         <tbody id="flows-body"><tr><td colspan="9" class="empty">Sin datos</td></tr></tbody>
@@ -336,6 +356,7 @@
           <button class="action editor-only" id="scan-all-btn">Ejecutar escaneo completo</button>
         </div>
       </div>
+      <div class="stat-row" id="vulns-stats"></div>
       <table>
         <thead><tr><th>Severidad</th><th>Dispositivo</th><th>Nombre</th><th>Hallazgo</th><th>Fuente</th><th>Evidencia</th></tr></thead>
         <tbody id="findings-body"><tr><td colspan="6" class="empty">Sin datos</td></tr></tbody>
@@ -487,6 +508,10 @@ $('#logout-btn').addEventListener('click', async () => {
 function activateTab(name) {
   $$('.sidebar nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   $$('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + name));
+  // Row heights can only be measured once the tab's container is actually
+  // visible (display:block) -- a tab loaded in the background while hidden
+  // would otherwise measure everything as 0px.
+  if (name === 'inventory') fitTableScroll('devices-scroll');
 }
 
 $$('.sidebar nav button').forEach(btn => {
@@ -608,12 +633,44 @@ $('#refresh-sessions-btn').addEventListener('click', loadSessions);
 
 // ---------- Inventory tab ----------
 let currentDeviceId = null;
+let allDevices = [];
+
+function fitTableScroll(wrapperId, rowsToShow = 10) {
+  const wrapper = document.getElementById(wrapperId);
+  if (!wrapper) return;
+  const table = wrapper.querySelector('table');
+  const thead = table && table.querySelector('thead');
+  const rows = table ? table.querySelectorAll('tbody tr') : [];
+  if (!thead || rows.length <= rowsToShow) { wrapper.style.maxHeight = 'none'; return; }
+  let height = thead.getBoundingClientRect().height;
+  for (let i = 0; i < rowsToShow; i++) height += rows[i].getBoundingClientRect().height;
+  wrapper.style.maxHeight = Math.ceil(height) + 'px';
+}
 
 async function loadDevices() {
+  allDevices = await api('/api/inventory/devices');
+  renderDeviceStats();
+  renderDevicesTable();
+}
+
+function renderDeviceStats() {
+  const total = allDevices.length;
+  const otCount = allDevices.filter(d => d.is_ot_suspected).length;
+  $('#inventory-stats').innerHTML = `
+    <div class="stat-tile"><div class="stat-num">${total}</div><div class="stat-label">Dispositivos detectados</div></div>
+    <div class="stat-tile"><div class="stat-num ot">${otCount}</div><div class="stat-label">Sospechosos de OT</div></div>
+  `;
+}
+
+function renderDevicesTable() {
   const tbody = $('#devices-body');
   const otOnly = $('#ot-only-checkbox').checked;
-  const devices = await api('/api/inventory/devices' + (otOnly ? '?ot_only=true' : ''));
-  if (!devices.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin dispositivos detectados aún</td></tr>'; return; }
+  const devices = otOnly ? allDevices.filter(d => d.is_ot_suspected) : allDevices;
+  if (!devices.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin dispositivos detectados aún</td></tr>';
+    fitTableScroll('devices-scroll');
+    return;
+  }
   tbody.innerHTML = devices.map(d => `
     <tr class="clickable" onclick="showDeviceDetail(${d.id})">
       <td>${d.ip || '—'} ${d.is_ot_suspected ? '<span class="pill ot">OT</span>' : ''}</td>
@@ -622,9 +679,10 @@ async function loadDevices() {
       <td class="mono">${d.mac || '—'}</td>
       <td>${d.os_guess || '—'}</td>
       <td>${(d.os_confidence * 100).toFixed(0)}%</td>
-      <td>${d.protocol_count}</td>
+      <td class="protocol-list">${(d.protocol_names && d.protocol_names.length) ? d.protocol_names.join(', ') : '<span class="muted">—</span>'}</td>
       <td>${fmtDate(d.last_seen)}</td>
     </tr>`).join('');
+  fitTableScroll('devices-scroll');
 }
 
 async function showDeviceDetail(id) {
@@ -687,13 +745,30 @@ async function saveDeviceOverrides(id, reset = false) {
 }
 
 $('#refresh-devices-btn').addEventListener('click', loadDevices);
-$('#ot-only-checkbox').addEventListener('change', loadDevices);
+$('#ot-only-checkbox').addEventListener('change', renderDevicesTable);
 
 // ---------- Flows tab ----------
+let allFlows = [];
+
 async function loadFlows() {
+  allFlows = await api('/api/inventory/flows');
+  renderFlowStats();
+  renderFlowsTable();
+}
+
+function renderFlowStats() {
+  const total = allFlows.length;
+  const otCount = allFlows.filter(f => f.category === 'OT').length;
+  $('#flows-stats').innerHTML = `
+    <div class="stat-tile"><div class="stat-num">${total}</div><div class="stat-label">Flujos detectados</div></div>
+    <div class="stat-tile"><div class="stat-num ot">${otCount}</div><div class="stat-label">De protocolos industriales (OT)</div></div>
+  `;
+}
+
+function renderFlowsTable() {
   const tbody = $('#flows-body');
   const cat = $('#flow-category-filter').value;
-  const flows = await api('/api/inventory/flows' + (cat ? `?category=${cat}` : ''));
+  const flows = cat ? allFlows.filter(f => f.category === cat) : allFlows;
   if (!flows.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin flujos detectados aún</td></tr>'; return; }
   tbody.innerHTML = flows.map(f => {
     const aLabel = f.device_a_name || f.device_a_ip || `#${f.device_a_id}`;
@@ -715,13 +790,30 @@ async function loadFlows() {
 }
 
 $('#refresh-flows-btn').addEventListener('click', loadFlows);
-$('#flow-category-filter').addEventListener('change', loadFlows);
+$('#flow-category-filter').addEventListener('change', renderFlowsTable);
 
 // ---------- Vulnerabilities tab ----------
+let allFindings = [];
+
 async function loadFindings() {
+  allFindings = await api('/api/vuln/findings');
+  renderFindingsStats();
+  renderFindingsTable();
+}
+
+function renderFindingsStats() {
+  const affectedDevices = new Set(allFindings.map(f => f.device_id)).size;
+  const highOrCritical = allFindings.filter(f => f.severity === 'high' || f.severity === 'critical').length;
+  $('#vulns-stats').innerHTML = `
+    <div class="stat-tile"><div class="stat-num">${affectedDevices}</div><div class="stat-label">Dispositivos con vulnerabilidades</div></div>
+    <div class="stat-tile"><div class="stat-num high">${highOrCritical}</div><div class="stat-label">Hallazgos de alta criticidad (high/critical)</div></div>
+  `;
+}
+
+function renderFindingsTable() {
   const tbody = $('#findings-body');
   const sev = $('#severity-filter').value;
-  const findings = await api('/api/vuln/findings' + (sev ? `?severity=${sev}` : ''));
+  const findings = sev ? allFindings.filter(f => f.severity === sev) : allFindings;
   if (!findings.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">Sin hallazgos. Ejecuta un escaneo.</td></tr>'; return; }
   tbody.innerHTML = findings.map(f => `
     <tr>
@@ -735,7 +827,7 @@ async function loadFindings() {
 }
 
 $('#refresh-findings-btn').addEventListener('click', loadFindings);
-$('#severity-filter').addEventListener('change', loadFindings);
+$('#severity-filter').addEventListener('change', renderFindingsTable);
 $('#scan-all-btn').addEventListener('click', async () => {
   $('#scan-all-btn').textContent = 'Escaneando...';
   try {
