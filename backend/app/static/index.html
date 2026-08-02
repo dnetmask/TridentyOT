@@ -224,6 +224,10 @@
   .status-running { color: var(--accent); }
   .status-completed, .status-stopped { color: var(--muted); }
   .status-error { color: var(--crit); }
+  .progress-cell { display: flex; align-items: center; gap: 8px; min-width: 110px; }
+  .progress-track { flex: 1; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.4s ease; }
+  .progress-pct { font-size: 11.5px; color: var(--muted); white-space: nowrap; min-width: 32px; text-align: right; }
   .manual-tag { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
   .edit-field { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
   .edit-field label { min-width: 90px; margin: 0; }
@@ -389,8 +393,8 @@
       </div>
       <div class="viewer-note viewer-only hidden">Perfil visualizador: solo lectura, no puedes iniciar/detener capturas ni subir archivos.</div>
       <table>
-        <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>Origen</th><th>Estado</th><th>Paquetes</th><th>Inicio</th><th></th></tr></thead>
-        <tbody id="sessions-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
+        <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>Origen</th><th>Estado</th><th>Avance</th><th>Paquetes</th><th>Inicio</th><th></th></tr></thead>
+        <tbody id="sessions-body"><tr><td colspan="9" class="empty">Sin datos</td></tr></tbody>
       </table>
     </div>
 
@@ -771,15 +775,26 @@ async function loadInterfaces() {
   }
 }
 
+function progressCell(s) {
+  if (s.source_type !== 'pcap' || s.progress_percent === null || s.progress_percent === undefined) {
+    return '<span class="muted">—</span>';
+  }
+  return `<div class="progress-cell">
+    <div class="progress-track"><div class="progress-fill" style="width:${s.progress_percent}%"></div></div>
+    <span class="progress-pct">${s.progress_percent}%</span>
+  </div>`;
+}
+
 async function loadSessions() {
   const tbody = $('#sessions-body');
   const sessions = await api('/api/capture/sessions');
-  if (!sessions.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin sesiones aún</td></tr>'; return; }
+  if (!sessions.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin sesiones aún</td></tr>'; return; }
   const editor = isEditor();
   tbody.innerHTML = sessions.map(s => `
     <tr>
       <td>${s.id}</td><td>${s.name}</td><td>${s.source_type}</td><td>${s.source}</td>
       <td class="status-${s.status}">${s.status}${s.error_message ? ' — ' + s.error_message : ''}</td>
+      <td>${progressCell(s)}</td>
       <td>${s.packet_count}</td><td>${fmtDate(s.started_at)}</td>
       <td>
         ${editor && s.status === 'running' && s.source_type === 'live' ? `<button class="action danger" onclick="stopLive(${s.id})">Detener</button>` : ''}

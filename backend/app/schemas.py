@@ -115,6 +115,9 @@ class CaptureSessionOut(BaseModel):
     status: str
     packet_count: int
     dropped_count: int
+    total_bytes: int
+    bytes_processed: int
+    progress_percent: float | None
     error_message: str | None
     started_at: datetime.datetime
     ended_at: datetime.datetime | None

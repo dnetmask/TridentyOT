@@ -33,9 +33,21 @@ class CaptureSession(Base):
     # app/capture/live_capture.py. Always 0 for a pcap upload, which has no
     # producer/consumer split to drop anything from.
     dropped_count: Mapped[int] = mapped_column(Integer, default=0)
+    # pcap uploads only: the file's total size and how many bytes of it the
+    # reader has consumed so far, set by process_pcap_file -- see
+    # progress_percent. A live capture has no known "total" to measure
+    # against, so both stay 0 for it and progress_percent is always None.
+    total_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    bytes_processed: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
     ended_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
+
+    @property
+    def progress_percent(self) -> float | None:
+        if not self.total_bytes:
+            return None
+        return round(min(self.bytes_processed / self.total_bytes, 1.0) * 100, 1)
 
 
 class Device(Base):

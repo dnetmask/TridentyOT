@@ -22,11 +22,22 @@ if DATABASE_URL.startswith("sqlite"):
     # fsyncs at WAL checkpoints, just not on every single commit -- an
     # acceptable durability trade for a monitoring tool (a hard crash could
     # lose the last few ms of buffered writes, never a corrupt DB).
+    #
+    # WAL only buys concurrent *readers*; SQLite still allows only one
+    # writer at a time. A long pcap upload now commits every few hundred
+    # packets (see pcap_loader.py's progress tracking) instead of once at
+    # the very end, so some other request's write -- e.g. POST /auth/login
+    # inserting an auth_tokens row -- has a much bigger window to land
+    # while that writer briefly holds the lock. Without busy_timeout,
+    # SQLite raises "database is locked" the instant it can't grab the
+    # lock immediately instead of just waiting the few milliseconds it
+    # actually takes to free up.
     @event.listens_for(engine, "connect")
     def _set_sqlite_pragmas(dbapi_connection, _connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=10000")
         cursor.close()
 
 

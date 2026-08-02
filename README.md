@@ -231,6 +231,17 @@ la zona de carga, o hacer clic para seleccionarlo. Por API:
 curl -F "file=@captura.pcap" http://localhost:8000/api/capture/pcap
 ```
 
+La subida devuelve de inmediato (el archivo se procesa en segundo plano); la tabla **Sesiones de
+captura** muestra una barra de **Avance** con el porcentaje mientras la sesión está `running`,
+calculado sobre los bytes del archivo ya leídos (`bytes_processed`/`total_bytes`, expuestos también
+por `GET /api/capture/sessions`) -- ninguno de los dos formatos guarda en su cabecera un conteo
+total de paquetes del que derivar un porcentaje más exacto. Para no competir por el único lock de
+escritura de SQLite con el resto de la API mientras un archivo grande se procesa, estas
+actualizaciones de avance se confirman como mucho una vez por segundo (no por paquete), y tras cada
+una se cede la escritura brevemente antes de seguir -- lo justo para que otra petición concurrente
+(un login, un PATCH de otra pestaña) tenga una oportunidad real de tomar el lock en vez de que este
+hilo, más rápido, se lo vuelva a quedar primero.
+
 ### Ejecutar el escaneo de vulnerabilidades
 
 ```bash
