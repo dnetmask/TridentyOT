@@ -10,7 +10,7 @@ from scapy.utils import PcapReader
 from sqlalchemy.orm import Session
 
 from app.capture.packet_processor import process_packet
-from app.inventory.inventory_service import ingest_packet_record
+from app.inventory.inventory_service import apply_gateway_detection, ingest_packet_record
 from app.models import CaptureSession
 
 
@@ -23,6 +23,10 @@ def process_pcap_file(db_session: Session, filepath: str, capture_session: Captu
                 if record is not None:
                     ingest_packet_record(db_session, record, capture_session_id=capture_session.id)
                 count += 1
+        # Whole-table pass: the router/NAT gateway pattern (one MAC shared
+        # by several public IPs) only shows up once the file has been read
+        # in full, not from any single packet.
+        apply_gateway_detection(db_session)
         capture_session.packet_count = count
         capture_session.status = "completed"
     except Exception as exc:

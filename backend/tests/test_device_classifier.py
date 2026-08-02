@@ -46,6 +46,21 @@ def test_industrial_vendor_alone_suggests_plc_moderate_confidence():
     assert 0 < guess.confidence < 0.7
 
 
+def test_vmware_vendor_suggests_server_not_ambiguous_it():
+    """VMware only ever registers virtual NICs -- unlike the generic IT
+    vendor keywords (Dell, Lenovo, ...) that split evenly between server
+    and workstation, a VMware OUI should vote confidently for SERVER."""
+    guess = classify_device_type(
+        vendor="VMware, Inc.",
+        hostname=None,
+        os_signature=None,
+        has_ot_server_protocol=False,
+        server_protocol_count=0,
+    )
+    assert guess.device_type == SERVER
+    assert guess.confidence >= 0.4
+
+
 def test_hostname_keyword_outweighs_a_conflicting_vendor_hint():
     """A Siemens-made industrial PC named "...-PC" is a workstation, not a
     PLC, despite the vendor -- the site's own naming is more specific

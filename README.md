@@ -33,20 +33,38 @@ ya capturado, y a partir de eso construye:
    - Todo es **editable manualmente** en cualquier momento (se detecte o no), sin perder el
      valor auto-detectado como referencia.
    - **Tipo de dispositivo** (columna **Tipo**): clasifica cada activo como **PLC**, **HMI**,
-     **Servidor**, **PC** o **Equipo de red** combinando, con reglas explicables (no ML), la
+     **Servidor/VM**, **PC** o **Equipo de red** combinando, con reglas explicables (no ML), la
      evidencia que el resto del motor pasivo ya recolectó -- protocolo servido, anuncio CDP/LLDP
      (equipo de red con certeza), categoría del fabricante por OUI (industrial/redes/IT
-     genérico), palabras clave del nombre del equipo ("-HMI01", "-SRV", "-PC"...) y cantidad de
-     protocolos distintos servidos. Un protocolo OT como servidor es **PLC** casi con certeza --
-     salvo que el propio fingerprint TCP/IP del paquete sea un Windows/Linux real, en cuyo caso es
-     **HMI** (SCADA/estación de ingeniería: un PLC embebido nunca fingerprintea como un SO de
-     propósito general). Un nombre que contenga "HMI" también clasifica como HMI directamente.
-     Cada clasificación muestra su **evidencia** y una confianza 0-100%; los indicadores
-     superiores de Inventario tienen un contador propio por cada tipo (**PLC**, **HMI**,
-     **Servidores**, **PCs**, **Equipos de red**) más "Otros equipos" para lo no clasificado, y se
-     recalculan al vuelo si se activa "Ocultar equipos externos". Igual que nombre y fabricante, es
-     **editable manualmente** sin perder el valor auto-detectado. Ver "Limitaciones conocidas"
-     para el caso que esto no puede resolver de forma pasiva (servidor vs. PC Windows).
+     genérico/virtualización), palabras clave del nombre del equipo ("-HMI01", "-SRV", "-PC"...) y
+     cantidad de protocolos distintos servidos. Un protocolo OT como servidor es **PLC** casi con
+     certeza -- salvo que el propio fingerprint TCP/IP del paquete sea un Windows/Linux real, en
+     cuyo caso es **HMI** (SCADA/estación de ingeniería: un PLC embebido nunca fingerprintea como
+     un SO de propósito general). Un nombre que contenga "HMI" también clasifica como HMI
+     directamente. Un fabricante **VMware** (interfaz de red virtual) clasifica directamente como
+     **Servidor/VM**, a diferencia de un fabricante IT genérico (Dell, Lenovo...) que solo aporta
+     una pista ambigua entre servidor y PC. Cada clasificación muestra su **evidencia** y una
+     confianza 0-100%; los indicadores superiores de Inventario tienen un contador propio por cada
+     tipo (**PLC**, **HMI**, **Servidores/VM**, **PCs**, **Equipos de red**) más "Otros equipos"
+     para lo no clasificado, y se recalculan al vuelo si se activa "Ocultar equipos externos".
+     Igual que nombre y fabricante, es **editable manualmente** sin perder el valor auto-detectado.
+     Ver "Limitaciones conocidas" para el caso que esto no puede resolver de forma pasiva (servidor
+     vs. PC Windows).
+   - **Subtipo de equipo de red** (columna **Subtipo**, solo aplica a filas **Equipo de red**):
+     una segunda clasificación independiente entre **Switch L2**, **Switch L3**, **Firewall**,
+     **Access Point** o **Router/NAT**. Hoy solo **Router/NAT** se detecta solo (ver el punto
+     siguiente); el resto es editable manualmente desde el detalle del dispositivo por ahora, a la
+     espera de una señal pasiva confiable para auto-detectarlos.
+   - **Detección de gateway/NAT**: un router que reenvía tráfico de internet transmite él mismo esa
+     trama en el segmento LAN -- por la misma regla de "la MAC solo se aprende del emisor" (ver
+     `inventory_service.get_or_create_device`), su MAC termina asociada a *cada IP pública distinta*
+     que alguna vez reenvió, cada una como su propia fila de inventario. Cuando dos o más IPs
+     públicas comparten una misma MAC, TridentyOT reconoce el patrón: elige una fila para
+     representar el gateway (su propia identidad LAN si la vio en esta captura, si no la más
+     antigua de las públicas), la marca como **Equipo de red / Router-NAT** con confianza 100%, y
+     **oculta del Inventario** el resto de filas que comparten esa MAC -- son el mismo artefacto de
+     reenvío, no activos distintos. No se borran: siguen apareciendo normalmente en **Flujos** y
+     **Vulnerabilidades**.
 2. **Fingerprint pasivo de sistema operativo**: heurística basada en TTL inicial, tamaño de
    ventana TCP y opciones TCP del handshake (similar a p0f), sin enviar ningún tráfico activo.
 3. **Detección de protocolos/servicios**: por puerto conocido y por firma de los primeros bytes

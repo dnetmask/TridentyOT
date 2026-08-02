@@ -11,8 +11,8 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.capture.packet_processor import PacketRecord
-from app.fingerprint.device_classifier import classify_device_type
-from app.fingerprint.ip_scope import is_real_unicast_ip
+from app.fingerprint.device_classifier import NETWORK_DEVICE, ROUTER_NAT, classify_device_type
+from app.fingerprint.ip_scope import is_lan_ip, is_real_unicast_ip
 from app.fingerprint.os_fingerprint import (
     OsGuess,
     TcpSignature,
@@ -184,6 +184,64 @@ def apply_hostname_hints(session: Session, hints: list[tuple[str, str]]) -> None
 
         device.hostname = hostname
         apply_device_type_guess(session, device)
+
+
+# How many distinct public IPs sharing one MAC it takes before that MAC is
+# treated as a router/NAT gateway rather than coincidence -- one shared
+# public IP alone doesn't prove a pattern.
+_GATEWAY_MIN_PUBLIC_IPS = 2
+
+
+def apply_gateway_detection(session: Session) -> None:
+    """Detects a router/NAT gateway from a pattern purely-passive capture
+    produces: when the gateway forwards a reply from some public-internet
+    host onto the LAN, it is transmitting that frame -- so by this app's
+    own "MAC only ever learned from the sender" rule (see
+    get_or_create_device), that MAC gets attached to the device row for
+    *that public IP*. Every distinct public IP the gateway ever forwarded
+    ends up as its own inventory row, all sharing the gateway's one real
+    MAC, even though none of those IPs are actual local assets (see
+    Device.is_external and the module docstring's routed-traffic caveat).
+
+    Two or more distinct public IPs sharing a MAC is that exact pattern.
+    Once found, one row is picked to actually represent the gateway in
+    Inventory -- its own LAN-side identity if this capture ever saw it
+    speak from one, otherwise (deterministically) the oldest of the
+    public-IP rows -- and classified as a network device (subcategory
+    "router_nat"). The rest are exactly the forwarding artifact described
+    above, not separate assets: routes_inventory.list_devices hides every
+    other row sharing that MAC, without deleting them (Flows/Vulnerabilidades
+    still reference them normally).
+
+    Runs as a whole-table pass after ingesting a batch/file rather than
+    per-packet: the pattern is only visible once several distinct public
+    IPs for the same MAC actually exist, which no single packet can tell
+    on its own.
+    """
+    devices = session.query(Device).filter(Device.mac.is_not(None)).all()
+    by_mac: dict[str, list[Device]] = {}
+    for d in devices:
+        by_mac.setdefault(d.mac, []).append(d)
+
+    for mac, group in by_mac.items():
+        if len(group) < _GATEWAY_MIN_PUBLIC_IPS:
+            continue
+        public_members = [d for d in group if not is_lan_ip(d.ip)]
+        if len(public_members) < _GATEWAY_MIN_PUBLIC_IPS:
+            continue
+
+        lan_members = [d for d in group if is_lan_ip(d.ip)]
+        primary = min(lan_members, key=lambda d: d.id) if lan_members else min(group, key=lambda d: d.id)
+
+        if primary.device_type != NETWORK_DEVICE or primary.device_type_confidence < 1.0:
+            primary.device_type = NETWORK_DEVICE
+            primary.device_type_confidence = 1.0
+            primary.device_type_evidence = (
+                f"Una misma MAC ({mac}) aparece en {len(public_members)} IPs públicas distintas -- "
+                "consistente con un equipo que enruta/NATea tráfico hacia internet"
+            )
+        if not primary.device_type_secondary:
+            primary.device_type_secondary = ROUTER_NAT
 
 
 def upsert_protocol(

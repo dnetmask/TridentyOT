@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user, require_editor
 from app.db import get_db
+from app.fingerprint.device_classifier import ROUTER_NAT
 from app.models import Device, DeviceProtocol, Flow, User
 from app.schemas import DeviceDetailOut, DeviceOut, DeviceUpdateRequest, FlowOut
 
@@ -23,6 +24,21 @@ def list_devices(
     if protocol:
         query = query.join(DeviceProtocol).filter(DeviceProtocol.protocol == protocol)
     devices = query.order_by(Device.last_seen.desc()).all()
+
+    # A router/NAT gateway forwarding return traffic from the internet is,
+    # by this app's own MAC-learning rule, the *sender* of those frames on
+    # the LAN -- so its MAC ends up attached to every distinct public IP it
+    # ever forwarded (see apply_gateway_detection). Those are forwarding
+    # artifacts, not separate assets: once ingestion has picked one row per
+    # gateway MAC to actually represent it (device_type_secondary ==
+    # router_nat), every other row sharing that MAC is hidden here --
+    # still real rows, untouched in Flows/Vulnerabilidades, just not
+    # cluttering Inventory as phantom "devices".
+    gateway_macs = {d.mac for d in devices if d.mac and d.display_device_type_secondary == ROUTER_NAT}
+    if gateway_macs:
+        devices = [
+            d for d in devices if d.mac not in gateway_macs or d.display_device_type_secondary == ROUTER_NAT
+        ]
 
     # Some LANs (mis)assign public IP ranges to real local devices, so a
     # public-looking IP alone is no longer grounds to hide something from
@@ -67,6 +83,8 @@ def update_device(
         device.custom_vendor = updates["custom_vendor"] or None
     if "custom_device_type" in updates:
         device.custom_device_type = updates["custom_device_type"] or None
+    if "custom_device_type_secondary" in updates:
+        device.custom_device_type_secondary = updates["custom_device_type_secondary"] or None
 
     db.commit()
     db.refresh(device)

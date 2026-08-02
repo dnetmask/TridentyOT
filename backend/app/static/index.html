@@ -423,6 +423,7 @@
             <label><input type="checkbox" data-col-toggle="ip" checked /> IP</label>
             <label><input type="checkbox" data-col-toggle="nombre" checked /> Nombre</label>
             <label><input type="checkbox" data-col-toggle="tipo" checked /> Tipo</label>
+            <label><input type="checkbox" data-col-toggle="subtipo" checked /> Subtipo</label>
             <label><input type="checkbox" data-col-toggle="fabricante" checked /> Fabricante</label>
             <label><input type="checkbox" data-col-toggle="mac" checked /> MAC</label>
             <label><input type="checkbox" data-col-toggle="so" checked /> SO estimado</label>
@@ -436,11 +437,11 @@
       <div class="table-scroll" id="devices-scroll">
         <table>
           <thead><tr>
-            <th data-col="ip">IP</th><th data-col="nombre">Nombre</th><th data-col="tipo">Tipo</th><th data-col="fabricante">Fabricante</th>
+            <th data-col="ip">IP</th><th data-col="nombre">Nombre</th><th data-col="tipo">Tipo</th><th data-col="subtipo">Subtipo</th><th data-col="fabricante">Fabricante</th>
             <th data-col="mac">MAC</th><th data-col="so">SO estimado</th><th data-col="confianza">Confianza</th>
             <th data-col="protocolos">Protocolos</th><th data-col="visto">Últ. visto</th>
           </tr></thead>
-          <tbody id="devices-body"><tr><td colspan="9" class="empty">Sin datos</td></tr></tbody>
+          <tbody id="devices-body"><tr><td colspan="10" class="empty">Sin datos</td></tr></tbody>
         </table>
       </div>
       <div id="device-detail" class="device-detail"></div>
@@ -879,6 +880,7 @@ dropzone.addEventListener('drop', (e) => {
 
 // ---------- Inventory tab ----------
 let currentDeviceId = null;
+let currentDeviceAutoType = null;
 let allDevices = [];
 
 function fitTableScroll(wrapperId, rowsToShow = 7) {
@@ -901,7 +903,7 @@ async function loadDevices() {
 const DEVICE_TYPE_LABELS = {
   plc: 'PLC',
   hmi: 'HMI',
-  server: 'Servidor',
+  server: 'Servidor/VM',
   workstation: 'PC',
   network_device: 'Equipo de red',
   other: 'Otro',
@@ -913,6 +915,13 @@ const DEVICE_TYPE_PILL_CLASS = {
   network_device: 'network',
   workstation: 'workstation',
 };
+const NETWORK_SUBTYPE_LABELS = {
+  switch_l2: 'Switch L2',
+  switch_l3: 'Switch L3',
+  firewall: 'Firewall',
+  access_point: 'Access Point',
+  router_nat: 'Router/NAT',
+};
 
 function deviceTypeBadge(d) {
   const type = d.display_device_type;
@@ -921,6 +930,13 @@ function deviceTypeBadge(d) {
   const pillClass = DEVICE_TYPE_PILL_CLASS[type];
   const badge = pillClass ? `<span class="pill ${pillClass}">${label}</span>` : label;
   return `${badge}${d.custom_device_type ? '<span class="manual-tag">manual</span>' : ''}`;
+}
+
+function deviceSubtypeBadge(d) {
+  const subtype = d.display_device_type_secondary;
+  if (!subtype) return '<span class="muted">—</span>';
+  const label = NETWORK_SUBTYPE_LABELS[subtype] || subtype;
+  return `<span class="pill network">${label}</span>${d.custom_device_type_secondary ? '<span class="manual-tag">manual</span>' : ''}`;
 }
 
 function renderDeviceStats(devices) {
@@ -937,7 +953,7 @@ function renderDeviceStats(devices) {
     <div class="stat-tile"><div class="stat-num ot">${otCount}</div><div class="stat-label">Dispositivos OT</div></div>
     <div class="stat-tile"><div class="stat-num plc">${plcCount}</div><div class="stat-label">PLC</div></div>
     <div class="stat-tile"><div class="stat-num hmi">${hmiCount}</div><div class="stat-label">HMI</div></div>
-    <div class="stat-tile"><div class="stat-num server">${serverCount}</div><div class="stat-label">Servidores</div></div>
+    <div class="stat-tile"><div class="stat-num server">${serverCount}</div><div class="stat-label">Servidores/VM</div></div>
     <div class="stat-tile"><div class="stat-num workstation">${workstationCount}</div><div class="stat-label">PCs</div></div>
     <div class="stat-tile"><div class="stat-num network">${networkCount}</div><div class="stat-label">Equipos de red</div></div>
     <div class="stat-tile"><div class="stat-num">${otherCount}</div><div class="stat-label">Otros equipos</div></div>
@@ -952,7 +968,7 @@ function renderDevicesTable() {
   renderDeviceStats(statsDevices);
   const devices = otOnly ? statsDevices.filter(d => d.is_ot_suspected) : statsDevices;
   if (!devices.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin dispositivos detectados aún</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="empty">Sin dispositivos detectados aún</td></tr>';
     fitTableScroll('devices-scroll');
     return;
   }
@@ -961,6 +977,7 @@ function renderDevicesTable() {
       <td data-col="ip">${d.ip || '—'} ${d.is_ot_suspected ? '<span class="pill ot">OT</span>' : ''} ${d.is_external ? '<span class="pill external" title="Sin MAC capturada y con IP pública: probablemente fuera de esta red">Externo</span>' : ''}</td>
       <td data-col="nombre">${d.display_name || '<span class="muted">—</span>'}${d.custom_name ? '<span class="manual-tag">manual</span>' : ''}</td>
       <td data-col="tipo">${deviceTypeBadge(d)}</td>
+      <td data-col="subtipo">${deviceSubtypeBadge(d)}</td>
       <td data-col="fabricante">${d.display_vendor || '<span class="muted">—</span>'}${d.custom_vendor ? '<span class="manual-tag">manual</span>' : ''}</td>
       <td data-col="mac" class="mono">${d.mac || '—'}</td>
       <td data-col="so">${d.os_guess || '—'}</td>
@@ -975,6 +992,7 @@ function renderDevicesTable() {
 async function showDeviceDetail(id) {
   currentDeviceId = id;
   const device = await api(`/api/inventory/devices/${id}`);
+  currentDeviceAutoType = device.device_type;
   const protoRows = device.protocols.map(p => `
     <span class="pill ${p.category === 'OT' ? 'ot' : ''}">${p.protocol}:${p.port ?? '-'} (${p.role}, ${p.packet_count}x)</span>`).join(' ');
   const findingRows = device.findings.map(f => `
@@ -991,12 +1009,21 @@ async function showDeviceDetail(id) {
     </div>
     <div class="edit-field">
       <label>Tipo</label>
-      <select id="edit-device-type" ${editor ? '' : 'disabled'}>
+      <select id="edit-device-type" ${editor ? '' : 'disabled'} onchange="toggleSubtypeFieldVisibility()">
         <option value="" ${!device.custom_device_type ? 'selected' : ''}>${device.device_type ? 'Automático: ' + (DEVICE_TYPE_LABELS[device.device_type] || device.device_type) : 'Automático (sin clasificar aún)'}</option>
         ${Object.entries(DEVICE_TYPE_LABELS).map(([value, label]) => `
         <option value="${value}" ${device.custom_device_type === value ? 'selected' : ''}>${label}</option>`).join('')}
       </select>
       <span class="hint">${device.device_type_evidence ? `evidencia: ${device.device_type_evidence}` : 'sin evidencia suficiente para clasificar aún'}</span>
+    </div>
+    <div class="edit-field" id="subtype-field-wrapper">
+      <label>Subtipo</label>
+      <select id="edit-device-type-secondary" ${editor ? '' : 'disabled'}>
+        <option value="" ${!device.custom_device_type_secondary ? 'selected' : ''}>${device.device_type_secondary ? 'Automático: ' + (NETWORK_SUBTYPE_LABELS[device.device_type_secondary] || device.device_type_secondary) : 'Sin subtipo'}</option>
+        ${Object.entries(NETWORK_SUBTYPE_LABELS).map(([value, label]) => `
+        <option value="${value}" ${device.custom_device_type_secondary === value ? 'selected' : ''}>${label}</option>`).join('')}
+      </select>
+      <span class="hint">Solo aplica a Equipos de red (Switch L2/L3, Firewall, Access Point, Router/NAT)</span>
     </div>
     <div class="edit-field">
       <label>Fabricante</label>
@@ -1020,15 +1047,25 @@ async function showDeviceDetail(id) {
     $('#save-device-btn').addEventListener('click', () => saveDeviceOverrides(id));
     $('#reset-device-btn').addEventListener('click', () => saveDeviceOverrides(id, true));
   }
+  toggleSubtypeFieldVisibility();
+}
+
+function toggleSubtypeFieldVisibility() {
+  const select = $('#edit-device-type');
+  const wrapper = $('#subtype-field-wrapper');
+  if (!select || !wrapper) return;
+  const effectiveType = select.value || currentDeviceAutoType;
+  wrapper.classList.toggle('hidden', effectiveType !== 'network_device');
 }
 
 async function saveDeviceOverrides(id, reset = false) {
   const body = reset
-    ? { custom_name: null, custom_vendor: null, custom_device_type: null }
+    ? { custom_name: null, custom_vendor: null, custom_device_type: null, custom_device_type_secondary: null }
     : {
         custom_name: $('#edit-name').value.trim() || null,
         custom_vendor: $('#edit-vendor').value.trim() || null,
         custom_device_type: $('#edit-device-type').value || null,
+        custom_device_type_secondary: $('#edit-device-type-secondary').value || null,
       };
   try {
     await api(`/api/inventory/devices/${id}`, {

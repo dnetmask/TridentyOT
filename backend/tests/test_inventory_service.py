@@ -436,3 +436,103 @@ def test_apply_hostname_hints_clears_shared_name_from_every_claimant(db_session)
     assert claimant_a.hostname is None
     assert claimant_b.hostname is None
     assert target.hostname is None
+
+
+def test_gateway_detection_flags_mac_shared_across_public_ips(db_session):
+    """A router/NAT gateway forwarding return traffic from the internet
+    transmits those frames itself -- so its MAC (never the destination's,
+    see get_or_create_device) ends up attached to every distinct public IP
+    it ever forwarded, each becoming its own inventory row. Two or more
+    such rows sharing one MAC is the signature: one of them should be
+    picked as the real gateway (network_device / router_nat), and neither
+    picked-and-not-picked distinction should touch the local LAN host on
+    the other end of those flows."""
+    from app.inventory.inventory_service import apply_gateway_detection
+
+    GATEWAY_MAC = "aa:bb:cc:00:00:01"
+    reply1 = Ether(src=GATEWAY_MAC) / IP(src="8.8.8.8", dst="10.0.6.5", ttl=64) / TCP(
+        sport=443, dport=51000, flags="SA", window=8192
+    )
+    reply2 = Ether(src=GATEWAY_MAC) / IP(src="93.184.216.34", dst="10.0.6.5", ttl=64) / TCP(
+        sport=443, dport=51001, flags="SA", window=8192
+    )
+    ingest_packet_record(db_session, process_packet(reply1))
+    ingest_packet_record(db_session, process_packet(reply2))
+    db_session.commit()
+
+    pub1 = db_session.query(Device).filter(Device.ip == "8.8.8.8").one()
+    pub2 = db_session.query(Device).filter(Device.ip == "93.184.216.34").one()
+    lan_host = db_session.query(Device).filter(Device.ip == "10.0.6.5").one()
+    assert pub1.mac == GATEWAY_MAC
+    assert pub2.mac == GATEWAY_MAC
+    assert pub1.device_type != "network_device"  # not yet classified
+
+    apply_gateway_detection(db_session)
+    db_session.commit()
+
+    db_session.refresh(pub1)
+    db_session.refresh(pub2)
+    db_session.refresh(lan_host)
+
+    primary, other = (pub1, pub2) if pub1.id < pub2.id else (pub2, pub1)
+    assert primary.display_device_type == "network_device"
+    assert primary.display_device_type_secondary == "router_nat"
+    assert primary.device_type_confidence == 1.0
+    # the non-chosen duplicate is untouched otherwise -- still a real row,
+    # not reclassified or deleted, just not the one picked to represent
+    # the gateway.
+    assert other.device_type != "network_device"
+    # the actual LAN host these were replies to is never touched by this.
+    assert lan_host.mac is None
+    assert lan_host.display_device_type != "network_device"
+
+
+def test_gateway_detection_prefers_a_lan_side_identity_when_one_exists(db_session):
+    """If the capture also saw the gateway speak from its own LAN IP (e.g.
+    ARP, DHCP), that's a much better row to represent it than an arbitrary
+    public-IP duplicate -- so it should be the one picked, regardless of
+    creation order."""
+    from app.inventory.inventory_service import apply_gateway_detection
+
+    GATEWAY_MAC = "aa:bb:cc:00:00:02"
+    reply1 = Ether(src=GATEWAY_MAC) / IP(src="8.8.4.4", dst="10.0.6.6", ttl=64) / TCP(
+        sport=443, dport=51000, flags="SA", window=8192
+    )
+    reply2 = Ether(src=GATEWAY_MAC) / IP(src="1.1.1.1", dst="10.0.6.6", ttl=64) / TCP(
+        sport=443, dport=51001, flags="SA", window=8192
+    )
+    who_has = Ether(src=GATEWAY_MAC) / ARP(op=1, hwsrc=GATEWAY_MAC, psrc="10.0.6.1", pdst="10.0.6.6")
+    ingest_packet_record(db_session, process_packet(reply1))
+    ingest_packet_record(db_session, process_packet(reply2))
+    ingest_packet_record(db_session, process_packet(who_has))
+    db_session.commit()
+
+    apply_gateway_detection(db_session)
+    db_session.commit()
+
+    lan_side = db_session.query(Device).filter(Device.ip == "10.0.6.1").one()
+    assert lan_side.display_device_type == "network_device"
+    assert lan_side.display_device_type_secondary == "router_nat"
+
+    for public_ip in ("8.8.4.4", "1.1.1.1"):
+        pub_device = db_session.query(Device).filter(Device.ip == public_ip).one()
+        assert pub_device.display_device_type != "network_device"
+
+
+def test_gateway_detection_ignores_a_single_shared_public_ip(db_session):
+    """One public IP alone sharing a MAC with something else proves
+    nothing on its own -- the gateway pattern needs at least two."""
+    from app.inventory.inventory_service import apply_gateway_detection
+
+    GATEWAY_MAC = "aa:bb:cc:00:00:03"
+    reply = Ether(src=GATEWAY_MAC) / IP(src="8.8.8.8", dst="10.0.6.7", ttl=64) / TCP(
+        sport=443, dport=51000, flags="SA", window=8192
+    )
+    ingest_packet_record(db_session, process_packet(reply))
+    db_session.commit()
+
+    apply_gateway_detection(db_session)
+    db_session.commit()
+
+    pub_device = db_session.query(Device).filter(Device.ip == "8.8.8.8").one()
+    assert pub_device.display_device_type != "network_device"

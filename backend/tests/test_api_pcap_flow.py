@@ -121,6 +121,74 @@ def test_patch_device_rejects_unknown_device_type(client, tmp_path):
     assert resp.status_code == 422
 
 
+def test_patch_device_sets_and_clears_custom_device_type_secondary(client, tmp_path):
+    syn = Ether() / IP(src="10.5.0.8", dst="10.5.0.63", ttl=64) / TCP(sport=41000, dport=502, flags="S", window=1024)
+    pcap_path = tmp_path / "modbus4.pcap"
+    wrpcap(str(pcap_path), [syn])
+    with open(pcap_path, "rb") as f:
+        client.post("/api/capture/pcap", files={"file": ("modbus4.pcap", f, "application/vnd.tcpdump.pcap")})
+
+    devices = client.get("/api/inventory/devices").json()
+    device_id = next(d for d in devices if d["ip"] == "10.5.0.8")["id"]
+
+    resp = client.patch(f"/api/inventory/devices/{device_id}", json={"custom_device_type_secondary": "switch_l2"})
+    assert resp.status_code == 200
+    updated = resp.json()
+    assert updated["custom_device_type_secondary"] == "switch_l2"
+    assert updated["display_device_type_secondary"] == "switch_l2"
+
+    resp = client.patch(f"/api/inventory/devices/{device_id}", json={"custom_device_type_secondary": None})
+    assert resp.status_code == 200
+    assert resp.json()["custom_device_type_secondary"] is None
+
+
+def test_patch_device_rejects_unknown_device_type_secondary(client, tmp_path):
+    syn = Ether() / IP(src="10.5.0.9", dst="10.5.0.64", ttl=64) / TCP(sport=41000, dport=502, flags="S", window=1024)
+    pcap_path = tmp_path / "modbus5.pcap"
+    wrpcap(str(pcap_path), [syn])
+    with open(pcap_path, "rb") as f:
+        client.post("/api/capture/pcap", files={"file": ("modbus5.pcap", f, "application/vnd.tcpdump.pcap")})
+
+    devices = client.get("/api/inventory/devices").json()
+    device_id = next(d for d in devices if d["ip"] == "10.5.0.9")["id"]
+
+    resp = client.patch(f"/api/inventory/devices/{device_id}", json={"custom_device_type_secondary": "hub"})
+    assert resp.status_code == 422
+
+
+def test_gateway_duplicates_hidden_from_inventory_but_kept_in_flows(client, tmp_path):
+    """A router/NAT gateway forwarding replies from two different public
+    IPs ends up as two inventory rows sharing one MAC (see
+    apply_gateway_detection). Only one should show up in Inventory,
+    reclassified as a network device / router_nat; the other stays a real
+    row, still visible in Flows, just not cluttering the device list."""
+    gateway_mac = "aa:bb:cc:00:01:01"
+    reply1 = Ether(src=gateway_mac) / IP(src="8.8.8.8", dst="10.6.1.5", ttl=64) / TCP(
+        sport=443, dport=51000, flags="SA", window=8192
+    )
+    reply2 = Ether(src=gateway_mac) / IP(src="93.184.216.34", dst="10.6.1.5", ttl=64) / TCP(
+        sport=443, dport=51001, flags="SA", window=8192
+    )
+    pcap_path = tmp_path / "gateway.pcap"
+    wrpcap(str(pcap_path), [reply1, reply2])
+    with open(pcap_path, "rb") as f:
+        client.post("/api/capture/pcap", files={"file": ("gateway.pcap", f, "application/vnd.tcpdump.pcap")})
+
+    devices = client.get("/api/inventory/devices").json()
+    device_ips = {d["ip"] for d in devices}
+    assert "10.6.1.5" in device_ips
+    # exactly one of the two public IPs should remain visible
+    assert len({"8.8.8.8", "93.184.216.34"} & device_ips) == 1
+
+    primary = next(d for d in devices if d["ip"] in ("8.8.8.8", "93.184.216.34"))
+    assert primary["display_device_type"] == "network_device"
+    assert primary["display_device_type_secondary"] == "router_nat"
+
+    flows = client.get("/api/inventory/flows").json()
+    flow_ips = {f["device_a_ip"] for f in flows} | {f["device_b_ip"] for f in flows}
+    assert {"8.8.8.8", "93.184.216.34", "10.6.1.5"} <= flow_ips
+
+
 def test_health_endpoint(client):
     resp = client.get("/api/health")
     assert resp.status_code == 200

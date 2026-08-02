@@ -55,6 +55,9 @@ class DeviceOut(BaseModel):
     device_type_evidence: str | None
     custom_device_type: str | None
     display_device_type: str | None
+    device_type_secondary: str | None
+    custom_device_type_secondary: str | None
+    display_device_type_secondary: str | None
     is_ot_suspected: bool
     is_external: bool
     protocol_count: int
@@ -76,6 +79,9 @@ class DeviceUpdateRequest(BaseModel):
     custom_name: str | None = None
     custom_vendor: str | None = None
     custom_device_type: Literal["plc", "hmi", "server", "workstation", "network_device", "other"] | None = None
+    custom_device_type_secondary: (
+        Literal["switch_l2", "switch_l3", "firewall", "access_point", "router_nat"] | None
+    ) = None
 
 
 class FlowOut(BaseModel):

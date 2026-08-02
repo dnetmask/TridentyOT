@@ -65,6 +65,13 @@ class Device(Base):
     device_type_evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
     custom_device_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
+    # Subcategory for NETWORK_DEVICE rows only (switch L2/L3, firewall,
+    # access point, router/NAT) -- a second, independent type field, same
+    # auto/custom-override pattern as device_type above. Only "router_nat"
+    # is ever auto-detected today (see inventory_service.apply_gateway_detection).
+    device_type_secondary: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    custom_device_type_secondary: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     is_ot_suspected: Mapped[bool] = mapped_column(default=False)
 
     # The capture session that *first* discovered this device -- used to
@@ -103,6 +110,10 @@ class Device(Base):
     @property
     def display_device_type(self) -> str | None:
         return self.custom_device_type or self.device_type
+
+    @property
+    def display_device_type_secondary(self) -> str | None:
+        return self.custom_device_type_secondary or self.device_type_secondary
 
     @property
     def is_external(self) -> bool:

@@ -30,10 +30,31 @@ OTHER = "other"
 LABELS = {
     PLC: "PLC",
     HMI: "HMI",
-    SERVER: "Servidor",
+    SERVER: "Servidor/VM",
     WORKSTATION: "PC",
     NETWORK_DEVICE: "Equipo de red",
     OTHER: "Otro",
+}
+
+# Subcategory for NETWORK_DEVICE rows only -- a second, independent
+# classification field (see Device.device_type_secondary/custom_device_type_secondary).
+# ROUTER_NAT is the only one ever auto-detected today (see
+# inventory_service.apply_gateway_detection); the rest are manual-only
+# until there's a reliable passive signal for them.
+SWITCH_L2 = "switch_l2"
+SWITCH_L3 = "switch_l3"
+FIREWALL = "firewall"
+ACCESS_POINT = "access_point"
+ROUTER_NAT = "router_nat"
+
+NETWORK_DEVICE_SUBTYPES = (SWITCH_L2, SWITCH_L3, FIREWALL, ACCESS_POINT, ROUTER_NAT)
+
+SUBTYPE_LABELS = {
+    SWITCH_L2: "Switch L2",
+    SWITCH_L3: "Switch L3",
+    FIREWALL: "Firewall",
+    ACCESS_POINT: "Access Point",
+    ROUTER_NAT: "Router/NAT",
 }
 
 # Substring match against the OUI vendor string (already resolved by
@@ -51,9 +72,13 @@ _NETWORK_VENDOR_KEYWORDS = (
     "netgear", "d-link", "tp-link", "fortinet", "extreme networks", "moxa", "advantech",
 )
 _IT_VENDOR_KEYWORDS = (
-    "dell", "vmware", "microsoft", "lenovo", "hewlett-packard", "hewlett packard",
+    "dell", "microsoft", "lenovo", "hewlett-packard", "hewlett packard",
     "intel corporate", "apple", "supermicro",
 )
+# A VMware-registered MAC prefix is a virtual NIC -- VMware doesn't make
+# workstations, so unlike the ambiguous IT keywords above this is a
+# confident, direct vote for SERVER (a VM), not a 50/50 split.
+_VIRTUALIZATION_VENDOR_KEYWORDS = ("vmware",)
 
 # Substring match against the device's own (lowercased) hostname. A site's
 # naming convention is a strong hint when it exists (e.g. this product's
@@ -91,6 +116,8 @@ def _vendor_category(vendor: str | None) -> str | None:
         return PLC
     if any(k in v for k in _NETWORK_VENDOR_KEYWORDS):
         return NETWORK_DEVICE
+    if any(k in v for k in _VIRTUALIZATION_VENDOR_KEYWORDS):
+        return SERVER
     if any(k in v for k in _IT_VENDOR_KEYWORDS):
         return "it"  # ambiguous between server/workstation on its own
     return None
@@ -150,6 +177,9 @@ def classify_device_type(
     elif vendor_cat == NETWORK_DEVICE:
         scores[NETWORK_DEVICE] += 2.0
         evidence.append(f'Fabricante de redes ("{vendor}")')
+    elif vendor_cat == SERVER:
+        scores[SERVER] += 2.0
+        evidence.append(f'Fabricante de virtualización ("{vendor}") -- interfaz de máquina virtual')
     elif vendor_cat == "it":
         scores[SERVER] += 0.5
         scores[WORKSTATION] += 0.5
