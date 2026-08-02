@@ -11,6 +11,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+from app.fingerprint.ip_scope import is_lan_ip
 
 
 def utcnow() -> datetime.datetime:
@@ -102,6 +103,17 @@ class Device(Base):
     @property
     def display_device_type(self) -> str | None:
         return self.custom_device_type or self.device_type
+
+    @property
+    def is_external(self) -> bool:
+        """A device counts as external only if BOTH signals agree: its IP
+        looks public AND we've never captured it transmitting (mac is None
+        -- see inventory_service.get_or_create_device, which only ever
+        learns mac from a packet's sender, never its destination). A LAN
+        host misconfigured with a public IP range still has a captured mac,
+        so it's correctly kept off this flag; a real off-network host
+        reached only through a router never does."""
+        return self.mac is None and not is_lan_ip(self.ip)
 
 
 class DeviceProtocol(Base):

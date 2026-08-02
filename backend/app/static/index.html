@@ -135,6 +135,7 @@
   .pill.server { border-color: var(--accent); color: var(--accent); }
   .pill.network { border-color: var(--info); color: var(--info); }
   .pill.workstation { border-color: var(--ok); color: var(--ok); }
+  .pill.external { border-color: var(--info); color: var(--info); }
   .muted { color: var(--muted); }
   .empty { color: var(--muted); padding: 20px; text-align: center; }
   .stat-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 14px; }
@@ -330,6 +331,9 @@
         <div class="row" style="position:relative;">
           <label style="display:inline-flex;align-items:center;gap:6px;margin:0;">
             <input type="checkbox" id="ot-only-checkbox" style="width:auto" /> Solo dispositivos OT
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:6px;margin:0;" title="Un equipo se marca Externo cuando nunca se le capturó transmitiendo (sin MAC) y su IP parece pública -- es decir, fuera de esta red, alcanzado solo a través de un router.">
+            <input type="checkbox" id="hide-external-checkbox" style="width:auto" /> Ocultar equipos externos
           </label>
           <button class="action secondary" id="columns-btn">Columnas</button>
           <div id="columns-panel" class="columns-panel hidden">
@@ -766,7 +770,9 @@ function renderDeviceStats() {
 function renderDevicesTable() {
   const tbody = $('#devices-body');
   const otOnly = $('#ot-only-checkbox').checked;
-  const devices = otOnly ? allDevices.filter(d => d.is_ot_suspected) : allDevices;
+  const hideExternal = $('#hide-external-checkbox').checked;
+  let devices = otOnly ? allDevices.filter(d => d.is_ot_suspected) : allDevices;
+  if (hideExternal) devices = devices.filter(d => !d.is_external);
   if (!devices.length) {
     tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin dispositivos detectados aún</td></tr>';
     fitTableScroll('devices-scroll');
@@ -774,7 +780,7 @@ function renderDevicesTable() {
   }
   tbody.innerHTML = devices.map(d => `
     <tr class="clickable" onclick="showDeviceDetail(${d.id})">
-      <td data-col="ip">${d.ip || '—'} ${d.is_ot_suspected ? '<span class="pill ot">OT</span>' : ''}</td>
+      <td data-col="ip">${d.ip || '—'} ${d.is_ot_suspected ? '<span class="pill ot">OT</span>' : ''} ${d.is_external ? '<span class="pill external" title="Sin MAC capturada y con IP pública: probablemente fuera de esta red">Externo</span>' : ''}</td>
       <td data-col="nombre">${d.display_name || '<span class="muted">—</span>'}${d.custom_name ? '<span class="manual-tag">manual</span>' : ''}</td>
       <td data-col="tipo">${deviceTypeBadge(d)}</td>
       <td data-col="fabricante">${d.display_vendor || '<span class="muted">—</span>'}${d.custom_vendor ? '<span class="manual-tag">manual</span>' : ''}</td>
@@ -858,6 +864,7 @@ async function saveDeviceOverrides(id, reset = false) {
 }
 
 $('#ot-only-checkbox').addEventListener('change', renderDevicesTable);
+$('#hide-external-checkbox').addEventListener('change', renderDevicesTable);
 
 // ---------- Inventory column visibility (persisted per-browser) ----------
 const COLUMNS_STORAGE_KEY = 'tridentyot_inventory_columns';

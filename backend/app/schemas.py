@@ -56,6 +56,7 @@ class DeviceOut(BaseModel):
     custom_device_type: str | None
     display_device_type: str | None
     is_ot_suspected: bool
+    is_external: bool
     protocol_count: int
     protocol_names: list[str] = []
     first_seen: datetime.datetime

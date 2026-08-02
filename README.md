@@ -18,11 +18,18 @@ ya capturado, y a partir de eso construye:
    - Switches/routers identificados solo por CDP/LLDP (sin tráfico IP propio en el segmento
      capturado) se inventarían igual, quedan marcados como **Network appliance** y se fusionan
      automáticamente con su registro por IP si luego se les ve tráfico IP con la misma MAC.
-   - Solo se listan activos de **la propia red local** (IP privada/link-local, o sin IP para un
-     equipo identificado solo por MAC vía CDP/LLDP): un host con IP pública nunca aparece como
-     activo del inventario, aunque las conversaciones hacia él y sus hallazgos de vulnerabilidad
-     siguen visibles en **Flujos** y **Vulnerabilidades** (`GET /api/inventory/devices` acepta
-     `?include_public=true` para listarlo también ahí).
+   - Se listan **todos** los activos vistos, incluida una IP de rango público: algunas redes
+     LAN (mal) asignan rangos públicos a equipos internos, así que el rango de IP por sí solo ya
+     no basta para decidir si algo es "de esta red". En su lugar, cada dispositivo trae un campo
+     **`is_external`** (columna/etiqueta **Externo** en el frontend) que combina dos señales: si su
+     IP parece pública **y** si alguna vez se le capturó transmitiendo, es decir, si tiene una MAC
+     propia. La MAC solo se aprende del *emisor* de un paquete, nunca del destino (ver
+     `inventory_service.get_or_create_device`), así que un host realmente externo -- alcanzado solo
+     a través de un router -- nunca tiene MAC propia capturada, mientras que un equipo LAN mal
+     configurado con IP pública sí la tiene (se le vio transmitir en el segmento capturado). Solo se
+     marca **Externo** cuando ambas señales coinciden. `GET /api/inventory/devices` acepta
+     `?hide_external=true` para ocultar esos equipos del listado si se prefiere; por defecto se
+     muestran todos.
    - Todo es **editable manualmente** en cualquier momento (se detecte o no), sin perder el
      valor auto-detectado como referencia.
    - **Tipo de dispositivo** (columna **Tipo**): clasifica cada activo como **PLC**, **HMI**,

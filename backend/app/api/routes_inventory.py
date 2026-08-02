@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user, require_editor
 from app.db import get_db
-from app.fingerprint.ip_scope import is_lan_ip
 from app.models import Device, DeviceProtocol, Flow, User
 from app.schemas import DeviceDetailOut, DeviceOut, DeviceUpdateRequest, FlowOut
 
@@ -14,7 +13,7 @@ router = APIRouter(prefix="/api/inventory", tags=["inventory"])
 def list_devices(
     ot_only: bool = False,
     protocol: str | None = None,
-    include_public: bool = False,
+    hide_external: bool = False,
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
@@ -25,13 +24,13 @@ def list_devices(
         query = query.join(DeviceProtocol).filter(DeviceProtocol.protocol == protocol)
     devices = query.order_by(Device.last_seen.desc()).all()
 
-    # Inventory is meant to be *this network's* asset list. A device whose
-    # only identity is a public-internet IP was never an asset here -- it's
-    # something a real LAN device talked to, which still belongs in Flows
-    # and in that device's own vulnerability findings, just not listed
-    # alongside actual local hosts and switches.
-    if not include_public:
-        devices = [d for d in devices if is_lan_ip(d.ip)]
+    # Some LANs (mis)assign public IP ranges to real local devices, so a
+    # public-looking IP alone is no longer grounds to hide something from
+    # Inventory -- see Device.is_external for the combined mac+IP signal
+    # that actually distinguishes "off-network" from "just a public range
+    # in use here". Devices are shown by default; hide_external is opt-in.
+    if hide_external:
+        devices = [d for d in devices if not d.is_external]
     return devices
 
 
