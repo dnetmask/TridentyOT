@@ -40,16 +40,31 @@ class Base(DeclarativeBase):
 def _add_missing_columns() -> None:
     """`Base.metadata.create_all()` only creates missing *tables* -- it never
     alters an existing table, so a database created by an older version of
-    the app (before a new nullable column was added to a model) is left
-    without that column, and every query against it fails with something
-    like "no such column: devices.custom_name".
+    the app (before a new column was added to a model) is left without that
+    column, and every query against it fails with something like "no such
+    column: devices.custom_name".
 
     This adds any column present in the current models but missing from the
     actual database, via plain `ALTER TABLE ... ADD COLUMN`, which is enough
     for how this app evolves its schema so far -- every change has been a
-    new nullable column or a brand-new table (handled by create_all itself),
-    never a rename, a drop, or a new NOT NULL column. Existing rows and data
-    are left untouched; the new column is simply NULL for them.
+    new column or a brand-new table (handled by create_all itself), never a
+    rename or a drop.
+
+    A plain `ADD COLUMN` never applies the *ORM-level* default
+    (`mapped_column(..., default=0)`) to rows that already existed before
+    the column did -- SQLite just leaves it NULL for them. That's fine for
+    an `Optional` field (custom_name, hostname, ...), but a column the API
+    schema declares as a plain non-optional `int`/`float`/`bool`
+    (packet_count, dropped_count, os_confidence, device_type_confidence,
+    is_ot_suspected, ...) then fails response validation the moment one of
+    those pre-existing rows is read back -- e.g. GET /api/capture/sessions
+    500ing with "Input should be a valid integer" for dropped_count after
+    upgrading to the version that added it. So every column with a plain
+    scalar default gets its lingering NULLs backfilled to that default on
+    every startup, not just the ones added in *this* run -- a database that
+    already picked up the column with NULLs in an earlier startup needs
+    the same repair, and this is idempotent (a no-op once there's nothing
+    left to fix).
     """
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -60,11 +75,25 @@ def _add_missing_columns() -> None:
                 continue  # brand-new table: create_all() already made it, in full
             existing_columns = {col["name"] for col in inspector.get_columns(table.name)}
             for column in table.columns:
-                if column.name in existing_columns:
-                    continue
-                col_type = column.type.compile(dialect=engine.dialect)
-                logger.info("Migrating schema: adding %s.%s (%s)", table.name, column.name, col_type)
-                conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN "{column.name}" {col_type}'))
+                if column.name not in existing_columns:
+                    col_type = column.type.compile(dialect=engine.dialect)
+                    logger.info("Migrating schema: adding %s.%s (%s)", table.name, column.name, col_type)
+                    conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN "{column.name}" {col_type}'))
+
+                default = column.default
+                if default is not None and getattr(default, "is_scalar", False):
+                    result = conn.execute(
+                        text(f'UPDATE {table.name} SET "{column.name}" = :default WHERE "{column.name}" IS NULL'),
+                        {"default": default.arg},
+                    )
+                    if result.rowcount:
+                        logger.info(
+                            "Migrating schema: backfilled %d NULL row(s) in %s.%s to %r",
+                            result.rowcount,
+                            table.name,
+                            column.name,
+                            default.arg,
+                        )
 
 
 def init_db() -> None:

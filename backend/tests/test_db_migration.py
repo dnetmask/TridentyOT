@@ -8,7 +8,7 @@ existing one. init_db() now also patches in any missing columns.
 import sqlalchemy as sa
 
 from app import db as db_module
-from app.models import Device
+from app.models import CaptureSession, Device
 
 
 def test_migration_adds_missing_columns_without_losing_existing_data(tmp_path, monkeypatch):
@@ -70,6 +70,72 @@ def test_migration_adds_missing_columns_without_losing_existing_data(tmp_path, m
     with Session() as session:
         device = session.query(Device).filter(Device.ip == "10.0.0.5").one()
         assert device.custom_name == "Renamed PLC"
+
+
+def test_migration_backfills_a_scalar_default_instead_of_leaving_null(tmp_path, monkeypatch):
+    """Regression test for a real bug: CaptureSession.dropped_count was
+    added as a plain `int` in the API schema, but a bare `ALTER TABLE ADD
+    COLUMN` leaves it NULL on every row that existed before the column
+    did -- so GET /api/capture/sessions 500'd with a ResponseValidationError
+    ("Input should be a valid integer") the moment it tried to serialize
+    one of those pre-existing sessions. Any scalar-default column
+    (packet_count, dropped_count, os_confidence, is_ot_suspected, ...) has
+    the same exposure; this must backfill the model's default instead of
+    leaving SQLite's NULL in place, and must do so even for a column an
+    *earlier* run of this migration already added with the bug.
+    """
+    db_path = tmp_path / "legacy_sessions.db"
+
+    setup_engine = sa.create_engine(f"sqlite:///{db_path}")
+    with setup_engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                """
+                CREATE TABLE capture_sessions (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR(255),
+                    source_type VARCHAR(16),
+                    source VARCHAR(255),
+                    bpf_filter VARCHAR(255),
+                    status VARCHAR(16),
+                    packet_count INTEGER,
+                    error_message TEXT,
+                    started_at DATETIME,
+                    ended_at DATETIME
+                )
+                """
+            )
+        )
+        conn.execute(
+            sa.text(
+                "INSERT INTO capture_sessions "
+                "(id, name, source_type, source, bpf_filter, status, packet_count, started_at) "
+                "VALUES (1, 'live:eth0', 'live', 'eth0', 'ip or arp', 'stopped', 42, '2024-01-01')"
+            )
+        )
+    setup_engine.dispose()
+
+    patched_engine = sa.create_engine(f"sqlite:///{db_path}")
+    monkeypatch.setattr(db_module, "engine", patched_engine)
+
+    db_module.init_db()
+
+    Session = sa.orm.sessionmaker(bind=patched_engine)
+    with Session() as session:
+        capture_session = session.query(CaptureSession).filter(CaptureSession.id == 1).one()
+        assert capture_session.packet_count == 42  # pre-existing data untouched
+        assert capture_session.dropped_count == 0  # backfilled, not None
+
+    # Simulate the column having already been added by an earlier (buggy)
+    # startup, with the NULL still sitting there -- init_db() must repair
+    # it too, not just skip columns it thinks already exist.
+    with patched_engine.begin() as conn:
+        conn.execute(sa.text("UPDATE capture_sessions SET dropped_count = NULL WHERE id = 1"))
+    db_module.init_db()
+
+    with Session() as session:
+        capture_session = session.query(CaptureSession).filter(CaptureSession.id == 1).one()
+        assert capture_session.dropped_count == 0
 
 
 def test_migration_is_a_no_op_on_an_up_to_date_database(tmp_path, monkeypatch):
