@@ -149,8 +149,12 @@
   .stat-tile .stat-num.high { color: var(--high); }
   .stat-tile .stat-num.ot { color: var(--high); }
   .stat-tile .stat-num.plc { color: var(--med); }
+  .stat-tile .stat-num.hmi { color: var(--high); }
   .stat-tile .stat-num.server { color: var(--accent); }
+  .stat-tile .stat-num.workstation { color: var(--ok); }
+  .stat-tile .stat-num.network { color: var(--info); }
   .stat-tile .stat-label { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .refresh-timer { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
   .table-scroll { overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
   .table-scroll table { width: 100%; border-collapse: collapse; }
   .table-scroll thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
@@ -199,6 +203,28 @@
     margin-bottom: 14px;
   }
   .hidden { display: none !important; }
+
+  /* ---------- printable vulnerability report (screen: hidden; print: only this) ---------- */
+  #print-report { display: none; }
+  @media print {
+    body { background: #fff !important; }
+    body > *:not(#print-report) { display: none !important; }
+    #print-report { display: block !important; }
+  }
+  #print-report { background: #fff; color: #14171f; padding: 28px 36px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  #print-report .pr-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #14171f; padding-bottom: 14px; margin-bottom: 18px; }
+  #print-report .pr-header img { height: 30px; }
+  #print-report .pr-meta { font-size: 11.5px; color: #55607a; text-align: right; }
+  #print-report h1 { font-size: 19px; margin: 0 0 2px; }
+  #print-report .pr-sub { font-size: 12px; color: #55607a; margin: 0 0 18px; }
+  #print-report .pr-stats { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+  #print-report .pr-stat { border: 1px solid #d6dbe6; border-radius: 8px; padding: 8px 14px; min-width: 110px; }
+  #print-report .pr-stat .n { font-size: 19px; font-weight: 800; }
+  #print-report .pr-stat .l { font-size: 10.5px; color: #55607a; margin-top: 2px; }
+  #print-report table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+  #print-report th, #print-report td { border: 1px solid #d6dbe6; padding: 6px 8px; text-align: left; vertical-align: top; }
+  #print-report th { background: #f2f4f8; }
+  #print-report .pr-footer { margin-top: 16px; font-size: 10px; color: #8a93a8; }
 
   /* ---------- login screen ---------- */
   #login-screen {
@@ -329,6 +355,7 @@
       <div class="flex-between">
         <h2>Dispositivos detectados</h2>
         <div class="row" style="position:relative;">
+          <span id="inventory-refresh-timer" class="refresh-timer"></span>
           <label style="display:inline-flex;align-items:center;gap:6px;margin:0;">
             <input type="checkbox" id="ot-only-checkbox" style="width:auto" /> Solo dispositivos OT
           </label>
@@ -370,6 +397,10 @@
       <div class="flex-between">
         <h2>Flujos (sesiones TCP/UDP) — quién conversa con quién</h2>
         <div class="row">
+          <span id="flows-refresh-timer" class="refresh-timer"></span>
+          <label style="display:inline-flex;align-items:center;gap:6px;margin:0;" title="Un equipo se marca Externo cuando nunca se le capturó transmitiendo (sin MAC) y su IP parece pública -- es decir, fuera de esta red, alcanzado solo a través de un router.">
+            <input type="checkbox" id="hide-external-flows-checkbox" style="width:auto" /> Ocultar flujos externos
+          </label>
           <select id="flow-category-filter">
             <option value="">Todas las categorías</option>
             <option value="OT">Solo OT</option>
@@ -390,6 +421,7 @@
       <div class="flex-between">
         <h2>Hallazgos de vulnerabilidades</h2>
         <div class="row">
+          <span id="vuln-scan-timer" class="refresh-timer"></span>
           <select id="severity-filter">
             <option value="">Todas las severidades</option>
             <option value="critical">Critical</option>
@@ -398,6 +430,7 @@
             <option value="low">Low</option>
             <option value="info">Info</option>
           </select>
+          <button class="action secondary" id="export-vuln-pdf-btn">Exportar PDF</button>
           <button class="action editor-only" id="scan-all-btn">Ejecutar escaneo completo</button>
         </div>
       </div>
@@ -447,13 +480,40 @@
   </main>
 </div>
 
+<div id="print-report"></div>
+
 <script>
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 let currentUser = null;
 let autoRefreshTimer = null;
+let countdownTimer = null;
+let vulnScanTimer = null;
+let nextRefreshAt = null;
+let nextVulnScanAt = null;
 const AUTO_REFRESH_MS = 15000;
+const VULN_AUTO_SCAN_MS = 60000;
+
+function stopBackgroundTimers() {
+  [autoRefreshTimer, countdownTimer, vulnScanTimer].forEach(t => { if (t) clearInterval(t); });
+  autoRefreshTimer = countdownTimer = vulnScanTimer = null;
+  nextRefreshAt = nextVulnScanAt = null;
+}
+
+function updateCountdowns() {
+  const secsLeft = (target) => target ? Math.max(0, Math.round((target - Date.now()) / 1000)) : null;
+  const refreshSecs = secsLeft(nextRefreshAt);
+  const refreshLabel = refreshSecs === null ? '' : `Se actualiza en ${refreshSecs}s`;
+  const invTimer = $('#inventory-refresh-timer');
+  if (invTimer) invTimer.textContent = refreshLabel;
+  const flowTimer = $('#flows-refresh-timer');
+  if (flowTimer) flowTimer.textContent = refreshLabel;
+
+  const scanSecs = secsLeft(nextVulnScanAt);
+  const vulnTimer = $('#vuln-scan-timer');
+  if (vulnTimer) vulnTimer.textContent = scanSecs === null ? '' : `Próximo reporte automático en ${scanSecs}s`;
+}
 
 function isEditor() {
   return !!currentUser && currentUser.role === 'editor';
@@ -493,7 +553,7 @@ async function api(path, options = {}) {
 
   const res = await fetch(path, Object.assign({}, options, { headers }));
   if (res.status === 401) {
-    if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+    stopBackgroundTimers();
     setToken(null);
     currentUser = null;
     showLoginScreen();
@@ -516,16 +576,33 @@ async function bootstrapAfterLogin() {
   showAppShell();
   loadInterfaces();
   refreshAllData();
-  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
-  autoRefreshTimer = setInterval(refreshAllData, AUTO_REFRESH_MS);
+
+  stopBackgroundTimers();
+  nextRefreshAt = Date.now() + AUTO_REFRESH_MS;
+  nextVulnScanAt = Date.now() + VULN_AUTO_SCAN_MS;
+  autoRefreshTimer = setInterval(() => { refreshAllData(); nextRefreshAt = Date.now() + AUTO_REFRESH_MS; }, AUTO_REFRESH_MS);
+  vulnScanTimer = setInterval(() => { autoScanVulnerabilities(); nextVulnScanAt = Date.now() + VULN_AUTO_SCAN_MS; }, VULN_AUTO_SCAN_MS);
+  countdownTimer = setInterval(updateCountdowns, 1000);
+  updateCountdowns();
 }
 
-function refreshAllData() {
+async function refreshAllData() {
   loadSessions();
-  loadDevices();
+  await loadDevices();
   loadFlows();
   loadFindings();
   if (isEditor()) loadUsers();
+}
+
+async function autoScanVulnerabilities() {
+  try {
+    await api('/api/vuln/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ use_nvd: false }),
+    });
+  } catch (e) { /* transient failure -- the next minute's tick retries */ }
+  loadFindings();
 }
 
 $('#login-form').addEventListener('submit', async (e) => {
@@ -552,7 +629,7 @@ $('#login-form').addEventListener('submit', async (e) => {
 });
 
 $('#logout-btn').addEventListener('click', async () => {
-  if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+  stopBackgroundTimers();
   try { await api('/api/auth/logout', { method: 'POST' }); } catch (e) {}
   setToken(null);
   currentUser = null;
@@ -723,7 +800,6 @@ function fitTableScroll(wrapperId, rowsToShow = 7) {
 
 async function loadDevices() {
   allDevices = await api('/api/inventory/devices');
-  renderDeviceStats();
   renderDevicesTable();
 }
 
@@ -752,17 +828,23 @@ function deviceTypeBadge(d) {
   return `${badge}${d.custom_device_type ? '<span class="manual-tag">manual</span>' : ''}`;
 }
 
-function renderDeviceStats() {
-  const total = allDevices.length;
-  const otCount = allDevices.filter(d => d.is_ot_suspected).length;
-  const plcCount = allDevices.filter(d => d.display_device_type === 'plc').length;
-  const serverCount = allDevices.filter(d => d.display_device_type === 'server').length;
-  const otherCount = total - plcCount - serverCount;
+function renderDeviceStats(devices) {
+  const total = devices.length;
+  const otCount = devices.filter(d => d.is_ot_suspected).length;
+  const plcCount = devices.filter(d => d.display_device_type === 'plc').length;
+  const hmiCount = devices.filter(d => d.display_device_type === 'hmi').length;
+  const serverCount = devices.filter(d => d.display_device_type === 'server').length;
+  const workstationCount = devices.filter(d => d.display_device_type === 'workstation').length;
+  const networkCount = devices.filter(d => d.display_device_type === 'network_device').length;
+  const otherCount = total - plcCount - hmiCount - serverCount - workstationCount - networkCount;
   $('#inventory-stats').innerHTML = `
     <div class="stat-tile"><div class="stat-num">${total}</div><div class="stat-label">Dispositivos detectados</div></div>
     <div class="stat-tile"><div class="stat-num ot">${otCount}</div><div class="stat-label">Dispositivos OT</div></div>
     <div class="stat-tile"><div class="stat-num plc">${plcCount}</div><div class="stat-label">PLC</div></div>
+    <div class="stat-tile"><div class="stat-num hmi">${hmiCount}</div><div class="stat-label">HMI</div></div>
     <div class="stat-tile"><div class="stat-num server">${serverCount}</div><div class="stat-label">Servidores</div></div>
+    <div class="stat-tile"><div class="stat-num workstation">${workstationCount}</div><div class="stat-label">PCs</div></div>
+    <div class="stat-tile"><div class="stat-num network">${networkCount}</div><div class="stat-label">Equipos de red</div></div>
     <div class="stat-tile"><div class="stat-num">${otherCount}</div><div class="stat-label">Otros equipos</div></div>
   `;
 }
@@ -771,8 +853,9 @@ function renderDevicesTable() {
   const tbody = $('#devices-body');
   const otOnly = $('#ot-only-checkbox').checked;
   const hideExternal = $('#hide-external-checkbox').checked;
-  let devices = otOnly ? allDevices.filter(d => d.is_ot_suspected) : allDevices;
-  if (hideExternal) devices = devices.filter(d => !d.is_external);
+  const statsDevices = hideExternal ? allDevices.filter(d => !d.is_external) : allDevices;
+  renderDeviceStats(statsDevices);
+  const devices = otOnly ? statsDevices.filter(d => d.is_ot_suspected) : statsDevices;
   if (!devices.length) {
     tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin dispositivos detectados aún</td></tr>';
     fitTableScroll('devices-scroll');
@@ -920,32 +1003,45 @@ let allFlows = [];
 
 async function loadFlows() {
   allFlows = await api('/api/inventory/flows');
-  renderFlowStats();
   renderFlowsTable();
 }
 
-function renderFlowStats() {
-  const total = allFlows.length;
-  const otCount = allFlows.filter(f => f.category === 'OT').length;
+function renderFlowStats(flows) {
+  const total = flows.length;
+  const otCount = flows.filter(f => f.category === 'OT').length;
   $('#flows-stats').innerHTML = `
     <div class="stat-tile"><div class="stat-num">${total}</div><div class="stat-label">Flujos detectados</div></div>
     <div class="stat-tile"><div class="stat-num ot">${otCount}</div><div class="stat-label">De protocolos industriales (OT)</div></div>
   `;
 }
 
+function isFlowExternal(f, deviceById) {
+  const a = deviceById.get(f.device_a_id);
+  const b = deviceById.get(f.device_b_id);
+  return !!(a && a.is_external) || !!(b && b.is_external);
+}
+
 function renderFlowsTable() {
   const tbody = $('#flows-body');
   const cat = $('#flow-category-filter').value;
-  const flows = cat ? allFlows.filter(f => f.category === cat) : allFlows;
+  const hideExternal = $('#hide-external-flows-checkbox').checked;
+  const deviceById = new Map(allDevices.map(d => [d.id, d]));
+
+  const statsFlows = hideExternal ? allFlows.filter(f => !isFlowExternal(f, deviceById)) : allFlows;
+  renderFlowStats(statsFlows);
+  const flows = cat ? statsFlows.filter(f => f.category === cat) : statsFlows;
   if (!flows.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin flujos detectados aún</td></tr>'; return; }
   tbody.innerHTML = flows.map(f => {
+    const aDevice = deviceById.get(f.device_a_id);
+    const bDevice = deviceById.get(f.device_b_id);
     const aLabel = f.device_a_name || f.device_a_ip || `#${f.device_a_id}`;
     const bLabel = f.device_b_name || f.device_b_ip || `#${f.device_b_id}`;
     const aIsServer = f.server_device_id === f.device_a_id;
+    const externalPill = ' <span class="pill external">Externo</span>';
     return `
     <tr>
-      <td>${aLabel}${aIsServer ? ' <span class="pill">servidor</span>' : ''}</td>
-      <td>${bLabel}${!aIsServer ? ' <span class="pill">servidor</span>' : ''}</td>
+      <td>${aLabel}${aIsServer ? ' <span class="pill">servidor</span>' : ''}${aDevice && aDevice.is_external ? externalPill : ''}</td>
+      <td>${bLabel}${!aIsServer ? ' <span class="pill">servidor</span>' : ''}${bDevice && bDevice.is_external ? externalPill : ''}</td>
       <td>${f.protocol}${f.category === 'OT' ? ' <span class="pill ot">OT</span>' : ''}</td>
       <td>${f.port ?? '—'}</td>
       <td>${f.transport}</td>
@@ -957,6 +1053,7 @@ function renderFlowsTable() {
 }
 
 $('#flow-category-filter').addEventListener('change', renderFlowsTable);
+$('#hide-external-flows-checkbox').addEventListener('change', renderFlowsTable);
 
 // ---------- Vulnerabilities tab ----------
 let allFindings = [];
@@ -1004,6 +1101,49 @@ $('#scan-all-btn').addEventListener('click', async () => {
     await loadFindings();
   } catch (e) { alert('Error en el escaneo: ' + e.message); }
   finally { $('#scan-all-btn').textContent = 'Ejecutar escaneo completo'; }
+});
+
+function buildVulnReportHtml() {
+  const now = new Date();
+  const bySeverity = {};
+  allFindings.forEach(f => { bySeverity[f.severity] = (bySeverity[f.severity] || 0) + 1; });
+  const affectedDevices = new Set(allFindings.map(f => f.device_id)).size;
+  const rows = allFindings.map(f => `
+    <tr>
+      <td>${(f.severity || 'unknown').toUpperCase()}</td>
+      <td>${f.device_ip || '#' + f.device_id}</td>
+      <td>${f.device_name || '—'}</td>
+      <td>${f.title}</td>
+      <td>${f.source}${f.cve_id ? ' · ' + f.cve_id : ''}</td>
+      <td>${f.evidence || '—'}</td>
+    </tr>`).join('') || '<tr><td colspan="6">Sin hallazgos</td></tr>';
+
+  return `
+    <div class="pr-header">
+      <img src="/brand/lockup_dark.png" alt="TridentyOT" />
+      <div class="pr-meta">Generado: ${now.toLocaleString()}</div>
+    </div>
+    <h1>Reporte de vulnerabilidades</h1>
+    <p class="pr-sub">Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)</p>
+    <div class="pr-stats">
+      <div class="pr-stat"><div class="n">${allFindings.length}</div><div class="l">Hallazgos totales</div></div>
+      <div class="pr-stat"><div class="n">${affectedDevices}</div><div class="l">Dispositivos afectados</div></div>
+      <div class="pr-stat"><div class="n">${bySeverity.critical || 0}</div><div class="l">Critical</div></div>
+      <div class="pr-stat"><div class="n">${bySeverity.high || 0}</div><div class="l">High</div></div>
+      <div class="pr-stat"><div class="n">${bySeverity.medium || 0}</div><div class="l">Medium</div></div>
+      <div class="pr-stat"><div class="n">${bySeverity.low || 0}</div><div class="l">Low</div></div>
+    </div>
+    <table>
+      <thead><tr><th>Severidad</th><th>Dispositivo</th><th>Nombre</th><th>Hallazgo</th><th>Fuente</th><th>Evidencia</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="pr-footer">TridentyOT — reporte generado automáticamente a partir de la última captura analizada.</div>
+  `;
+}
+
+$('#export-vuln-pdf-btn').addEventListener('click', () => {
+  $('#print-report').innerHTML = buildVulnReportHtml();
+  window.print();
 });
 
 // ---------- Users tab (editor only) ----------

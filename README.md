@@ -42,8 +42,9 @@ ya capturado, y a partir de eso construye:
      **HMI** (SCADA/estación de ingeniería: un PLC embebido nunca fingerprintea como un SO de
      propósito general). Un nombre que contenga "HMI" también clasifica como HMI directamente.
      Cada clasificación muestra su **evidencia** y una confianza 0-100%; los indicadores
-     superiores de Inventario cuentan PLC/Servidores/Otros (HMI cae en "Otros equipos" en ese
-     conteo, aunque sigue marcado como **OT** igual que un PLC). Igual que nombre y fabricante, es
+     superiores de Inventario tienen un contador propio por cada tipo (**PLC**, **HMI**,
+     **Servidores**, **PCs**, **Equipos de red**) más "Otros equipos" para lo no clasificado, y se
+     recalculan al vuelo si se activa "Ocultar equipos externos". Igual que nombre y fabricante, es
      **editable manualmente** sin perder el valor auto-detectado. Ver "Limitaciones conocidas"
      para el caso que esto no puede resolver de forma pasiva (servidor vs. PC Windows).
 2. **Fingerprint pasivo de sistema operativo**: heurística basada en TTL inicial, tamaño de
@@ -52,7 +53,10 @@ ya capturado, y a partir de eso construye:
    del payload (HTTP, TLS, SSH, FTP...), cubriendo tanto protocolos IT comunes como protocolos
    OT/ICS (Modbus, DNP3, S7comm, EtherNet/IP, BACnet, IEC-104, OPC UA, etc.).
 4. **Flujos / conversaciones**: qué par de dispositivos conversó, por qué protocolo/puerto y
-   cuántos paquetes, agregado desde las sesiones TCP/UDP observadas (pestaña **Flujos**).
+   cuántos paquetes, agregado desde las sesiones TCP/UDP observadas (pestaña **Flujos**). Si
+   cualquiera de los dos extremos es un dispositivo marcado **Externo** (ver punto 1), el flujo
+   muestra esa misma etiqueta y puede ocultarse con "Ocultar flujos externos", que recalcula al
+   vuelo los indicadores de la pestaña (total de flujos y flujos OT).
 5. **Motor de vulnerabilidades**:
    - **Reglas locales** (sin conexión a internet): protocolos inseguros por diseño (Telnet, FTP,
      SNMP, SMB sin verificar SMBv1, etc.), exposición de protocolos OT sin autenticación/cifrado,
@@ -222,7 +226,9 @@ curl -X POST http://localhost:8000/api/vuln/scan \
 ### Borrar toda la base de datos (empezar una captura en blanco)
 
 El dashboard se refresca solo, cada 15 segundos, en todas sus pestañas -- no hace falta ningún
-botón "Actualizar". Cuando lo que hace falta es partir de cero (no solo ver datos nuevos), la
+botón "Actualizar". Las pestañas **Inventario** y **Flujos** muestran un pequeño temporizador
+("Se actualiza en Xs") junto a sus filtros que cuenta hacia atrás hasta el próximo refresco.
+Cuando lo que hace falta es partir de cero (no solo ver datos nuevos), la
 pestaña **Captura** tiene una sección "Zona de peligro" con un botón que borra **todas** las
 sesiones de captura, dispositivos, protocolos, flujos y hallazgos de vulnerabilidades -- las
 cuentas de usuario nunca se tocan. Pide confirmación antes de ejecutar, porque no se puede
@@ -232,6 +238,16 @@ deshacer. Por API (requiere rol editor):
 curl -X DELETE http://localhost:8000/api/capture/wipe \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+### Reporte automático de vulnerabilidades y exportación a PDF
+
+Además del refresco general de 15 segundos, la pestaña **Vulnerabilidades** ejecuta por su cuenta
+un escaneo basado en reglas (equivalente a `?use_nvd=false`, para no depender de salir a internet
+cada minuto) cada **60 segundos**, con su propio temporizador ("Próximo reporte automático en
+Xs"). El botón **Exportar PDF** genera, con los hallazgos actualmente cargados, una vista de
+reporte de una sola página con el logo de TridentyOT, fecha de generación, resumen por severidad
+y la tabla completa de hallazgos, y abre el diálogo de impresión del navegador (**Guardar como
+PDF**) ya con esa vista lista -- sin depender de ningún servicio externo de generación de PDF.
 
 ## Configuración (variables de entorno)
 
