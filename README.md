@@ -223,6 +223,16 @@ curl -X POST http://localhost:8000/api/vuln/scan \
 
 `use_nvd: false` limita el escaneo a las reglas locales (sin salir a internet).
 
+### Tema claro/oscuro
+
+El dashboard sigue por defecto la preferencia del sistema operativo (`prefers-color-scheme`), y
+tiene un interruptor manual en la barra lateral (debajo de la navegación) para forzar uno u otro;
+la elección manual queda guardada en el navegador (`localStorage`) y tiene prioridad sobre la
+preferencia del sistema en las siguientes visitas. Es un cambio puramente de variables CSS -- los
+colores semánticos (OT, PLC, HMI, severidades de Vulnerabilidades) se mantienen reconocibles en
+ambos temas, solo se reajusta el contraste de algunos (naranja/ámbar más oscuros sobre fondo
+blanco).
+
 ### Borrar toda la base de datos (empezar una captura en blanco)
 
 El dashboard se refresca solo, cada 15 segundos, en todas sus pestañas -- no hace falta ningún
