@@ -25,6 +25,16 @@ ya capturado, y a partir de eso construye:
      `?include_public=true` para listarlo también ahí).
    - Todo es **editable manualmente** en cualquier momento (se detecte o no), sin perder el
      valor auto-detectado como referencia.
+   - **Tipo de dispositivo** (columna **Tipo**): clasifica cada activo como **PLC**, **Servidor**,
+     **PC** o **Equipo de red** combinando, con reglas explicables (no ML), la evidencia que el
+     resto del motor pasivo ya recolectó -- protocolo servido (un protocolo OT como servidor es
+     PLC casi con certeza), anuncio CDP/LLDP (equipo de red con certeza), categoría del
+     fabricante por OUI (industrial/redes/IT genérico), palabras clave del nombre del equipo
+     ("-HMI01", "-SRV", "-PC"...) y cantidad de protocolos distintos servidos. Cada clasificación
+     muestra su **evidencia** y una confianza 0-100%; los indicadores superiores de Inventario
+     cuentan PLC/Servidores/Otros. Igual que nombre y fabricante, es **editable manualmente**
+     sin perder el valor auto-detectado. Ver "Limitaciones conocidas" para el caso que esto
+     no puede resolver de forma pasiva (servidor vs. PC Windows).
 2. **Fingerprint pasivo de sistema operativo**: heurística basada en TTL inicial, tamaño de
    ventana TCP y opciones TCP del handshake (similar a p0f), sin enviar ningún tráfico activo.
 3. **Detección de protocolos/servicios**: por puerto conocido y por firma de los primeros bytes
@@ -259,3 +269,9 @@ un doble (mock) del cliente HTTP para no depender de la disponibilidad de intern
   `dropped_count` empieza a crecer. La base de eso es el propio parsing en Python/Scapy, así que
   paralelizar a varios procesos consumidores (particionados por IP) es la vía de escala, no un
   cambio de librería de captura.
+- El clasificador de **tipo de dispositivo** es pasivo por reglas, no una certeza: distingue muy
+  bien PLC/RTU (protocolo OT) y equipos de red (CDP/LLDP), pero un servidor Windows y un PC
+  Windows tienen el mismo fingerprint TCP/IP -- ahí depende de señales indirectas (nombre,
+  cantidad de protocolos servidos) y puede devolver confianza baja o quedar sin clasificar.
+  Resolverlo con certeza requiere una consulta activa (SNMP `sysDescr`, WMI), que es una pieza
+  posterior y separada del motor pasivo (ver hoja de ruta, Bloque 1).

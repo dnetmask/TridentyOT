@@ -7,7 +7,7 @@ from scapy.contrib.lldp import (
     LLDPDUTimeToLive,
 )
 from scapy.layers.inet import IP, TCP, UDP
-from scapy.layers.l2 import LLC, SNAP, Ether
+from scapy.layers.l2 import ARP, LLC, SNAP, Ether
 from scapy.layers.netbios import NBNSHeader, NBNSRegistrationRequest
 
 from app.capture.packet_processor import process_packet
@@ -283,3 +283,66 @@ def test_cdp_discovered_switch_merges_with_later_ip_traffic(db_session):
     assert len(devices) == 1
     assert devices[0].ip == "10.0.0.9"
     assert devices[0].hostname == "switch1.corp.local"
+
+
+def test_cdp_announcement_sets_device_type_network_device(db_session):
+    pkt = (
+        Ether(src="aa:bb:cc:dd:ee:ff", dst="01:00:0c:cc:cc:cc")
+        / LLC()
+        / SNAP(OUI=0xC, code=0x2000)
+        / CDPv2_HDR(msg=[CDPMsgDeviceID(val=b"switch1.corp.local")])
+    )
+    ingest_packet_record(db_session, process_packet(Ether(bytes(pkt))))
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.mac == "aa:bb:cc:dd:ee:ff").one()
+    assert device.device_type == "network_device"
+    assert device.device_type_confidence >= 0.7
+
+
+def test_modbus_server_sets_device_type_plc(db_session):
+    syn = Ether() / IP(src="10.0.4.5", dst="10.0.4.60", ttl=64) / TCP(sport=41000, dport=502, flags="S", window=1024)
+    ingest_packet_record(db_session, process_packet(syn))
+    db_session.commit()
+
+    plc = db_session.query(Device).filter(Device.ip == "10.0.4.60").one()
+    assert plc.device_type == "plc"
+    assert plc.device_type_confidence >= 0.7
+    assert "protocolo industrial" in plc.device_type_evidence
+
+
+def test_arp_only_industrial_vendor_sets_device_type_plc(db_session):
+    """A device only ever seen via ARP has no protocol/OS evidence at all --
+    but its vendor OUI (0001E3 -> Siemens AG in the bundled manuf table) is
+    still real evidence worth a classification attempt."""
+    who_has = Ether() / ARP(op=1, hwsrc="00:01:e3:aa:bb:cc", psrc="10.0.4.70", pdst="10.0.4.1")
+    ingest_packet_record(db_session, process_packet(who_has))
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "10.0.4.70").one()
+    assert device.vendor == "Siemens AG"
+    assert device.device_type == "plc"
+    assert 0 < device.device_type_confidence < 0.7
+
+
+def test_hostname_hint_can_upgrade_device_type_classification(db_session):
+    """A device with no distinguishing evidence starts unclassified; once
+    an HMI-style hostname arrives, it should reclassify as plc. Plain ACK
+    (not SYN/SYN-ACK) on unclassified ports avoids any OS-fingerprint or
+    protocol-based vote, isolating this to the hostname signal alone."""
+    from app.inventory.inventory_service import apply_hostname_hints
+
+    ack = Ether() / IP(src="10.0.4.80", dst="10.0.4.90", ttl=64) / TCP(
+        sport=51000, dport=51099, flags="A", window=1024
+    )
+    ingest_packet_record(db_session, process_packet(ack))
+    db_session.commit()
+
+    before = db_session.query(Device).filter(Device.ip == "10.0.4.80").one()
+    assert before.device_type is None
+
+    apply_hostname_hints(db_session, [("10.0.4.80", "K787395-HMI01")])
+    db_session.commit()
+
+    after = db_session.query(Device).filter(Device.ip == "10.0.4.80").one()
+    assert after.device_type == "plc"

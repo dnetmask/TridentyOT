@@ -79,6 +79,48 @@ def test_patch_unknown_device_returns_404(client):
     assert resp.status_code == 404
 
 
+def test_patch_device_sets_and_clears_custom_device_type(client, tmp_path):
+    syn = Ether() / IP(src="10.5.0.6", dst="10.5.0.61", ttl=64) / TCP(sport=41000, dport=502, flags="S", window=1024)
+    pcap_path = tmp_path / "modbus2.pcap"
+    wrpcap(str(pcap_path), [syn])
+    with open(pcap_path, "rb") as f:
+        client.post("/api/capture/pcap", files={"file": ("modbus2.pcap", f, "application/vnd.tcpdump.pcap")})
+
+    devices = client.get("/api/inventory/devices").json()
+    plc = next(d for d in devices if d["ip"] == "10.5.0.61")
+    # Auto-classified from the Modbus server protocol alone, no override yet.
+    assert plc["device_type"] == "plc"
+    assert plc["custom_device_type"] is None
+    assert plc["display_device_type"] == "plc"
+
+    resp = client.patch(f"/api/inventory/devices/{plc['id']}", json={"custom_device_type": "server"})
+    assert resp.status_code == 200
+    updated = resp.json()
+    assert updated["custom_device_type"] == "server"
+    assert updated["display_device_type"] == "server"
+    assert updated["device_type"] == "plc"  # auto-detected value is preserved underneath
+
+    resp = client.patch(f"/api/inventory/devices/{plc['id']}", json={"custom_device_type": None})
+    assert resp.status_code == 200
+    cleared = resp.json()
+    assert cleared["custom_device_type"] is None
+    assert cleared["display_device_type"] == "plc"
+
+
+def test_patch_device_rejects_unknown_device_type(client, tmp_path):
+    syn = Ether() / IP(src="10.5.0.7", dst="10.5.0.62", ttl=64) / TCP(sport=41000, dport=502, flags="S", window=1024)
+    pcap_path = tmp_path / "modbus3.pcap"
+    wrpcap(str(pcap_path), [syn])
+    with open(pcap_path, "rb") as f:
+        client.post("/api/capture/pcap", files={"file": ("modbus3.pcap", f, "application/vnd.tcpdump.pcap")})
+
+    devices = client.get("/api/inventory/devices").json()
+    device_id = next(d for d in devices if d["ip"] == "10.5.0.62")["id"]
+
+    resp = client.patch(f"/api/inventory/devices/{device_id}", json={"custom_device_type": "printer"})
+    assert resp.status_code == 422
+
+
 def test_health_endpoint(client):
     resp = client.get("/api/health")
     assert resp.status_code == 200

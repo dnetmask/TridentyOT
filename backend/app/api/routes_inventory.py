@@ -66,6 +66,8 @@ def update_device(
         device.custom_name = updates["custom_name"] or None
     if "custom_vendor" in updates:
         device.custom_vendor = updates["custom_vendor"] or None
+    if "custom_device_type" in updates:
+        device.custom_device_type = updates["custom_device_type"] or None
 
     db.commit()
     db.refresh(device)

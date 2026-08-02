@@ -57,6 +57,13 @@ class Device(Base):
     os_confidence: Mapped[float] = mapped_column(Float, default=0.0)
     os_signature: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    # device_type is auto-detected (see app/fingerprint/device_classifier.py);
+    # custom_device_type is a manual override, same pattern as custom_name/vendor.
+    device_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    device_type_confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    device_type_evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    custom_device_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     is_ot_suspected: Mapped[bool] = mapped_column(default=False)
 
     # The capture session that *first* discovered this device -- used to
@@ -91,6 +98,10 @@ class Device(Base):
     @property
     def display_vendor(self) -> str | None:
         return self.custom_vendor or self.vendor
+
+    @property
+    def display_device_type(self) -> str | None:
+        return self.custom_device_type or self.device_type
 
 
 class DeviceProtocol(Base):

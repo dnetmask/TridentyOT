@@ -130,6 +130,10 @@
   .sev-info, .sev-unknown { background: var(--info); }
   .pill { background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 11px; margin: 2px; display: inline-block; }
   .pill.ot { border-color: var(--high); color: var(--high); }
+  .pill.plc { border-color: var(--med); color: var(--med); }
+  .pill.server { border-color: var(--accent); color: var(--accent); }
+  .pill.network { border-color: var(--info); color: var(--info); }
+  .pill.workstation { border-color: var(--ok); color: var(--ok); }
   .muted { color: var(--muted); }
   .empty { color: var(--muted); padding: 20px; text-align: center; }
   .stat-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 14px; }
@@ -142,6 +146,8 @@
   .stat-tile .stat-num.crit { color: var(--crit); }
   .stat-tile .stat-num.high { color: var(--high); }
   .stat-tile .stat-num.ot { color: var(--high); }
+  .stat-tile .stat-num.plc { color: var(--med); }
+  .stat-tile .stat-num.server { color: var(--accent); }
   .stat-tile .stat-label { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
   .table-scroll { overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
   .table-scroll table { width: 100%; border-collapse: collapse; }
@@ -322,6 +328,7 @@
             <div class="columns-panel-title">Columnas visibles</div>
             <label><input type="checkbox" data-col-toggle="ip" checked /> IP</label>
             <label><input type="checkbox" data-col-toggle="nombre" checked /> Nombre</label>
+            <label><input type="checkbox" data-col-toggle="tipo" checked /> Tipo</label>
             <label><input type="checkbox" data-col-toggle="fabricante" checked /> Fabricante</label>
             <label><input type="checkbox" data-col-toggle="mac" checked /> MAC</label>
             <label><input type="checkbox" data-col-toggle="so" checked /> SO estimado</label>
@@ -335,11 +342,11 @@
       <div class="table-scroll" id="devices-scroll">
         <table>
           <thead><tr>
-            <th data-col="ip">IP</th><th data-col="nombre">Nombre</th><th data-col="fabricante">Fabricante</th>
+            <th data-col="ip">IP</th><th data-col="nombre">Nombre</th><th data-col="tipo">Tipo</th><th data-col="fabricante">Fabricante</th>
             <th data-col="mac">MAC</th><th data-col="so">SO estimado</th><th data-col="confianza">Confianza</th>
             <th data-col="protocolos">Protocolos</th><th data-col="visto">Últ. visto</th>
           </tr></thead>
-          <tbody id="devices-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
+          <tbody id="devices-body"><tr><td colspan="9" class="empty">Sin datos</td></tr></tbody>
         </table>
       </div>
       <div id="device-detail" class="device-detail"></div>
@@ -690,12 +697,41 @@ async function loadDevices() {
   renderDevicesTable();
 }
 
+const DEVICE_TYPE_LABELS = {
+  plc: 'PLC',
+  server: 'Servidor',
+  workstation: 'PC',
+  network_device: 'Equipo de red',
+  other: 'Otro',
+};
+const DEVICE_TYPE_PILL_CLASS = {
+  plc: 'plc',
+  server: 'server',
+  network_device: 'network',
+  workstation: 'workstation',
+};
+
+function deviceTypeBadge(d) {
+  const type = d.display_device_type;
+  if (!type) return '<span class="muted">—</span>';
+  const label = DEVICE_TYPE_LABELS[type] || type;
+  const pillClass = DEVICE_TYPE_PILL_CLASS[type];
+  const badge = pillClass ? `<span class="pill ${pillClass}">${label}</span>` : label;
+  return `${badge}${d.custom_device_type ? '<span class="manual-tag">manual</span>' : ''}`;
+}
+
 function renderDeviceStats() {
   const total = allDevices.length;
   const otCount = allDevices.filter(d => d.is_ot_suspected).length;
+  const plcCount = allDevices.filter(d => d.display_device_type === 'plc').length;
+  const serverCount = allDevices.filter(d => d.display_device_type === 'server').length;
+  const otherCount = total - plcCount - serverCount;
   $('#inventory-stats').innerHTML = `
     <div class="stat-tile"><div class="stat-num">${total}</div><div class="stat-label">Dispositivos detectados</div></div>
     <div class="stat-tile"><div class="stat-num ot">${otCount}</div><div class="stat-label">Dispositivos OT</div></div>
+    <div class="stat-tile"><div class="stat-num plc">${plcCount}</div><div class="stat-label">PLC</div></div>
+    <div class="stat-tile"><div class="stat-num server">${serverCount}</div><div class="stat-label">Servidores</div></div>
+    <div class="stat-tile"><div class="stat-num">${otherCount}</div><div class="stat-label">Otros equipos</div></div>
   `;
 }
 
@@ -704,7 +740,7 @@ function renderDevicesTable() {
   const otOnly = $('#ot-only-checkbox').checked;
   const devices = otOnly ? allDevices.filter(d => d.is_ot_suspected) : allDevices;
   if (!devices.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin dispositivos detectados aún</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin dispositivos detectados aún</td></tr>';
     fitTableScroll('devices-scroll');
     return;
   }
@@ -712,6 +748,7 @@ function renderDevicesTable() {
     <tr class="clickable" onclick="showDeviceDetail(${d.id})">
       <td data-col="ip">${d.ip || '—'} ${d.is_ot_suspected ? '<span class="pill ot">OT</span>' : ''}</td>
       <td data-col="nombre">${d.display_name || '<span class="muted">—</span>'}${d.custom_name ? '<span class="manual-tag">manual</span>' : ''}</td>
+      <td data-col="tipo">${deviceTypeBadge(d)}</td>
       <td data-col="fabricante">${d.display_vendor || '<span class="muted">—</span>'}${d.custom_vendor ? '<span class="manual-tag">manual</span>' : ''}</td>
       <td data-col="mac" class="mono">${d.mac || '—'}</td>
       <td data-col="so">${d.os_guess || '—'}</td>
@@ -741,6 +778,15 @@ async function showDeviceDetail(id) {
       <span class="hint">${device.hostname ? `auto: ${device.hostname}` : 'no detectado automáticamente'}</span>
     </div>
     <div class="edit-field">
+      <label>Tipo</label>
+      <select id="edit-device-type" ${editor ? '' : 'disabled'}>
+        <option value="" ${!device.custom_device_type ? 'selected' : ''}>${device.device_type ? 'Automático: ' + (DEVICE_TYPE_LABELS[device.device_type] || device.device_type) : 'Automático (sin clasificar aún)'}</option>
+        ${Object.entries(DEVICE_TYPE_LABELS).map(([value, label]) => `
+        <option value="${value}" ${device.custom_device_type === value ? 'selected' : ''}>${label}</option>`).join('')}
+      </select>
+      <span class="hint">${device.device_type_evidence ? `evidencia: ${device.device_type_evidence}` : 'sin evidencia suficiente para clasificar aún'}</span>
+    </div>
+    <div class="edit-field">
       <label>Fabricante</label>
       <input id="edit-vendor" value="${device.custom_vendor || ''}" placeholder="${device.vendor || 'sin detectar — escribe uno'}" ${editor ? '' : 'disabled'} />
       <span class="hint">${device.vendor ? `auto: ${device.vendor}` : 'no detectado automáticamente'}</span>
@@ -766,10 +812,11 @@ async function showDeviceDetail(id) {
 
 async function saveDeviceOverrides(id, reset = false) {
   const body = reset
-    ? { custom_name: null, custom_vendor: null }
+    ? { custom_name: null, custom_vendor: null, custom_device_type: null }
     : {
         custom_name: $('#edit-name').value.trim() || null,
         custom_vendor: $('#edit-vendor').value.trim() || null,
+        custom_device_type: $('#edit-device-type').value || null,
       };
   try {
     await api(`/api/inventory/devices/${id}`, {

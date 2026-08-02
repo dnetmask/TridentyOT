@@ -11,6 +11,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.capture.packet_processor import PacketRecord
+from app.fingerprint.device_classifier import classify_device_type
 from app.fingerprint.ip_scope import is_real_unicast_ip
 from app.fingerprint.os_fingerprint import (
     OsGuess,
@@ -18,7 +19,7 @@ from app.fingerprint.os_fingerprint import (
     fingerprint_tcp_syn,
     parse_tcp_options,
 )
-from app.fingerprint.protocol_detect import ProtocolInfo, classify
+from app.fingerprint.protocol_detect import OT, ProtocolInfo, classify
 from app.fingerprint.vendor_lookup import lookup_vendor
 from app.models import Device, DeviceProtocol, Flow, VulnerabilityFinding, utcnow
 
@@ -104,6 +105,30 @@ def apply_os_guess(device: Device, guess: OsGuess) -> None:
     device.os_signature = guess.signature_name
 
 
+def apply_device_type_guess(device: Device) -> None:
+    """Recomputes device.device_type from whatever evidence is on hand
+    right now (protocols served, OS fingerprint, vendor, hostname) --
+    called whenever one of those inputs just changed. Same
+    never-downgrade rule as apply_os_guess: a new guess only replaces the
+    stored one if it's *more* confident, so one signal disappearing later
+    (e.g. a hostname getting cleared) doesn't erase a better guess an
+    earlier signal already established.
+    """
+    server_protocols = [p for p in device.protocols if p.role == "server"]
+    guess = classify_device_type(
+        vendor=device.display_vendor,
+        hostname=device.display_name,
+        os_signature=device.os_signature,
+        has_ot_server_protocol=any(p.category == OT for p in server_protocols),
+        server_protocol_count=len({p.protocol for p in server_protocols}),
+    )
+    if guess.confidence <= device.device_type_confidence:
+        return
+    device.device_type = guess.device_type
+    device.device_type_confidence = guess.confidence
+    device.device_type_evidence = "; ".join(guess.evidence) if guess.evidence else None
+
+
 def apply_hostname_hints(session: Session, hints: list[tuple[str, str]]) -> None:
     """Enriches already-known devices with an auto-detected hostname.
 
@@ -129,9 +154,11 @@ def apply_hostname_hints(session: Session, hints: list[tuple[str, str]]) -> None
         other = session.query(Device).filter(Device.hostname == hostname, Device.ip != ip).one_or_none()
         if other is not None:
             other.hostname = None
+            apply_device_type_guess(other)
             continue
 
         device.hostname = hostname
+        apply_device_type_guess(device)
 
 
 def upsert_protocol(
@@ -264,7 +291,16 @@ def ingest_packet_record(
     session: Session, record: PacketRecord, capture_session_id: int | None = None
 ) -> None:
     if record.transport == "arp":
-        get_or_create_device(session, ip=record.src_ip, mac=record.src_mac, capture_session_id=capture_session_id)
+        device = get_or_create_device(
+            session, ip=record.src_ip, mac=record.src_mac, capture_session_id=capture_session_id
+        )
+        if device is not None:
+            # A device only ever seen via ARP has no protocol/OS evidence at
+            # all, but its vendor OUI is still real, weak-but-real evidence
+            # (e.g. a Siemens NIC is still a hint towards "plc") -- worth a
+            # classification attempt rather than leaving it unclassified
+            # purely because it never happened to send TCP/UDP traffic.
+            apply_device_type_guess(device)
         return
 
     if record.transport in ("cdp", "lldp"):
@@ -279,6 +315,7 @@ def ingest_packet_record(
             # An explicit CDP/LLDP announcement is a stronger signal than the
             # passive TCP-SYN heuristic, so it always outranks it.
             apply_os_guess(device, _CDP_LLDP_GUESS)
+            apply_device_type_guess(device)
         return
 
     if record.transport not in ("tcp", "udp", "icmp"):
@@ -317,6 +354,15 @@ def ingest_packet_record(
             banner,
             capture_session_id=capture_session_id,
         )
+        # upsert_protocol's own add() of a brand-new row isn't visible to
+        # the device.protocols relationship read inside
+        # apply_device_type_guess without a flush first -- without this, a
+        # device would need a *second* packet on the same protocol before
+        # ever being classified from it (benchmarked: the extra flush costs
+        # ~2% on a real capture, not worth trading for a device that never
+        # gets classified because a capture only ever saw one packet from it).
+        session.flush()
+        apply_device_type_guess(server_device)
         upsert_flow(
             session,
             src_device,
@@ -351,6 +397,7 @@ def ingest_packet_record(
         guess = fingerprint_tcp_syn(tcp_sig)
         # ttl/window always describe the packet's sender, i.e. src_device
         apply_os_guess(src_device, guess)
+        apply_device_type_guess(src_device)
 
 
 def purge_capture_session(session: Session, capture_session_id: int) -> None:

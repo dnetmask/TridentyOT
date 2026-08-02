@@ -50,6 +50,11 @@ class DeviceOut(BaseModel):
     display_vendor: str | None
     os_guess: str | None
     os_confidence: float
+    device_type: str | None
+    device_type_confidence: float
+    device_type_evidence: str | None
+    custom_device_type: str | None
+    display_device_type: str | None
     is_ot_suspected: bool
     protocol_count: int
     protocol_names: list[str] = []
@@ -69,6 +74,7 @@ class DeviceUpdateRequest(BaseModel):
 
     custom_name: str | None = None
     custom_vendor: str | None = None
+    custom_device_type: Literal["plc", "server", "workstation", "network_device", "other"] | None = None
 
 
 class FlowOut(BaseModel):
