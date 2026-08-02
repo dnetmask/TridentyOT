@@ -69,9 +69,22 @@ def get_or_create_device(
 
     device = None
     if ip:
-        device = session.query(Device).filter(Device.ip == ip).one_or_none()
+        # ip alone isn't actually unique (the DB constraint is on the
+        # (mac, ip) pair, and two NULL macs don't collide under it either)
+        # -- a large/long capture can genuinely produce two rows for the
+        # same ip (e.g. an address briefly reused/conflicting on the LAN,
+        # or two uploads racing each other). Picking the oldest
+        # deterministically instead of one_or_none() means that anomaly
+        # gets tolerated and converged on rather than crashing every
+        # ingest that touches this ip afterwards.
+        device = session.query(Device).filter(Device.ip == ip).order_by(Device.id.asc()).first()
     if device is None and mac:
-        device = session.query(Device).filter(Device.mac == mac, Device.ip.is_(None)).one_or_none()
+        device = (
+            session.query(Device)
+            .filter(Device.mac == mac, Device.ip.is_(None))
+            .order_by(Device.id.asc())
+            .first()
+        )
 
     now = utcnow()
     if device is None:
@@ -156,14 +169,17 @@ def apply_hostname_hints(session: Session, hints: list[tuple[str, str]]) -> None
     for ip, hostname in hints:
         if not hostname:
             continue
-        device = session.query(Device).filter(Device.ip == ip).one_or_none()
+        # ip alone isn't a unique key (see get_or_create_device) -- pick the
+        # oldest of any duplicates deterministically rather than crashing.
+        device = session.query(Device).filter(Device.ip == ip).order_by(Device.id.asc()).first()
         if device is None or hostname == device.hostname:
             continue
 
-        other = session.query(Device).filter(Device.hostname == hostname, Device.ip != ip).one_or_none()
-        if other is not None:
-            other.hostname = None
-            apply_device_type_guess(session, other)
+        others = session.query(Device).filter(Device.hostname == hostname, Device.ip != ip).all()
+        if others:
+            for other in others:
+                other.hostname = None
+                apply_device_type_guess(session, other)
             continue
 
         device.hostname = hostname

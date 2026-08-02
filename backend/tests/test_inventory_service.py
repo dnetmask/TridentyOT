@@ -365,3 +365,74 @@ def test_hostname_hint_can_upgrade_device_type_classification(db_session):
 
     after = db_session.query(Device).filter(Device.ip == "10.0.4.80").one()
     assert after.device_type == "hmi"
+
+
+def test_get_or_create_device_tolerates_pre_existing_duplicate_ip(db_session):
+    """ip alone is not actually a unique key: the DB constraint is on the
+    (mac, ip) pair, and two NULL macs don't collide under it either -- so a
+    large/long capture (concurrent uploads racing, an address briefly
+    reused/conflicting on the LAN) can leave two Device rows sharing one ip.
+    Regression for a real bug: a big pcap upload hit exactly this and every
+    subsequent packet touching that ip crashed the whole capture with
+    'Multiple rows were found when one or none was required'. Ingesting
+    should tolerate the anomaly (deterministically use the oldest row)
+    instead of raising."""
+    from app.inventory.inventory_service import get_or_create_device
+
+    older = Device(ip="10.0.5.5", mac=None)
+    newer = Device(ip="10.0.5.5", mac=None)
+    db_session.add(older)
+    db_session.add(newer)
+    db_session.commit()
+    assert older.id < newer.id
+
+    device = get_or_create_device(db_session, ip="10.0.5.5", mac="aa:bb:cc:dd:ee:01")
+    db_session.commit()
+
+    assert device.id == older.id
+    assert device.mac == "aa:bb:cc:dd:ee:01"
+    assert db_session.query(Device).filter(Device.ip == "10.0.5.5").count() == 2
+
+
+def test_apply_hostname_hints_tolerates_pre_existing_duplicate_ip(db_session):
+    """Same anomaly as above, exercised through apply_hostname_hints's own
+    ip-keyed lookup -- must not raise, and should enrich the oldest row."""
+    from app.inventory.inventory_service import apply_hostname_hints
+
+    older = Device(ip="10.0.5.6", mac=None)
+    newer = Device(ip="10.0.5.6", mac=None)
+    db_session.add(older)
+    db_session.add(newer)
+    db_session.commit()
+
+    apply_hostname_hints(db_session, [("10.0.5.6", "PLC-DUPE")])
+    db_session.commit()
+
+    db_session.refresh(older)
+    db_session.refresh(newer)
+    assert older.hostname == "PLC-DUPE"
+    assert newer.hostname is None
+
+
+def test_apply_hostname_hints_clears_shared_name_from_every_claimant(db_session):
+    """The anti-collision rule ("a name shared by 2+ IPs isn't real, clear
+    it from all of them") must actually clear *every* other claimant, not
+    just the first one found, if a name somehow ended up on more than one
+    other device already."""
+    from app.inventory.inventory_service import apply_hostname_hints
+
+    target = Device(ip="10.0.5.10", mac=None)
+    claimant_a = Device(ip="10.0.5.11", mac=None, hostname="WORKGROUP")
+    claimant_b = Device(ip="10.0.5.12", mac=None, hostname="WORKGROUP")
+    db_session.add_all([target, claimant_a, claimant_b])
+    db_session.commit()
+
+    apply_hostname_hints(db_session, [("10.0.5.10", "WORKGROUP")])
+    db_session.commit()
+
+    db_session.refresh(claimant_a)
+    db_session.refresh(claimant_b)
+    db_session.refresh(target)
+    assert claimant_a.hostname is None
+    assert claimant_b.hostname is None
+    assert target.hostname is None

@@ -301,7 +301,11 @@ un doble (mock) del cliente HTTP para no depender de la disponibilidad de intern
   exacta.
 - La identidad de un dispositivo se basa principalmente en su IP; la MAC capturada solo es fiable
   para hosts en el mismo segmento L2 que el punto de captura (para tráfico enrutado, la MAC
-  observada corresponde al último salto/router, no al host origen).
+  observada corresponde al último salto/router, no al host origen). Si esa IP termina repetida en
+  dos registros (conflicto real de IP en la red, o dos cargas/capturas corriendo a la vez que
+  crean cada una un registro para la misma IP antes de verse entre sí -- la IP sola no tiene una
+  restricción de unicidad en la base de datos), el motor de inventario no falla: converge de forma
+  determinista en el registro más antiguo para esa IP en vez de lanzar un error a media captura.
 - La consulta a NVD depende de que el banner del servicio revele explícitamente producto y
   versión; sin ese dato, la vulnerabilidad "por versión" no se puede determinar de forma pasiva.
 - El nombre de equipo solo se auto-detecta si el dispositivo emite alguno de los tráficos que se
