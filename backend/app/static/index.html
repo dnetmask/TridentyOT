@@ -131,6 +131,7 @@
   .pill { background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 11px; margin: 2px; display: inline-block; }
   .pill.ot { border-color: var(--high); color: var(--high); }
   .pill.plc { border-color: var(--med); color: var(--med); }
+  .pill.hmi { border-color: var(--high); color: var(--high); }
   .pill.server { border-color: var(--accent); color: var(--accent); }
   .pill.network { border-color: var(--info); color: var(--info); }
   .pill.workstation { border-color: var(--ok); color: var(--ok); }
@@ -186,7 +187,6 @@
   }
   .dropzone.dragover { border-color: var(--accent); background: rgba(59,169,255,0.08); color: var(--text); }
   .dropzone b { color: var(--text); }
-  .flow-arrow { color: var(--muted); margin: 0 6px; }
   .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
   .viewer-note {
     border: 1px solid var(--border);
@@ -375,8 +375,8 @@
       </div>
       <div class="stat-row" id="flows-stats"></div>
       <table>
-        <thead><tr><th>Origen</th><th></th><th>Destino</th><th>Protocolo</th><th>Puerto</th><th>Transporte</th><th>Paquetes</th><th>Primero</th><th>Último</th></tr></thead>
-        <tbody id="flows-body"><tr><td colspan="9" class="empty">Sin datos</td></tr></tbody>
+        <thead><tr><th>Origen</th><th>Destino</th><th>Protocolo</th><th>Puerto</th><th>Transporte</th><th>Paquetes</th><th>Primero</th><th>Último</th></tr></thead>
+        <tbody id="flows-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
       </table>
     </div>
   </section>
@@ -725,6 +725,7 @@ async function loadDevices() {
 
 const DEVICE_TYPE_LABELS = {
   plc: 'PLC',
+  hmi: 'HMI',
   server: 'Servidor',
   workstation: 'PC',
   network_device: 'Equipo de red',
@@ -732,6 +733,7 @@ const DEVICE_TYPE_LABELS = {
 };
 const DEVICE_TYPE_PILL_CLASS = {
   plc: 'plc',
+  hmi: 'hmi',
   server: 'server',
   network_device: 'network',
   workstation: 'workstation',
@@ -928,7 +930,7 @@ function renderFlowsTable() {
   const tbody = $('#flows-body');
   const cat = $('#flow-category-filter').value;
   const flows = cat ? allFlows.filter(f => f.category === cat) : allFlows;
-  if (!flows.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin flujos detectados aún</td></tr>'; return; }
+  if (!flows.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin flujos detectados aún</td></tr>'; return; }
   tbody.innerHTML = flows.map(f => {
     const aLabel = f.device_a_name || f.device_a_ip || `#${f.device_a_id}`;
     const bLabel = f.device_b_name || f.device_b_ip || `#${f.device_b_id}`;
@@ -936,7 +938,6 @@ function renderFlowsTable() {
     return `
     <tr>
       <td>${aLabel}${aIsServer ? ' <span class="pill">servidor</span>' : ''}</td>
-      <td class="flow-arrow">${aIsServer ? '&larr;' : '&rarr;'}</td>
       <td>${bLabel}${!aIsServer ? ' <span class="pill">servidor</span>' : ''}</td>
       <td>${f.protocol}${f.category === 'OT' ? ' <span class="pill ot">OT</span>' : ''}</td>
       <td>${f.port ?? '—'}</td>

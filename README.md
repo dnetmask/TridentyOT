@@ -25,16 +25,20 @@ ya capturado, y a partir de eso construye:
      `?include_public=true` para listarlo también ahí).
    - Todo es **editable manualmente** en cualquier momento (se detecte o no), sin perder el
      valor auto-detectado como referencia.
-   - **Tipo de dispositivo** (columna **Tipo**): clasifica cada activo como **PLC**, **Servidor**,
-     **PC** o **Equipo de red** combinando, con reglas explicables (no ML), la evidencia que el
-     resto del motor pasivo ya recolectó -- protocolo servido (un protocolo OT como servidor es
-     PLC casi con certeza), anuncio CDP/LLDP (equipo de red con certeza), categoría del
-     fabricante por OUI (industrial/redes/IT genérico), palabras clave del nombre del equipo
-     ("-HMI01", "-SRV", "-PC"...) y cantidad de protocolos distintos servidos. Cada clasificación
-     muestra su **evidencia** y una confianza 0-100%; los indicadores superiores de Inventario
-     cuentan PLC/Servidores/Otros. Igual que nombre y fabricante, es **editable manualmente**
-     sin perder el valor auto-detectado. Ver "Limitaciones conocidas" para el caso que esto
-     no puede resolver de forma pasiva (servidor vs. PC Windows).
+   - **Tipo de dispositivo** (columna **Tipo**): clasifica cada activo como **PLC**, **HMI**,
+     **Servidor**, **PC** o **Equipo de red** combinando, con reglas explicables (no ML), la
+     evidencia que el resto del motor pasivo ya recolectó -- protocolo servido, anuncio CDP/LLDP
+     (equipo de red con certeza), categoría del fabricante por OUI (industrial/redes/IT
+     genérico), palabras clave del nombre del equipo ("-HMI01", "-SRV", "-PC"...) y cantidad de
+     protocolos distintos servidos. Un protocolo OT como servidor es **PLC** casi con certeza --
+     salvo que el propio fingerprint TCP/IP del paquete sea un Windows/Linux real, en cuyo caso es
+     **HMI** (SCADA/estación de ingeniería: un PLC embebido nunca fingerprintea como un SO de
+     propósito general). Un nombre que contenga "HMI" también clasifica como HMI directamente.
+     Cada clasificación muestra su **evidencia** y una confianza 0-100%; los indicadores
+     superiores de Inventario cuentan PLC/Servidores/Otros (HMI cae en "Otros equipos" en ese
+     conteo, aunque sigue marcado como **OT** igual que un PLC). Igual que nombre y fabricante, es
+     **editable manualmente** sin perder el valor auto-detectado. Ver "Limitaciones conocidas"
+     para el caso que esto no puede resolver de forma pasiva (servidor vs. PC Windows).
 2. **Fingerprint pasivo de sistema operativo**: heurística basada en TTL inicial, tamaño de
    ventana TCP y opciones TCP del handshake (similar a p0f), sin enviar ningún tráfico activo.
 3. **Detección de protocolos/servicios**: por puerto conocido y por firma de los primeros bytes

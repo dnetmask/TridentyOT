@@ -311,6 +311,25 @@ def test_modbus_server_sets_device_type_plc(db_session):
     assert "protocolo industrial" in plc.device_type_evidence
 
 
+def test_modbus_server_on_windows_stack_sets_device_type_hmi_not_plc(db_session):
+    """A single SYN-ACK from port 502 with a Windows-shaped TCP signature
+    (TTL 128, SACK, window scale, no timestamps) both assigns the Modbus
+    server protocol *and* fingerprints the OS in the same packet -- the
+    combination should classify as HMI (SCADA/engineering software on a
+    real OS), not PLC (an embedded controller wouldn't look like this)."""
+    synack = Ether() / IP(src="10.0.4.65", dst="10.0.4.5", ttl=128) / TCP(
+        sport=502, dport=51000, flags="SA", window=8192, options=[("WScale", 8), ("SAckOK", b"")]
+    )
+    ingest_packet_record(db_session, process_packet(synack))
+    db_session.commit()
+
+    hmi = db_session.query(Device).filter(Device.ip == "10.0.4.65").one()
+    assert hmi.os_guess == "Windows (7/8/10/11 family)"
+    assert hmi.device_type == "hmi"
+    assert hmi.device_type_confidence >= 0.7
+    assert "SO de propósito general" in hmi.device_type_evidence
+
+
 def test_arp_only_industrial_vendor_sets_device_type_plc(db_session):
     """A device only ever seen via ARP has no protocol/OS evidence at all --
     but its vendor OUI (0001E3 -> Siemens AG in the bundled manuf table) is
@@ -327,7 +346,7 @@ def test_arp_only_industrial_vendor_sets_device_type_plc(db_session):
 
 def test_hostname_hint_can_upgrade_device_type_classification(db_session):
     """A device with no distinguishing evidence starts unclassified; once
-    an HMI-style hostname arrives, it should reclassify as plc. Plain ACK
+    an HMI-style hostname arrives, it should reclassify as hmi. Plain ACK
     (not SYN/SYN-ACK) on unclassified ports avoids any OS-fingerprint or
     protocol-based vote, isolating this to the hostname signal alone."""
     from app.inventory.inventory_service import apply_hostname_hints
@@ -345,4 +364,4 @@ def test_hostname_hint_can_upgrade_device_type_classification(db_session):
     db_session.commit()
 
     after = db_session.query(Device).filter(Device.ip == "10.0.4.80").one()
-    assert after.device_type == "plc"
+    assert after.device_type == "hmi"

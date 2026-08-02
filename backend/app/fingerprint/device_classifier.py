@@ -1,5 +1,5 @@
-"""Device-type classification (PC / servidor / PLC / equipo de red / otro)
-from evidence the rest of the passive pipeline already collects --
+"""Device-type classification (PC / servidor / PLC / HMI / equipo de red /
+otro) from evidence the rest of the passive pipeline already collects --
 protocols served, OS fingerprint, vendor, and hostname. Rule-based and
 explainable, same spirit as os_fingerprint.py's signature scoring: each
 rule casts a weighted vote for one type, the highest-scoring type wins,
@@ -9,15 +9,19 @@ This is inherently probabilistic from purely passive data alone -- a
 Windows Server and a Windows workstation have an identical TCP/IP
 fingerprint, so telling them apart with certainty needs an active query
 (SNMP sysDescr, WMI), a separate, later piece of work. What this does get
-right with high confidence today is the OT side (a device serving
-Modbus/S7comm/EtherNet-IP *is* a PLC/RTU) and network infrastructure
-(already confirmed via CDP/LLDP) -- the IT split (server vs. workstation)
-is a best-effort evidence-based guess, not a certainty.
+right with high confidence today is the OT side: a device serving
+Modbus/S7comm/EtherNet-IP from an embedded stack *is* a PLC/RTU, while
+the same protocol served from a real Windows/Linux TCP/IP stack is
+software (HMI/SCADA/engineering tooling), not the embedded controller
+itself. Network infrastructure is confirmed via CDP/LLDP -- the IT split
+(server vs. workstation) is a best-effort evidence-based guess, not a
+certainty.
 """
 
 from dataclasses import dataclass, field
 
 PLC = "plc"
+HMI = "hmi"
 SERVER = "server"
 WORKSTATION = "workstation"
 NETWORK_DEVICE = "network_device"
@@ -25,6 +29,7 @@ OTHER = "other"
 
 LABELS = {
     PLC: "PLC",
+    HMI: "HMI",
     SERVER: "Servidor",
     WORKSTATION: "PC",
     NETWORK_DEVICE: "Equipo de red",
@@ -55,7 +60,8 @@ _IT_VENDOR_KEYWORDS = (
 # own test capture: "K787395-HMI01") but never authoritative alone --
 # someone can name a PC "server-old" -- so these votes are moderate, not
 # maximal, and always combined with other evidence.
-_PLC_HOSTNAME_KEYWORDS = ("plc", "rtu", "scada", "hmi", "-ied", "controller")
+_HMI_HOSTNAME_KEYWORDS = ("hmi",)
+_PLC_HOSTNAME_KEYWORDS = ("plc", "rtu", "scada", "-ied", "controller")
 _SERVER_HOSTNAME_KEYWORDS = ("srv", "server", "-dc", "sql", "svc", "vcenter", "esxi", "-dc0")
 _WORKSTATION_HOSTNAME_KEYWORDS = ("wks", "workstation", "desktop", "laptop", "-pc")
 _NETWORK_HOSTNAME_KEYWORDS = ("switch", "sw-", "-sw", "router", "rtr-", "firewall", "fw-", "core-")
@@ -94,6 +100,8 @@ def _hostname_category(hostname: str | None) -> str | None:
     if not hostname:
         return None
     h = hostname.lower()
+    if any(k in h for k in _HMI_HOSTNAME_KEYWORDS):
+        return HMI
     if any(k in h for k in _PLC_HOSTNAME_KEYWORDS):
         return PLC
     if any(k in h for k in _NETWORK_HOSTNAME_KEYWORDS):
@@ -113,7 +121,7 @@ def classify_device_type(
     has_ot_server_protocol: bool,
     server_protocol_count: int,
 ) -> DeviceTypeGuess:
-    scores = {PLC: 0.0, SERVER: 0.0, WORKSTATION: 0.0, NETWORK_DEVICE: 0.0}
+    scores = {PLC: 0.0, HMI: 0.0, SERVER: 0.0, WORKSTATION: 0.0, NETWORK_DEVICE: 0.0}
     evidence: list[str] = []
 
     if os_signature == "cdp_lldp_announcement":
@@ -121,8 +129,19 @@ def classify_device_type(
         evidence.append("Se anuncia activamente como switch/router (CDP/LLDP)")
 
     if has_ot_server_protocol:
-        scores[PLC] += 3.0
-        evidence.append("Sirve un protocolo industrial (Modbus/S7comm/EtherNet-IP/DNP3/...)")
+        # A device serving Modbus/S7comm/... from a general-purpose OS is
+        # software (SCADA/HMI, or engineering tooling) using that OS's real
+        # TCP/IP stack -- not an embedded PLC, which wouldn't fingerprint
+        # as Windows/Linux in the first place.
+        if os_signature in ("windows", "linux"):
+            scores[HMI] += 3.0
+            evidence.append(
+                "Sirve un protocolo industrial pero corre en un SO de propósito general "
+                "(Windows/Linux) -- HMI/estación SCADA, no un PLC embebido"
+            )
+        else:
+            scores[PLC] += 3.0
+            evidence.append("Sirve un protocolo industrial (Modbus/S7comm/EtherNet-IP/DNP3/...)")
 
     vendor_cat = _vendor_category(vendor)
     if vendor_cat == PLC:
@@ -142,9 +161,12 @@ def classify_device_type(
     # device's *role* than "who made its NIC" is -- e.g. a Siemens-made
     # industrial PC named "...-PC" is still better called a workstation
     # than a PLC, so a hostname match should win a tie against vendor alone.
-    if host_cat == PLC:
+    if host_cat == HMI:
+        scores[HMI] += 2.5
+        evidence.append(f'Nombre sugiere HMI ("{hostname}")')
+    elif host_cat == PLC:
         scores[PLC] += 2.5
-        evidence.append(f'Nombre sugiere HMI/PLC/RTU ("{hostname}")')
+        evidence.append(f'Nombre sugiere PLC/RTU ("{hostname}")')
     elif host_cat == SERVER:
         scores[SERVER] += 2.5
         evidence.append(f'Nombre sugiere servidor ("{hostname}")')

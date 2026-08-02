@@ -74,7 +74,7 @@ class DeviceUpdateRequest(BaseModel):
 
     custom_name: str | None = None
     custom_vendor: str | None = None
-    custom_device_type: Literal["plc", "server", "workstation", "network_device", "other"] | None = None
+    custom_device_type: Literal["plc", "hmi", "server", "workstation", "network_device", "other"] | None = None
 
 
 class FlowOut(BaseModel):
