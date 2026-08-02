@@ -208,6 +208,20 @@ curl -X POST http://localhost:8000/api/vuln/scan \
 
 `use_nvd: false` limita el escaneo a las reglas locales (sin salir a internet).
 
+### Borrar toda la base de datos (empezar una captura en blanco)
+
+El dashboard se refresca solo, cada 15 segundos, en todas sus pestañas -- no hace falta ningún
+botón "Actualizar". Cuando lo que hace falta es partir de cero (no solo ver datos nuevos), la
+pestaña **Captura** tiene una sección "Zona de peligro" con un botón que borra **todas** las
+sesiones de captura, dispositivos, protocolos, flujos y hallazgos de vulnerabilidades -- las
+cuentas de usuario nunca se tocan. Pide confirmación antes de ejecutar, porque no se puede
+deshacer. Por API (requiere rol editor):
+
+```bash
+curl -X DELETE http://localhost:8000/api/capture/wipe \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ## Configuración (variables de entorno)
 
 | Variable | Descripción | Default |

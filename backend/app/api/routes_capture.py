@@ -9,7 +9,7 @@ from app.capture.live_capture import live_capture_manager
 from app.capture.pcap_loader import process_pcap_file
 from app.config import DATA_DIR, DEFAULT_LIVE_CAPTURE_FILTER
 from app.db import get_db, session_scope
-from app.inventory.inventory_service import purge_capture_session
+from app.inventory.inventory_service import purge_capture_session, wipe_all_capture_data
 from app.models import CaptureSession, User
 from app.schemas import CaptureSessionOut, StartLiveCaptureRequest
 
@@ -104,6 +104,17 @@ def delete_session(session_id: int, db: Session = Depends(get_db), _user: User =
     db.delete(session_obj)
     db.commit()
     return None
+
+
+@router.delete("/wipe")
+def wipe_database(db: Session = Depends(get_db), _user: User = Depends(require_editor)):
+    """Clears every capture session, device, protocol, flow, and
+    vulnerability finding, so a completely blank capture can start --
+    user accounts are never touched by this."""
+    live_capture_manager.stop_all()
+    counts = wipe_all_capture_data(db)
+    db.commit()
+    return counts
 
 
 def _process_pcap_background(filepath: str, capture_session_id: int) -> None:

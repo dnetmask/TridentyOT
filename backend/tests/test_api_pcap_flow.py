@@ -156,3 +156,38 @@ def test_public_ip_device_excluded_from_inventory_but_kept_in_flows_and_findings
     scan_findings = client.post("/api/vuln/scan", json={"use_nvd": False}).json()
     public_device_id = next(d["id"] for d in devices_incl_public if d["ip"] == "8.8.8.8")
     assert any(f["device_id"] == public_device_id and "telnet" in f["title"].lower() for f in scan_findings)
+
+
+def test_wipe_database_clears_capture_data_but_keeps_users(client, tmp_path):
+    syn = Ether() / IP(src="10.6.0.5", dst="10.6.0.60", ttl=64) / TCP(sport=41000, dport=502, flags="S", window=1024)
+    pcap_path = tmp_path / "wipe.pcap"
+    wrpcap(str(pcap_path), [syn])
+    with open(pcap_path, "rb") as f:
+        client.post("/api/capture/pcap", files={"file": ("wipe.pcap", f, "application/vnd.tcpdump.pcap")})
+
+    client.post("/api/vuln/scan", json={"use_nvd": False})
+    assert len(client.get("/api/inventory/devices").json()) == 2
+    assert len(client.get("/api/capture/sessions").json()) == 1
+    assert len(client.get("/api/vuln/findings").json()) >= 1
+
+    resp = client.delete("/api/capture/wipe")
+    assert resp.status_code == 200
+    counts = resp.json()
+    assert counts["devices"] == 2
+    assert counts["sessions"] == 1
+    assert counts["findings"] >= 1
+
+    assert client.get("/api/inventory/devices").json() == []
+    assert client.get("/api/inventory/flows").json() == []
+    assert client.get("/api/vuln/findings").json() == []
+    assert client.get("/api/capture/sessions").json() == []
+
+    # users are never touched by a data wipe
+    assert client.get("/api/auth/me").status_code == 200
+    assert {u["username"] for u in client.get("/api/users").json()} == {"admin"}
+
+
+def test_wipe_database_requires_editor_role(client, make_client):
+    client.post("/api/users", json={"username": "viewer_wipe", "password": "secret1", "role": "viewer"})
+    viewer = make_client("viewer_wipe", "secret1")
+    assert viewer.delete("/api/capture/wipe").status_code == 403

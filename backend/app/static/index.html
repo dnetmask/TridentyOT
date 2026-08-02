@@ -304,13 +304,22 @@
     <div class="card">
       <div class="flex-between">
         <h2>Sesiones de captura</h2>
-        <button class="action secondary" id="refresh-sessions-btn">Actualizar</button>
       </div>
       <div class="viewer-note viewer-only hidden">Perfil visualizador: solo lectura, no puedes iniciar/detener capturas ni subir archivos.</div>
       <table>
         <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>Origen</th><th>Estado</th><th>Paquetes</th><th>Inicio</th><th></th></tr></thead>
         <tbody id="sessions-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
       </table>
+    </div>
+
+    <div class="card editor-only" style="border-color:var(--crit);">
+      <h2>Zona de peligro</h2>
+      <p class="muted" style="margin-top:6px;">
+        Borra todas las sesiones de captura, dispositivos, protocolos, flujos y hallazgos de
+        vulnerabilidades -- para arrancar una captura completamente en blanco. Los usuarios no se
+        ven afectados. <b>Esta acción no se puede deshacer.</b>
+      </p>
+      <button class="action danger" id="wipe-db-btn" style="margin-top:10px;">Borrar toda la base de datos</button>
     </div>
   </section>
 
@@ -323,7 +332,6 @@
             <input type="checkbox" id="ot-only-checkbox" style="width:auto" /> Solo dispositivos OT
           </label>
           <button class="action secondary" id="columns-btn">Columnas</button>
-          <button class="action secondary" id="refresh-devices-btn">Actualizar</button>
           <div id="columns-panel" class="columns-panel hidden">
             <div class="columns-panel-title">Columnas visibles</div>
             <label><input type="checkbox" data-col-toggle="ip" checked /> IP</label>
@@ -363,7 +371,6 @@
             <option value="OT">Solo OT</option>
             <option value="IT">Solo IT</option>
           </select>
-          <button class="action secondary" id="refresh-flows-btn">Actualizar</button>
         </div>
       </div>
       <div class="stat-row" id="flows-stats"></div>
@@ -387,7 +394,6 @@
             <option value="low">Low</option>
             <option value="info">Info</option>
           </select>
-          <button class="action secondary" id="refresh-findings-btn">Actualizar</button>
           <button class="action editor-only" id="scan-all-btn">Ejecutar escaneo completo</button>
         </div>
       </div>
@@ -426,7 +432,6 @@
     <div class="card">
       <div class="flex-between">
         <h2>Usuarios</h2>
-        <button class="action secondary" id="refresh-users-btn">Actualizar</button>
       </div>
       <table>
         <thead><tr><th>Usuario</th><th>Perfil</th><th>Creado</th><th></th></tr></thead>
@@ -443,6 +448,8 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 let currentUser = null;
+let autoRefreshTimer = null;
+const AUTO_REFRESH_MS = 15000;
 
 function isEditor() {
   return !!currentUser && currentUser.role === 'editor';
@@ -482,6 +489,7 @@ async function api(path, options = {}) {
 
   const res = await fetch(path, Object.assign({}, options, { headers }));
   if (res.status === 401) {
+    if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
     setToken(null);
     currentUser = null;
     showLoginScreen();
@@ -503,6 +511,12 @@ async function bootstrapAfterLogin() {
   applyRoleVisibility();
   showAppShell();
   loadInterfaces();
+  refreshAllData();
+  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+  autoRefreshTimer = setInterval(refreshAllData, AUTO_REFRESH_MS);
+}
+
+function refreshAllData() {
   loadSessions();
   loadDevices();
   loadFlows();
@@ -534,6 +548,7 @@ $('#login-form').addEventListener('submit', async (e) => {
 });
 
 $('#logout-btn').addEventListener('click', async () => {
+  if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
   try { await api('/api/auth/logout', { method: 'POST' }); } catch (e) {}
   setToken(null);
   currentUser = null;
@@ -617,6 +632,19 @@ async function deleteSession(id) {
   } catch (e) { alert('No se pudo borrar: ' + e.message); }
 }
 
+$('#wipe-db-btn').addEventListener('click', async () => {
+  const ok = confirm(
+    'Esto borra TODAS las sesiones de captura, dispositivos, protocolos, flujos y hallazgos ' +
+    'de vulnerabilidades. Los usuarios no se ven afectados. Esta acción no se puede deshacer. ' +
+    '¿Continuar?'
+  );
+  if (!ok) return;
+  try {
+    await api('/api/capture/wipe', { method: 'DELETE' });
+    refreshAllData();
+  } catch (e) { alert('No se pudo borrar la base de datos: ' + e.message); }
+});
+
 $('#start-live-btn').addEventListener('click', async () => {
   const iface = $('#iface-select').value;
   if (!iface) { alert('Selecciona una interfaz'); return; }
@@ -672,8 +700,6 @@ dropzone.addEventListener('drop', (e) => {
   }
   uploadPcapFile(file);
 });
-
-$('#refresh-sessions-btn').addEventListener('click', loadSessions);
 
 // ---------- Inventory tab ----------
 let currentDeviceId = null;
@@ -829,7 +855,6 @@ async function saveDeviceOverrides(id, reset = false) {
   } catch (e) { alert('No se pudo guardar: ' + e.message); }
 }
 
-$('#refresh-devices-btn').addEventListener('click', loadDevices);
 $('#ot-only-checkbox').addEventListener('change', renderDevicesTable);
 
 // ---------- Inventory column visibility (persisted per-browser) ----------
@@ -923,7 +948,6 @@ function renderFlowsTable() {
   }).join('');
 }
 
-$('#refresh-flows-btn').addEventListener('click', loadFlows);
 $('#flow-category-filter').addEventListener('change', renderFlowsTable);
 
 // ---------- Vulnerabilities tab ----------
@@ -960,7 +984,6 @@ function renderFindingsTable() {
     </tr>`).join('');
 }
 
-$('#refresh-findings-btn').addEventListener('click', loadFindings);
 $('#severity-filter').addEventListener('change', renderFindingsTable);
 $('#scan-all-btn').addEventListener('click', async () => {
   $('#scan-all-btn').textContent = 'Escaneando...';
@@ -1032,7 +1055,6 @@ async function deleteUser(id) {
   } catch (e) { alert('No se pudo eliminar: ' + e.message); }
 }
 
-$('#refresh-users-btn').addEventListener('click', loadUsers);
 $('#create-user-btn').addEventListener('click', async () => {
   const username = $('#new-user-username').value.trim();
   const password = $('#new-user-password').value;

@@ -21,7 +21,7 @@ from app.fingerprint.os_fingerprint import (
 )
 from app.fingerprint.protocol_detect import OT, ProtocolInfo, classify
 from app.fingerprint.vendor_lookup import lookup_vendor
-from app.models import Device, DeviceProtocol, Flow, VulnerabilityFinding, utcnow
+from app.models import CaptureSession, Device, DeviceProtocol, Flow, VulnerabilityFinding, utcnow
 
 _PRINTABLE_BANNER_MIN_RATIO = 0.85
 
@@ -442,3 +442,24 @@ def purge_capture_session(session: Session, capture_session_id: int) -> None:
             synchronize_session=False
         )
         session.query(Device).filter(Device.id == device_id).delete(synchronize_session=False)
+
+
+def wipe_all_capture_data(session: Session) -> dict[str, int]:
+    """Clears every capture session, device, protocol, flow, and
+    vulnerability finding -- for starting a completely blank capture.
+    User accounts are never touched here: this only ever clears what
+    capturing produced, never who's allowed to use the app.
+
+    Deletes in FK-safe order (children before the parents they reference)
+    rather than looping purge_capture_session per session -- there's no
+    "does something else still reference this" case to check when
+    everything is going away at once.
+    """
+    counts = {
+        "findings": session.query(VulnerabilityFinding).delete(synchronize_session=False),
+        "protocols": session.query(DeviceProtocol).delete(synchronize_session=False),
+        "flows": session.query(Flow).delete(synchronize_session=False),
+        "devices": session.query(Device).delete(synchronize_session=False),
+        "sessions": session.query(CaptureSession).delete(synchronize_session=False),
+    }
+    return counts
