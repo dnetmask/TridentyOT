@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.capture.packet_processor import PacketRecord
 from app.fingerprint.device_classifier import NETWORK_DEVICE, ROUTER_NAT, classify_device_type
+from app.fingerprint.identity_detect import IdentityHint
 from app.fingerprint.ip_scope import is_lan_ip, is_real_unicast_ip
 from app.fingerprint.os_fingerprint import (
     OsGuess,
@@ -149,6 +150,40 @@ def apply_device_type_guess(session: Session, device: Device) -> None:
     device.device_type = guess.device_type
     device.device_type_confidence = guess.confidence
     device.device_type_evidence = "; ".join(guess.evidence) if guess.evidence else None
+    if guess.device_type_secondary:
+        device.device_type_secondary = guess.device_type_secondary
+
+
+def apply_identity_hints(session: Session, device: Device, hints: list[IdentityHint]) -> None:
+    """Applies protocol-level identity hints (EtherNet/IP CIP, Modbus
+    device identification, ...) to *this packet's sender* -- these are
+    facts a device states about itself, not inferred evidence:
+
+    - vendor only fills in when still unknown, same as the MAC-OUI lookup
+      in get_or_create_device -- never overwrites a real OUI vendor with a
+      protocol-level guess (a DHCP vendor class string, an HTTP Server
+      banner, ...).
+    - device_type is a direct, maximal-confidence override, same
+      "bypass the generic scorer" pattern as apply_gateway_detection --
+      only the handful of protocols/values unambiguous enough to earn that
+      (see identity_detect.py) ever set it.
+    - a hint with no vendor/hostname/device_type at all (e.g. BACnet's raw
+      vendor-id number, which this app can't translate to a name) only
+      fills in device_type_evidence when nothing else has spoken yet, never
+      overwriting a real classification's evidence text.
+    """
+    for hint in hints:
+        if hint.vendor and not device.vendor:
+            device.vendor = hint.vendor
+        if hint.device_type:
+            if device.device_type != hint.device_type or device.device_type_confidence < 1.0:
+                device.device_type = hint.device_type
+                device.device_type_confidence = 1.0
+                device.device_type_evidence = hint.evidence or None
+            if hint.device_type_secondary:
+                device.device_type_secondary = hint.device_type_secondary
+        elif hint.evidence and not device.device_type_evidence:
+            device.device_type_evidence = hint.evidence
 
 
 def apply_hostname_hints(session: Session, hints: list[tuple[str, str]]) -> None:
@@ -445,6 +480,14 @@ def ingest_packet_record(
     )
     dst_device = get_or_create_device(session, ip=record.dst_ip, mac=None, capture_session_id=capture_session_id)
     session.flush()
+
+    # Applied unconditionally on src_device, independent of dst_device --
+    # unlike the protocol/flow bookkeeping below, this doesn't need a real
+    # device on both ends (e.g. a BACnet I-Am broadcast to 255.255.255.255
+    # never gets a dst_device at all, but its sender's identity is still
+    # worth recording).
+    if src_device is not None and record.identity_hints:
+        apply_identity_hints(session, src_device, record.identity_hints)
 
     # Applied before the protocol/device-type block below: has_ot_server_
     # protocol's PLC-vs-HMI split reads os_signature, and a SYN-ACK can

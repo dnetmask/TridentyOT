@@ -49,12 +49,20 @@ ROUTER_NAT = "router_nat"
 
 NETWORK_DEVICE_SUBTYPES = (SWITCH_L2, SWITCH_L3, FIREWALL, ACCESS_POINT, ROUTER_NAT)
 
+# Subcategory for OTHER rows -- same idea as NETWORK_DEVICE_SUBTYPES above,
+# just for the OTHER bucket. TRANSPORT_CONTROLLER is auto-detected from
+# vendor (see _vendor_category / "Industrial Software Co").
+TRANSPORT_CONTROLLER = "transport_controller"
+
+OTHER_SUBTYPES = (TRANSPORT_CONTROLLER,)
+
 SUBTYPE_LABELS = {
     SWITCH_L2: "Switch L2",
     SWITCH_L3: "Switch L3",
     FIREWALL: "Firewall",
     ACCESS_POINT: "Access Point",
     ROUTER_NAT: "Router/NAT",
+    TRANSPORT_CONTROLLER: "Controlador de transporte",
 }
 
 # Substring match against the OUI vendor string (already resolved by
@@ -79,6 +87,14 @@ _IT_VENDOR_KEYWORDS = (
 # workstations, so unlike the ambiguous IT keywords above this is a
 # confident, direct vote for SERVER (a VM), not a 50/50 split.
 _VIRTUALIZATION_VENDOR_KEYWORDS = ("vmware",)
+# Weintek only makes HMI touch panels -- an unambiguous, direct vendor vote,
+# same spirit as the VMware rule above.
+_HMI_VENDOR_KEYWORDS = ("weintek",)
+# "Industrial Software Co" is the OUI registrant string used by transport/
+# logistics controller boards seen in this product's own test captures --
+# not a PLC/HMI vendor, so it votes OTHER with a specific subtype rather
+# than falling through to the zero-score OTHER fallback.
+_TRANSPORT_CONTROLLER_VENDOR_KEYWORDS = ("industrial software co",)
 
 # Substring match against the device's own (lowercased) hostname. A site's
 # naming convention is a strong hint when it exists (e.g. this product's
@@ -106,6 +122,7 @@ class DeviceTypeGuess:
     device_type: str
     confidence: float  # 0.0 - 1.0
     evidence: list[str] = field(default_factory=list)
+    device_type_secondary: str | None = None
 
 
 def _vendor_category(vendor: str | None) -> str | None:
@@ -114,10 +131,14 @@ def _vendor_category(vendor: str | None) -> str | None:
     v = vendor.lower()
     if any(k in v for k in _INDUSTRIAL_VENDOR_KEYWORDS):
         return PLC
+    if any(k in v for k in _HMI_VENDOR_KEYWORDS):
+        return HMI
     if any(k in v for k in _NETWORK_VENDOR_KEYWORDS):
         return NETWORK_DEVICE
     if any(k in v for k in _VIRTUALIZATION_VENDOR_KEYWORDS):
         return SERVER
+    if any(k in v for k in _TRANSPORT_CONTROLLER_VENDOR_KEYWORDS):
+        return OTHER
     if any(k in v for k in _IT_VENDOR_KEYWORDS):
         return "it"  # ambiguous between server/workstation on its own
     return None
@@ -148,8 +169,9 @@ def classify_device_type(
     has_ot_server_protocol: bool,
     server_protocol_count: int,
 ) -> DeviceTypeGuess:
-    scores = {PLC: 0.0, HMI: 0.0, SERVER: 0.0, WORKSTATION: 0.0, NETWORK_DEVICE: 0.0}
+    scores = {PLC: 0.0, HMI: 0.0, SERVER: 0.0, WORKSTATION: 0.0, NETWORK_DEVICE: 0.0, OTHER: 0.0}
     evidence: list[str] = []
+    subtype_hint: str | None = None
 
     if os_signature == "cdp_lldp_announcement":
         scores[NETWORK_DEVICE] += 3.0
@@ -177,9 +199,16 @@ def classify_device_type(
     elif vendor_cat == NETWORK_DEVICE:
         scores[NETWORK_DEVICE] += 2.0
         evidence.append(f'Fabricante de redes ("{vendor}")')
+    elif vendor_cat == HMI:
+        scores[HMI] += 2.0
+        evidence.append(f'Fabricante de HMI ("{vendor}")')
     elif vendor_cat == SERVER:
         scores[SERVER] += 2.0
         evidence.append(f'Fabricante de virtualización ("{vendor}") -- interfaz de máquina virtual')
+    elif vendor_cat == OTHER:
+        scores[OTHER] += 2.0
+        subtype_hint = TRANSPORT_CONTROLLER
+        evidence.append(f'Fabricante de controladores de transporte ("{vendor}")')
     elif vendor_cat == "it":
         scores[SERVER] += 0.5
         scores[WORKSTATION] += 0.5
@@ -224,4 +253,7 @@ def classify_device_type(
         return DeviceTypeGuess(device_type=OTHER, confidence=0.0, evidence=[])
 
     confidence = round(min(best_score / _CONFIDENCE_SATURATION, 1.0), 2)
-    return DeviceTypeGuess(device_type=best_type, confidence=confidence, evidence=evidence)
+    secondary = subtype_hint if best_type == OTHER else None
+    return DeviceTypeGuess(
+        device_type=best_type, confidence=confidence, evidence=evidence, device_type_secondary=secondary
+    )

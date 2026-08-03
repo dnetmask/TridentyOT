@@ -80,7 +80,7 @@ class DeviceUpdateRequest(BaseModel):
     custom_vendor: str | None = None
     custom_device_type: Literal["plc", "hmi", "server", "workstation", "network_device", "other"] | None = None
     custom_device_type_secondary: (
-        Literal["switch_l2", "switch_l3", "firewall", "access_point", "router_nat"] | None
+        Literal["switch_l2", "switch_l3", "firewall", "access_point", "router_nat", "transport_controller"] | None
     ) = None
 
 

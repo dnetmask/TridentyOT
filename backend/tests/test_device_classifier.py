@@ -4,6 +4,7 @@ from app.fingerprint.device_classifier import (
     OTHER,
     PLC,
     SERVER,
+    TRANSPORT_CONTROLLER,
     WORKSTATION,
     classify_device_type,
 )
@@ -177,3 +178,43 @@ def test_embedded_stack_without_other_evidence_leans_plc():
     )
     assert guess.device_type == PLC
     assert guess.confidence < 0.5
+
+
+def test_weintek_vendor_suggests_hmi():
+    guess = classify_device_type(
+        vendor="Weintek Labs. Inc.",
+        hostname=None,
+        os_signature=None,
+        has_ot_server_protocol=False,
+        server_protocol_count=0,
+    )
+    assert guess.device_type == HMI
+    assert guess.confidence > 0
+    assert guess.device_type_secondary is None
+
+
+def test_industrial_software_co_vendor_suggests_other_transport_controller():
+    guess = classify_device_type(
+        vendor="Industrial Software Co",
+        hostname=None,
+        os_signature=None,
+        has_ot_server_protocol=False,
+        server_protocol_count=0,
+    )
+    assert guess.device_type == OTHER
+    assert guess.confidence > 0
+    assert guess.device_type_secondary == TRANSPORT_CONTROLLER
+
+
+def test_industrial_software_co_vendor_loses_to_stronger_conflicting_evidence():
+    """A vendor-only vote for OTHER (2.0) should still lose to a stronger,
+    more specific signal, same as any other vendor-only vote would."""
+    guess = classify_device_type(
+        vendor="Industrial Software Co",
+        hostname="plant-plc-07",
+        os_signature=None,
+        has_ot_server_protocol=False,
+        server_protocol_count=0,
+    )
+    assert guess.device_type == PLC
+    assert guess.device_type_secondary is None

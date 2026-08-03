@@ -1,4 +1,5 @@
 from scapy.contrib.cdp import CDPMsgDeviceID, CDPv2_HDR
+from scapy.contrib.enipTCP import ENIPTCP, ENIPListIdentity, ENIPListIdentityItem
 from scapy.contrib.lldp import (
     LLDPDUChassisID,
     LLDPDUEndOfLLDPDU,
@@ -405,6 +406,28 @@ def test_arp_only_industrial_vendor_sets_device_type_plc(db_session):
     assert 0 < device.device_type_confidence < 0.7
 
 
+def test_arp_only_weintek_vendor_sets_device_type_hmi(db_session):
+    who_has = Ether() / ARP(op=1, hwsrc="00:0c:26:aa:bb:cc", psrc="10.0.4.71", pdst="10.0.4.1")
+    ingest_packet_record(db_session, process_packet(who_has))
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "10.0.4.71").one()
+    assert device.vendor == "Weintek Labs. Inc."
+    assert device.device_type == "hmi"
+    assert device.device_type_secondary is None
+
+
+def test_arp_only_industrial_software_co_vendor_sets_other_transport_controller(db_session):
+    who_has = Ether() / ARP(op=1, hwsrc="14:b1:26:aa:bb:cc", psrc="10.0.4.72", pdst="10.0.4.1")
+    ingest_packet_record(db_session, process_packet(who_has))
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "10.0.4.72").one()
+    assert device.vendor == "Industrial Software Co"
+    assert device.device_type == "other"
+    assert device.device_type_secondary == "transport_controller"
+
+
 def test_hostname_hint_can_upgrade_device_type_classification(db_session):
     """A device with no distinguishing evidence starts unclassified; once
     an HMI-style hostname arrives, it should reclassify as hmi. Plain ACK
@@ -604,3 +627,96 @@ def test_gateway_detection_ignores_a_single_shared_public_ip(db_session):
 
     pub_device = db_session.query(Device).filter(Device.ip == "8.8.8.8").one()
     assert pub_device.display_device_type != "network_device"
+
+
+def _modbus_object(object_id: int, value: str) -> bytes:
+    return bytes([object_id, len(value)]) + value.encode()
+
+
+def test_enip_list_identity_sets_hmi_device_type_end_to_end(db_session):
+    """A CIP Identity object's deviceType is authoritative enough to
+    override the generic classifier outright -- same "direct-set" pattern
+    as apply_gateway_detection."""
+    item = ENIPListIdentityItem(
+        itemTypeCode=0x0C,
+        sinFamily=2,
+        sinPort=44818,
+        sinAddress="10.0.4.10",
+        vendorId=1,
+        deviceType=0x18,  # Human-Machine Interface
+        productNameLength=len("MyHMI-9000"),
+        productName="MyHMI-9000",
+    )
+    enip = ENIPTCP(commandId=0x63, status=0) / ENIPListIdentity(itemCount=1, items=[item])
+    pkt = Ether(bytes(Ether() / IP(src="10.0.4.10", dst="10.0.4.99", ttl=64) / TCP(sport=44818, dport=51000) / enip))
+    ingest_packet_record(db_session, process_packet(pkt))
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "10.0.4.10").one()
+    assert device.device_type == "hmi"
+    assert device.device_type_confidence == 1.0
+    assert device.hostname == "MyHMI-9000"
+
+
+def test_modbus_device_identification_sets_vendor_end_to_end(db_session):
+    payload = bytes([0x2B, 0x0E, 0x0E, 0x83, 0x00, 0x00, 2])
+    payload += _modbus_object(0x00, "Acme Corp") + _modbus_object(0x04, "Widget-9000")
+    adu = bytes([0, 1, 0, 0, 0, len(payload) + 1, 0xFF]) + payload
+    pkt = Ether(bytes(Ether() / IP(src="10.0.4.11", dst="10.0.4.99", ttl=64) / TCP(sport=502, dport=51000) / adu))
+    ingest_packet_record(db_session, process_packet(pkt))
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "10.0.4.11").one()
+    assert device.vendor == "Acme Corp"
+    assert device.hostname == "Widget-9000"
+
+
+def test_modbus_identification_never_overwrites_a_known_oui_vendor(db_session):
+    """Vendor only fills in when unknown -- a real MAC-OUI vendor always
+    outranks a protocol-level self-reported string."""
+    payload = bytes([0x2B, 0x0E, 0x0E, 0x83, 0x00, 0x00, 1])
+    payload += _modbus_object(0x00, "Some Other Vendor")
+    adu = bytes([0, 1, 0, 0, 0, len(payload) + 1, 0xFF]) + payload
+    pkt = Ether(
+        bytes(
+            Ether(src="00:01:e3:aa:bb:cc")
+            / IP(src="10.0.4.12", dst="10.0.4.99", ttl=64)
+            / TCP(sport=502, dport=51000)
+            / adu
+        )
+    )
+    ingest_packet_record(db_session, process_packet(pkt))
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "10.0.4.12").one()
+    assert device.vendor == "Siemens AG"  # from the 0001E3 OUI, not the Modbus hint
+
+
+def test_bacnet_i_am_fills_evidence_only_without_asserting_a_device_type(db_session):
+    """BACnet's vendor-id is a numeric registry ID this app doesn't bundle
+    a lookup table for -- it must never become Device.vendor/hostname, and
+    must never assert a device_type override; only device_type_evidence
+    fills in, and only when nothing else has classified this device yet."""
+    apdu = bytes([0x10, 0x00])
+    object_id = (8 << 22) | 1234
+    apdu += bytes([0xC4]) + object_id.to_bytes(4, "big")
+    apdu += bytes([0x22, 0x04, 0x00])
+    apdu += bytes([0x91, 0x00])
+    apdu += bytes([0x21, 42])
+    npdu = bytes([0x01, 0x00])
+    bvlc_len = 4 + len(npdu) + len(apdu)
+    bvlc = bytes([0x81, 0x0A]) + bvlc_len.to_bytes(2, "big")
+    data = bvlc + npdu + apdu
+    pkt = Ether(
+        bytes(Ether() / IP(src="10.0.4.13", dst="10.0.4.255", ttl=64) / UDP(sport=47808, dport=47808) / data)
+    )
+    ingest_packet_record(db_session, process_packet(pkt))
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "10.0.4.13").one()
+    assert device.vendor is None
+    assert device.hostname is None
+    assert device.device_type is None
+    assert device.device_type_evidence is not None
+    assert "1234" in device.device_type_evidence
+    assert "42" in device.device_type_evidence

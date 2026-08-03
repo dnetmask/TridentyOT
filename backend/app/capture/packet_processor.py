@@ -10,6 +10,7 @@ from scapy.layers.l2 import ARP, Ether
 from scapy.packet import Packet
 
 from app.fingerprint.hostname_detect import extract_hostname_hints
+from app.fingerprint.identity_detect import extract_identity_hints
 from app.fingerprint.protocol_detect import PN_ALARM, PN_DCP, PNIO_PS, PROFINET_OTHER
 
 try:
@@ -94,6 +95,9 @@ class PacketRecord:
     # Which PROFINET sub-protocol this frame carries (see _pnio_protocol_name)
     # -- only set when transport == "profinet".
     l2_protocol: str | None = None
+    # Protocol-level device identity (EtherNet/IP CIP, Modbus device ID,
+    # ...) self-reported by this packet's sender -- see identity_detect.py.
+    identity_hints: list = field(default_factory=list)
 
 
 def _mac(pkt: Packet, field_name: str) -> str | None:
@@ -210,6 +214,10 @@ def process_packet(pkt: Packet) -> PacketRecord | None:
         # hostnames ride over TCP.
         if record.transport in ("tcp", "udp"):
             record.hostname_hints = extract_hostname_hints(pkt)
+            record.identity_hints = extract_identity_hints(pkt)
+            for hint in record.identity_hints:
+                if hint.hostname and record.src_ip:
+                    record.hostname_hints.append((record.src_ip, hint.hostname))
 
         return record
 

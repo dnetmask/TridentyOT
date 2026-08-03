@@ -979,6 +979,7 @@ dropzone.addEventListener('drop', (e) => {
 // ---------- Inventory tab ----------
 let currentDeviceId = null;
 let currentDeviceAutoType = null;
+let currentDeviceData = null;
 let allDevices = [];
 
 function fitTableScroll(wrapperId, rowsToShow = 7) {
@@ -1131,12 +1132,19 @@ const DEVICE_TYPE_PILL_CLASS = {
   network_device: 'network',
   workstation: 'workstation',
 };
-const NETWORK_SUBTYPE_LABELS = {
+const SUBTYPE_LABELS = {
   switch_l2: 'Switch L2',
   switch_l3: 'Switch L3',
   firewall: 'Firewall',
   access_point: 'Access Point',
   router_nat: 'Router/NAT',
+  transport_controller: 'Controlador de transporte',
+};
+// Which subtypes are selectable for each primary Tipo -- mirrors the
+// backend's NETWORK_DEVICE_SUBTYPES / OTHER_SUBTYPES split.
+const SUBTYPES_BY_TYPE = {
+  network_device: ['switch_l2', 'switch_l3', 'firewall', 'access_point', 'router_nat'],
+  other: ['transport_controller'],
 };
 
 function deviceTypeBadge(d) {
@@ -1151,7 +1159,7 @@ function deviceTypeBadge(d) {
 function deviceSubtypeBadge(d) {
   const subtype = d.display_device_type_secondary;
   if (!subtype) return '<span class="muted">—</span>';
-  const label = NETWORK_SUBTYPE_LABELS[subtype] || subtype;
+  const label = SUBTYPE_LABELS[subtype] || subtype;
   return `<span class="pill network">${label}</span>${d.custom_device_type_secondary ? '<span class="manual-tag">manual</span>' : ''}`;
 }
 
@@ -1208,6 +1216,7 @@ async function showDeviceDetail(id) {
   currentDeviceId = id;
   const device = await api(`/api/inventory/devices/${id}`);
   currentDeviceAutoType = device.device_type;
+  currentDeviceData = device;
   const protoRows = device.protocols.map(p => `
     <span class="pill ${p.category === 'OT' ? 'ot' : ''}">${p.protocol}:${p.port ?? '-'} (${p.role}, ${p.packet_count}x)</span>`).join(' ');
   const findingRows = device.findings.map(f => `
@@ -1234,11 +1243,9 @@ async function showDeviceDetail(id) {
     <div class="edit-field" id="subtype-field-wrapper">
       <label>Subtipo</label>
       <select id="edit-device-type-secondary" ${editor ? '' : 'disabled'}>
-        <option value="" ${!device.custom_device_type_secondary ? 'selected' : ''}>${device.device_type_secondary ? 'Automático: ' + (NETWORK_SUBTYPE_LABELS[device.device_type_secondary] || device.device_type_secondary) : 'Sin subtipo'}</option>
-        ${Object.entries(NETWORK_SUBTYPE_LABELS).map(([value, label]) => `
-        <option value="${value}" ${device.custom_device_type_secondary === value ? 'selected' : ''}>${label}</option>`).join('')}
+        ${subtypeOptionsHtml(device.device_type)}
       </select>
-      <span class="hint">Solo aplica a Equipos de red (Switch L2/L3, Firewall, Access Point, Router/NAT)</span>
+      <span class="hint" id="subtype-field-hint"></span>
     </div>
     <div class="edit-field">
       <label>Fabricante</label>
@@ -1265,12 +1272,35 @@ async function showDeviceDetail(id) {
   toggleSubtypeFieldVisibility();
 }
 
+function subtypeOptionsHtml(effectiveType) {
+  const device = currentDeviceData || {};
+  const keys = SUBTYPES_BY_TYPE[effectiveType] || [];
+  const autoLabel = device.device_type_secondary ? (SUBTYPE_LABELS[device.device_type_secondary] || device.device_type_secondary) : null;
+  return `
+    <option value="" ${!device.custom_device_type_secondary ? 'selected' : ''}>${autoLabel ? 'Automático: ' + autoLabel : 'Sin subtipo'}</option>
+    ${keys.map(value => `
+    <option value="${value}" ${device.custom_device_type_secondary === value ? 'selected' : ''}>${SUBTYPE_LABELS[value]}</option>`).join('')}
+  `;
+}
+
+const SUBTYPE_FIELD_HINTS = {
+  network_device: 'Solo aplica a Equipos de red (Switch L2/L3, Firewall, Access Point, Router/NAT)',
+  other: 'Solo aplica a Otro (Controlador de transporte)',
+};
+
 function toggleSubtypeFieldVisibility() {
   const select = $('#edit-device-type');
+  const secondarySelect = $('#edit-device-type-secondary');
   const wrapper = $('#subtype-field-wrapper');
   if (!select || !wrapper) return;
   const effectiveType = select.value || currentDeviceAutoType;
-  wrapper.classList.toggle('hidden', effectiveType !== 'network_device');
+  const applies = Object.prototype.hasOwnProperty.call(SUBTYPES_BY_TYPE, effectiveType);
+  wrapper.classList.toggle('hidden', !applies);
+  if (applies && secondarySelect) {
+    secondarySelect.innerHTML = subtypeOptionsHtml(effectiveType);
+  }
+  const hint = $('#subtype-field-hint');
+  if (hint) hint.textContent = SUBTYPE_FIELD_HINTS[effectiveType] || '';
 }
 
 async function saveDeviceOverrides(id, reset = false) {
