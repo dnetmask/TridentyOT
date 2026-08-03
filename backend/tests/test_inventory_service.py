@@ -6,6 +6,12 @@ from scapy.contrib.lldp import (
     LLDPDUSystemName,
     LLDPDUTimeToLive,
 )
+from scapy.contrib.pnio import ProfinetIO
+from scapy.contrib.pnio_dcp import (
+    DCP_IDENTIFY_RESPONSE_FRAME_ID,
+    DCPNameOfStationBlock,
+    ProfinetDCP,
+)
 from scapy.layers.inet import IP, TCP, UDP
 from scapy.layers.l2 import ARP, LLC, SNAP, Ether
 from scapy.layers.netbios import NBNSHeader, NBNSRegistrationRequest
@@ -300,6 +306,61 @@ def test_cdp_announcement_sets_device_type_network_device(db_session):
     assert device.device_type_confidence >= 0.7
 
 
+def test_profinet_rtc_creates_mac_only_device_classified_as_plc(db_session):
+    """PROFINET's real-time cyclic I/O (PNIO_PS in Wireshark) runs raw over
+    Ethernet -- no IP layer at all -- so the device is keyed by MAC alone,
+    same as a CDP/LLDP-only switch. Registered as an OT server protocol,
+    with no os_signature to contradict it (no TCP/IP stack involved), it
+    should classify as PLC -- exactly what a real PROFINET IO device is."""
+    pkt = Ether(src="00:1b:1b:aa:bb:cc", dst="00:1b:1b:dd:ee:ff") / ProfinetIO(frameID=0x8000)
+    ingest_packet_record(db_session, process_packet(Ether(bytes(pkt))))
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.mac == "00:1b:1b:aa:bb:cc").one()
+    assert device.ip is None
+    protocols = db_session.query(DeviceProtocol).filter(DeviceProtocol.device_id == device.id).all()
+    assert len(protocols) == 1
+    assert protocols[0].protocol == "pnio_ps"
+    assert protocols[0].category == "OT"
+    assert device.is_ot_suspected is True
+    assert device.display_device_type == "plc"
+
+
+def test_profinet_dcp_sets_hostname_from_name_of_station(db_session):
+    pkt = (
+        Ether(src="00:1b:1b:11:22:33", dst="01:0e:cf:00:00:00")
+        / ProfinetIO(frameID=DCP_IDENTIFY_RESPONSE_FRAME_ID)
+        / ProfinetDCP(service_id=5, service_type=1, dcp_data_length=20)
+        / DCPNameOfStationBlock(name_of_station=b"plc-line3")
+    )
+    ingest_packet_record(db_session, process_packet(Ether(bytes(pkt))))
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.mac == "00:1b:1b:11:22:33").one()
+    assert device.hostname == "plc-line3"
+    protocols = db_session.query(DeviceProtocol).filter(DeviceProtocol.device_id == device.id).all()
+    assert protocols[0].protocol == "pn-dcp"
+
+
+def test_profinet_mac_only_device_merges_with_later_ip_traffic(db_session):
+    """Same merge-by-MAC behavior as a CDP-only switch: a PLC first seen
+    only via PROFINET RTC (no IP) should be enriched, not duplicated, once
+    the same MAC is later seen sending real IP traffic (e.g. its web UI)."""
+    rtc = Ether(src="00:1b:1b:aa:bb:cc", dst="00:1b:1b:dd:ee:ff") / ProfinetIO(frameID=0x8000)
+    ingest_packet_record(db_session, process_packet(Ether(bytes(rtc))))
+    db_session.commit()
+
+    ip_pkt = Ether(src="00:1b:1b:aa:bb:cc") / IP(src="10.0.4.20", dst="10.0.4.5", ttl=64) / TCP(
+        sport=80, dport=51000, flags="SA", window=8192
+    )
+    ingest_packet_record(db_session, process_packet(ip_pkt))
+    db_session.commit()
+
+    devices = db_session.query(Device).filter(Device.mac == "00:1b:1b:aa:bb:cc").all()
+    assert len(devices) == 1
+    assert devices[0].ip == "10.0.4.20"
+
+
 def test_modbus_server_sets_device_type_plc(db_session):
     syn = Ether() / IP(src="10.0.4.5", dst="10.0.4.60", ttl=64) / TCP(sport=41000, dport=502, flags="S", window=1024)
     ingest_packet_record(db_session, process_packet(syn))
@@ -487,11 +548,15 @@ def test_gateway_detection_flags_mac_shared_across_public_ips(db_session):
     assert lan_host.display_device_type != "network_device"
 
 
-def test_gateway_detection_prefers_a_lan_side_identity_when_one_exists(db_session):
-    """If the capture also saw the gateway speak from its own LAN IP (e.g.
-    ARP, DHCP), that's a much better row to represent it than an arbitrary
-    public-IP duplicate -- so it should be the one picked, regardless of
-    creation order."""
+def test_gateway_detection_never_promotes_a_private_ip_sharing_the_mac(db_session):
+    """A private-IP row sharing the gateway's MAC is never safe to treat as
+    "the gateway's own LAN identity" -- inter-VLAN routing produces the
+    exact same sender-MAC pattern for a real, distinct host on a different
+    subnet whose return traffic happens to pass through this same gateway.
+    There's no reliable way to tell those two cases apart, so the primary
+    is always one of the public-IP duplicates instead; a private IP is
+    always left alone as its own independently-classified device, even
+    when it's the only private-IP member of the group."""
     from app.inventory.inventory_service import apply_gateway_detection
 
     GATEWAY_MAC = "aa:bb:cc:00:00:02"
@@ -501,22 +566,25 @@ def test_gateway_detection_prefers_a_lan_side_identity_when_one_exists(db_sessio
     reply2 = Ether(src=GATEWAY_MAC) / IP(src="1.1.1.1", dst="10.0.6.6", ttl=64) / TCP(
         sport=443, dport=51001, flags="SA", window=8192
     )
-    who_has = Ether(src=GATEWAY_MAC) / ARP(op=1, hwsrc=GATEWAY_MAC, psrc="10.0.6.1", pdst="10.0.6.6")
+    # a real host on a different private subnet, reached via the same
+    # gateway (inter-VLAN routing) -- must never be mislabeled as it.
+    routed = Ether(src=GATEWAY_MAC) / IP(src="10.0.9.20", dst="10.0.6.6", ttl=63) / TCP(
+        sport=445, dport=51002, flags="SA", window=8192
+    )
     ingest_packet_record(db_session, process_packet(reply1))
     ingest_packet_record(db_session, process_packet(reply2))
-    ingest_packet_record(db_session, process_packet(who_has))
+    ingest_packet_record(db_session, process_packet(routed))
     db_session.commit()
 
     apply_gateway_detection(db_session)
     db_session.commit()
 
-    lan_side = db_session.query(Device).filter(Device.ip == "10.0.6.1").one()
-    assert lan_side.display_device_type == "network_device"
-    assert lan_side.display_device_type_secondary == "router_nat"
+    routed_device = db_session.query(Device).filter(Device.ip == "10.0.9.20").one()
+    assert routed_device.display_device_type != "network_device"
+    assert routed_device.display_device_type_secondary is None
 
-    for public_ip in ("8.8.4.4", "1.1.1.1"):
-        pub_device = db_session.query(Device).filter(Device.ip == public_ip).one()
-        assert pub_device.display_device_type != "network_device"
+    primary = db_session.query(Device).filter(Device.device_type_secondary == "router_nat").one()
+    assert primary.ip in ("8.8.4.4", "1.1.1.1")
 
 
 def test_gateway_detection_ignores_a_single_shared_public_ip(db_session):

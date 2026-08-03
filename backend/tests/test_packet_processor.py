@@ -6,6 +6,12 @@ from scapy.contrib.lldp import (
     LLDPDUSystemName,
     LLDPDUTimeToLive,
 )
+from scapy.contrib.pnio import ProfinetIO
+from scapy.contrib.pnio_dcp import (
+    DCP_IDENTIFY_RESPONSE_FRAME_ID,
+    DCPNameOfStationBlock,
+    ProfinetDCP,
+)
 from scapy.layers.inet import IP, TCP, UDP
 from scapy.layers.l2 import ARP, LLC, SNAP, Ether
 from scapy.packet import Raw
@@ -83,3 +89,40 @@ def test_process_lldp_extracts_system_name_and_mac():
     assert record.transport == "lldp"
     assert record.src_mac == "11:22:33:44:55:66"
     assert record.l2_hostname == "switch2-access"
+
+
+def test_process_profinet_rtc_cyclic_data_is_pnio_ps():
+    """PROFINET's real-time cyclic I/O exchange runs raw over Ethernet
+    (EtherType 0x8892, no IP layer) -- frameID 0x8000 falls in the
+    RT_CLASS_1 range, the overwhelming majority of traffic on a running
+    line, and is what Wireshark's Protocol column shows as PNIO_PS."""
+    pkt = Ether(src="00:1b:1b:aa:bb:cc", dst="00:1b:1b:dd:ee:ff") / ProfinetIO(frameID=0x8000)
+    record = process_packet(Ether(bytes(pkt)))
+    assert record.transport == "profinet"
+    assert record.src_mac == "00:1b:1b:aa:bb:cc"
+    assert record.l2_protocol == "pnio_ps"
+    assert record.l2_hostname is None
+
+
+def test_process_profinet_dcp_extracts_station_name_and_mac():
+    """A DCP Identify response self-reports the device's configured name in
+    a Name-of-Station block -- the PROFINET analogue of CDP/LLDP's system
+    name."""
+    pkt = (
+        Ether(src="00:1b:1b:11:22:33", dst="01:0e:cf:00:00:00")
+        / ProfinetIO(frameID=DCP_IDENTIFY_RESPONSE_FRAME_ID)
+        / ProfinetDCP(service_id=5, service_type=1, dcp_data_length=20)
+        / DCPNameOfStationBlock(name_of_station=b"plc-line3")
+    )
+    record = process_packet(Ether(bytes(pkt)))
+    assert record.transport == "profinet"
+    assert record.src_mac == "00:1b:1b:11:22:33"
+    assert record.l2_protocol == "pn-dcp"
+    assert record.l2_hostname == "plc-line3"
+
+
+def test_process_profinet_alarm_frame():
+    pkt = Ether(src="00:1b:1b:22:33:44", dst="00:1b:1b:dd:ee:ff") / ProfinetIO(frameID=0xFE01)
+    record = process_packet(Ether(bytes(pkt)))
+    assert record.transport == "profinet"
+    assert record.l2_protocol == "pn-alarm"

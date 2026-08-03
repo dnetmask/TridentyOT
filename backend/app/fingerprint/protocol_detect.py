@@ -77,8 +77,23 @@ _PORT_MAP: dict[int, ProtocolInfo] = {
     47808: ProtocolInfo("bacnet", OT, True),
 }
 
-OT_PROTOCOLS = frozenset(info.protocol for info in _PORT_MAP.values() if info.category == OT)
-INSECURE_PROTOCOL_NAMES = frozenset(info.protocol for info in _PORT_MAP.values() if info.insecure)
+# PROFINET runs its real-time I/O traffic raw over Ethernet (EtherType
+# 0x8892 -- see app.capture.packet_processor), so there's no port to key
+# it by like everything in _PORT_MAP above. Named here (not just inline
+# strings in packet_processor.py) so both that module and the OT_PROTOCOLS/
+# INSECURE_PROTOCOL_NAMES membership below share one source of truth.
+PNIO_PS = "pnio_ps"  # cyclic real-time I/O data -- the bulk of traffic on a running line
+PN_DCP = "pn-dcp"  # discovery/configuration (device identify, name, IP assignment)
+PN_ALARM = "pn-alarm"
+PROFINET_OTHER = "profinet"
+_PROFINET_PROTOCOL_NAMES = frozenset((PNIO_PS, PN_DCP, PN_ALARM, PROFINET_OTHER))
+
+OT_PROTOCOLS = (
+    frozenset(info.protocol for info in _PORT_MAP.values() if info.category == OT) | _PROFINET_PROTOCOL_NAMES
+)
+INSECURE_PROTOCOL_NAMES = (
+    frozenset(info.protocol for info in _PORT_MAP.values() if info.insecure) | _PROFINET_PROTOCOL_NAMES
+)
 
 
 def detect_by_port(port: int) -> ProtocolInfo | None:

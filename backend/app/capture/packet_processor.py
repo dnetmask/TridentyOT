@@ -10,6 +10,7 @@ from scapy.layers.l2 import ARP, Ether
 from scapy.packet import Packet
 
 from app.fingerprint.hostname_detect import extract_hostname_hints
+from app.fingerprint.protocol_detect import PN_ALARM, PN_DCP, PNIO_PS, PROFINET_OTHER
 
 try:
     from scapy.contrib.cdp import CDPMsgDeviceID, CDPv2_HDR
@@ -21,6 +22,50 @@ try:
 except ImportError:  # pragma: no cover - scapy always ships this contrib layer
     LLDPDUSystemName = None
 
+try:
+    from scapy.contrib.pnio import ProfinetIO
+    from scapy.contrib.pnio_dcp import ProfinetDCP
+except ImportError:  # pragma: no cover - scapy always ships this contrib layer
+    ProfinetIO = ProfinetDCP = None
+
+# PROFINET frame IDs that identify which sub-protocol a given ProfinetIO
+# frame carries -- mirrors ProfinetIO.guess_payload_class's own dispatch in
+# scapy.contrib.pnio, kept here as plain ranges rather than introspecting
+# the dissected payload type, since the frameID is always present and
+# unambiguous regardless of how deep scapy's own dissection went.
+_PNIO_DCP_FRAME_IDS = (0xFEFC, 0xFEFD, 0xFEFE, 0xFEFF)
+_PNIO_ALARM_FRAME_IDS = (0xFC01, 0xFE01)
+
+
+def _pnio_protocol_name(frame_id: int) -> str:
+    """The protocol name to record for a PROFINET frame, matching
+    Wireshark's own Protocol column labels as closely as practical so a
+    site's existing PROFINET knowledge (Wireshark captures, docs) transfers
+    directly. PNIO_PS -- the cyclic real-time I/O data exchange between an
+    IO-controller (PLC) and its IO-devices -- is by far the most common in
+    a running line, which is why it's the frameID range check, not an
+    afterthought fallback."""
+    if frame_id in _PNIO_DCP_FRAME_IDS:
+        return PN_DCP
+    if frame_id in _PNIO_ALARM_FRAME_IDS:
+        return PN_ALARM
+    if (0x0100 <= frame_id < 0x1000) or (0x8000 <= frame_id < 0xFC00):
+        return PNIO_PS
+    return PROFINET_OTHER
+
+
+def _pnio_station_name(pkt: Packet) -> str | None:
+    """A DCP Identify/Hello response carries the device's own configured
+    name in a Name-of-Station block -- the PROFINET equivalent of CDP/LLDP's
+    system name, self-reported by the device rather than inferred."""
+    dcp = pkt[ProfinetDCP]
+    for block in getattr(dcp, "dcp_blocks", None) or []:
+        name = getattr(block, "name_of_station", None)
+        if name:
+            return _decode(name).strip() or None
+    return None
+
+
 MAX_PAYLOAD_BYTES = 256
 
 
@@ -31,7 +76,7 @@ class PacketRecord:
     dst_mac: str | None = None
     src_ip: str | None = None
     dst_ip: str | None = None
-    transport: str | None = None  # "tcp" | "udp" | "icmp" | "arp" | "cdp" | "lldp"
+    transport: str | None = None  # "tcp" | "udp" | "icmp" | "arp" | "cdp" | "lldp" | "profinet"
     src_port: int | None = None
     dst_port: int | None = None
     ttl: int | None = None
@@ -42,10 +87,13 @@ class PacketRecord:
     is_syn_ack: bool = False
     payload: bytes = b""
     hostname_hints: list = field(default_factory=list)  # [(ip, hostname), ...]
-    # Self-reported device name from a CDP/LLDP announcement -- these are L2-only
-    # frames (no IP layer), so unlike hostname_hints this identifies src_mac,
-    # not an IP.
+    # Self-reported device name from a CDP/LLDP/PROFINET-DCP announcement --
+    # these are L2-only frames (no IP layer), so unlike hostname_hints this
+    # identifies src_mac, not an IP.
     l2_hostname: str | None = None
+    # Which PROFINET sub-protocol this frame carries (see _pnio_protocol_name)
+    # -- only set when transport == "profinet".
+    l2_protocol: str | None = None
 
 
 def _mac(pkt: Packet, field_name: str) -> str | None:
@@ -90,6 +138,20 @@ def process_packet(pkt: Packet) -> PacketRecord | None:
         record.transport = "lldp"
         name = _decode(pkt[LLDPDUSystemName].system_name).strip()
         record.l2_hostname = name or None
+        return record
+
+    # PROFINET (IEC 61158) runs its real-time I/O traffic raw over Ethernet
+    # (EtherType 0x8892, no IP layer at all) rather than over IP/UDP -- a
+    # PLC and its IO-devices are identified by MAC alone the same way a
+    # CDP/LLDP-only switch is. PNIO_PS (cyclic real-time I/O data) is the
+    # overwhelming majority of traffic on a running line; PN-DCP
+    # (discovery/configuration) additionally self-reports the device's
+    # configured name, same role as CDP/LLDP's system name.
+    if ProfinetIO is not None and pkt.haslayer(ProfinetIO):
+        record.transport = "profinet"
+        record.l2_protocol = _pnio_protocol_name(pkt[ProfinetIO].frameID)
+        if ProfinetDCP is not None and pkt.haslayer(ProfinetDCP):
+            record.l2_hostname = _pnio_station_name(pkt)
         return record
 
     if pkt.haslayer(ARP):

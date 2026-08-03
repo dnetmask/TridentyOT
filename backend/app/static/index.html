@@ -911,7 +911,14 @@ function fitTableScroll(wrapperId, rowsToShow = 7) {
 }
 
 async function loadDevices() {
-  allDevices = await api('/api/inventory/devices');
+  // hide_external also collapses a detected gateway's duplicate public-IP
+  // rows (see routes_inventory.list_devices) -- same opt-in toggle as
+  // is_external, so both are refetched together instead of only filtering
+  // is_external client-side, which the gateway duplicates wouldn't match
+  // (they do have a captured mac -- the gateway's -- so is_external is
+  // false for them even though they're the same kind of noise).
+  const hideExternal = $('#hide-external-checkbox').checked;
+  allDevices = await api(`/api/inventory/devices${hideExternal ? '?hide_external=true' : ''}`);
   renderDevicesTable();
 }
 
@@ -1094,7 +1101,7 @@ async function saveDeviceOverrides(id, reset = false) {
 }
 
 $('#ot-only-checkbox').addEventListener('change', renderDevicesTable);
-$('#hide-external-checkbox').addEventListener('change', renderDevicesTable);
+$('#hide-external-checkbox').addEventListener('change', loadDevices);
 
 // ---------- Inventory column visibility (persisted per-browser) ----------
 const COLUMNS_STORAGE_KEY = 'tridentyot_inventory_columns';

@@ -59,17 +59,35 @@ ya capturado, y a partir de eso construye:
      trama en el segmento LAN -- por la misma regla de "la MAC solo se aprende del emisor" (ver
      `inventory_service.get_or_create_device`), su MAC termina asociada a *cada IP pública distinta*
      que alguna vez reenvió, cada una como su propia fila de inventario. Cuando dos o más IPs
-     públicas comparten una misma MAC, TridentyOT reconoce el patrón: elige una fila para
-     representar el gateway (su propia identidad LAN si la vio en esta captura, si no la más
-     antigua de las públicas), la marca como **Equipo de red / Router-NAT** con confianza 100%, y
-     **oculta del Inventario** el resto de filas que comparten esa MAC -- son el mismo artefacto de
-     reenvío, no activos distintos. No se borran: siguen apareciendo normalmente en **Flujos** y
-     **Vulnerabilidades**.
+     públicas comparten una misma MAC, TridentyOT reconoce el patrón: elige la más antigua de esas
+     filas públicas para representar el gateway y la marca como **Equipo de red / Router-NAT** con
+     confianza 100%. Deliberadamente **nunca** elige una fila con IP privada para representarlo,
+     aunque comparta la misma MAC: el mismo patrón (misma MAC como emisor) lo produce también un
+     equipo real y distinto en otra subred cuyo tráfico de vuelta simplemente fue enrutado por ese
+     mismo gateway (enrutamiento entre VLANs) -- no hay forma confiable de distinguir ambos casos, y
+     adivinar mal etiquetaría un activo real como si fuera el gateway. Toda IP privada se deja
+     siempre como equipo aparte, clasificado de forma independiente.
+
+     Solo con `?hide_external=true` se colapsan las demás filas públicas duplicadas de esa MAC en
+     la elegida como representante -- mismo criterio que el resto de IPs públicas (ver más arriba):
+     visibles por defecto, ocultables solo bajo pedido. Una fila con IP privada que comparta esa
+     misma MAC **nunca** se oculta, sin importar el valor de `hide_external` -- es un activo real y
+     distinto, nunca un duplicado del gateway. Ninguna fila se borra: todas siguen apareciendo
+     normalmente en **Flujos** y **Vulnerabilidades** pase lo que pase con su visibilidad en
+     Inventario.
 2. **Fingerprint pasivo de sistema operativo**: heurística basada en TTL inicial, tamaño de
    ventana TCP y opciones TCP del handshake (similar a p0f), sin enviar ningún tráfico activo.
 3. **Detección de protocolos/servicios**: por puerto conocido y por firma de los primeros bytes
    del payload (HTTP, TLS, SSH, FTP...), cubriendo tanto protocolos IT comunes como protocolos
-   OT/ICS (Modbus, DNP3, S7comm, EtherNet/IP, BACnet, IEC-104, OPC UA, etc.).
+   OT/ICS (Modbus, DNP3, S7comm, EtherNet/IP, BACnet, IEC-104, OPC UA, etc.). **PROFINET** es un
+   caso aparte: su tráfico de tiempo real corre crudo sobre Ethernet (EtherType `0x8892`, sin capa
+   IP en absoluto), así que un PLC y sus IO-devices se identifican **solo por MAC**, igual que un
+   switch que solo se ve por CDP/LLDP. Se reconocen sus variantes con el mismo nombre que usa
+   Wireshark en la columna Protocol -- **PNIO_PS** (intercambio cíclico de datos de E/S en tiempo
+   real, la inmensa mayoría del tráfico en una línea en marcha), **PN-DCP** (descubrimiento/
+   configuración, que además trae el nombre configurado del equipo -- Name of Station -- igual que
+   CDP/LLDP) y **PN-Alarm**. Un equipo visto hablando PROFINET, sin ninguna huella TCP/IP que lo
+   contradiga (no tiene pila TCP/IP propia), se clasifica como **PLC**.
 4. **Flujos / conversaciones**: qué par de dispositivos conversó, por qué protocolo/puerto y
    cuántos paquetes, agregado desde las sesiones TCP/UDP observadas (pestaña **Flujos**). Si
    cualquiera de los dos extremos es un dispositivo marcado **Externo** (ver punto 1), el flujo

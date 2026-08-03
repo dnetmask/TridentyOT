@@ -19,7 +19,7 @@ from app.fingerprint.os_fingerprint import (
     fingerprint_tcp_syn,
     parse_tcp_options,
 )
-from app.fingerprint.protocol_detect import OT, ProtocolInfo, classify
+from app.fingerprint.protocol_detect import OT, PROFINET_OTHER, ProtocolInfo, classify
 from app.fingerprint.vendor_lookup import lookup_vendor
 from app.models import CaptureSession, Device, DeviceProtocol, Flow, VulnerabilityFinding, utcnow
 
@@ -204,14 +204,23 @@ def apply_gateway_detection(session: Session) -> None:
     Device.is_external and the module docstring's routed-traffic caveat).
 
     Two or more distinct public IPs sharing a MAC is that exact pattern.
-    Once found, one row is picked to actually represent the gateway in
-    Inventory -- its own LAN-side identity if this capture ever saw it
-    speak from one, otherwise (deterministically) the oldest of the
-    public-IP rows -- and classified as a network device (subcategory
-    "router_nat"). The rest are exactly the forwarding artifact described
-    above, not separate assets: routes_inventory.list_devices hides every
-    other row sharing that MAC, without deleting them (Flows/Vulnerabilidades
-    still reference them normally).
+    Once found, the oldest of those public-IP rows is picked to represent
+    the gateway in Inventory and classified as a network device (subcategory
+    "router_nat"); routes_inventory.list_devices collapses the rest of the
+    *public*-IP duplicates into it when hide_external is requested, without
+    deleting them (Flows/Vulnerabilidades still reference them normally).
+
+    Deliberately never promotes a *private*-IP row sharing that MAC to be
+    the gateway, even though the gateway's own LAN-side identity (if this
+    capture ever saw it speak from one, e.g. via ARP) would be a nicer,
+    more recognizable row to label -- there is no reliable way to tell
+    that apart from a real, distinct host on a different subnet whose
+    traffic was also routed through this same gateway (inter-VLAN routing
+    produces the exact same "sender MAC == the gateway" pattern for that
+    host's returning packets). Guessing wrong there would mislabel a real
+    asset as the gateway itself, which is worse than the gateway's own row
+    just not being the one every reader would expect; a private IP is
+    always left as a genuine, separate device, classified independently.
 
     Runs as a whole-table pass after ingesting a batch/file rather than
     per-packet: the pattern is only visible once several distinct public
@@ -230,8 +239,7 @@ def apply_gateway_detection(session: Session) -> None:
         if len(public_members) < _GATEWAY_MIN_PUBLIC_IPS:
             continue
 
-        lan_members = [d for d in group if is_lan_ip(d.ip)]
-        primary = min(lan_members, key=lambda d: d.id) if lan_members else min(group, key=lambda d: d.id)
+        primary = min(public_members, key=lambda d: d.id)
 
         if primary.device_type != NETWORK_DEVICE or primary.device_type_confidence < 1.0:
             primary.device_type = NETWORK_DEVICE
@@ -398,6 +406,24 @@ def ingest_packet_record(
             # An explicit CDP/LLDP announcement is a stronger signal than the
             # passive TCP-SYN heuristic, so it always outranks it.
             apply_os_guess(device, _CDP_LLDP_GUESS)
+            apply_device_type_guess(session, device)
+        return
+
+    if record.transport == "profinet":
+        # PROFINET runs raw over Ethernet (no IP layer), so like CDP/LLDP
+        # the device is keyed by MAC alone. Unlike CDP/LLDP, this is not a
+        # "this MAC is a switch" signal -- it's OT/industrial fieldbus
+        # traffic, so it's registered as a normal server protocol (category
+        # OT) and left to classify_device_type's existing has_ot_server_
+        # protocol rule: no os_signature contradicting it (no TCP/IP stack
+        # involved) reads as PLC, exactly right for a PROFINET IO device.
+        device = get_or_create_device(session, ip=None, mac=record.src_mac, capture_session_id=capture_session_id)
+        if device is not None:
+            if record.l2_hostname:
+                device.hostname = record.l2_hostname
+            proto_info = ProtocolInfo(record.l2_protocol or PROFINET_OTHER, OT, True)
+            upsert_protocol(session, device, proto_info, None, "profinet", "server", capture_session_id=capture_session_id)
+            session.flush()
             apply_device_type_guess(session, device)
         return
 

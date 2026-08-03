@@ -46,6 +46,29 @@ def test_ot_protocol_rule_fires_for_modbus(db_session):
     assert any(f["rule_id"] == "ot-protocol-exposure:modbus" and f["severity"] == "high" for f in findings)
 
 
+def test_ot_protocol_rule_fires_for_profinet_with_no_port(db_session):
+    """PROFINET (pnio_ps/pn-dcp/pn-alarm) runs raw over Ethernet -- no port
+    at all, unlike every other OT protocol here -- so the rule's title/
+    evidence must degrade gracefully instead of literally saying "puerto
+    None"."""
+    device = Device(mac="00:1b:1b:aa:bb:cc", is_ot_suspected=True)
+    db_session.add(device)
+    db_session.flush()
+    db_session.add(
+        DeviceProtocol(
+            device_id=device.id, protocol="pnio_ps", port=None, transport="profinet", role="server", category="OT"
+        )
+    )
+    db_session.flush()
+    db_session.refresh(device)
+
+    findings = run_local_rules(device)
+    finding = next(f for f in findings if f["rule_id"] == "ot-protocol-exposure:pnio_ps")
+    assert finding["severity"] == "high"
+    assert "None" not in finding["title"]
+    assert "None" not in finding["evidence"]
+
+
 def test_embedded_ot_stack_note(db_session):
     device = Device(ip="10.0.0.12", is_ot_suspected=True, os_signature="embedded_ot", os_guess="Embedded stack / RTOS", os_confidence=0.8)
     db_session.add(device)

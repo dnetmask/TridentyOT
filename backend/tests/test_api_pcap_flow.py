@@ -156,12 +156,14 @@ def test_patch_device_rejects_unknown_device_type_secondary(client, tmp_path):
     assert resp.status_code == 422
 
 
-def test_gateway_duplicates_hidden_from_inventory_but_kept_in_flows(client, tmp_path):
+def test_gateway_duplicates_shown_by_default_hidden_only_with_hide_external(client, tmp_path):
     """A router/NAT gateway forwarding replies from two different public
     IPs ends up as two inventory rows sharing one MAC (see
-    apply_gateway_detection). Only one should show up in Inventory,
-    reclassified as a network device / router_nat; the other stays a real
-    row, still visible in Flows, just not cluttering the device list."""
+    apply_gateway_detection) -- one gets reclassified as network_device /
+    router_nat. Same visibility rule as any other public IP (Device.is_external):
+    shown by default, collapsed to the one representative row only when the
+    caller opts in with hide_external=true. Still real rows either way,
+    always visible in Flows."""
     gateway_mac = "aa:bb:cc:00:01:01"
     reply1 = Ether(src=gateway_mac) / IP(src="8.8.8.8", dst="10.6.1.5", ttl=64) / TCP(
         sport=443, dport=51000, flags="SA", window=8192
@@ -174,19 +176,54 @@ def test_gateway_duplicates_hidden_from_inventory_but_kept_in_flows(client, tmp_
     with open(pcap_path, "rb") as f:
         client.post("/api/capture/pcap", files={"file": ("gateway.pcap", f, "application/vnd.tcpdump.pcap")})
 
+    # default (hide_external not set): both public-IP rows stay visible.
     devices = client.get("/api/inventory/devices").json()
     device_ips = {d["ip"] for d in devices}
-    assert "10.6.1.5" in device_ips
-    # exactly one of the two public IPs should remain visible
-    assert len({"8.8.8.8", "93.184.216.34"} & device_ips) == 1
+    assert {"8.8.8.8", "93.184.216.34", "10.6.1.5"} <= device_ips
 
-    primary = next(d for d in devices if d["ip"] in ("8.8.8.8", "93.184.216.34"))
+    primary = next(d for d in devices if d["display_device_type_secondary"] == "router_nat")
+    assert primary["ip"] in ("8.8.8.8", "93.184.216.34")
     assert primary["display_device_type"] == "network_device"
-    assert primary["display_device_type_secondary"] == "router_nat"
+
+    # hide_external=true: only the representative gateway row remains.
+    devices_hidden = client.get("/api/inventory/devices", params={"hide_external": "true"}).json()
+    device_ips_hidden = {d["ip"] for d in devices_hidden}
+    assert "10.6.1.5" in device_ips_hidden
+    assert len({"8.8.8.8", "93.184.216.34"} & device_ips_hidden) == 1
 
     flows = client.get("/api/inventory/flows").json()
     flow_ips = {f["device_a_ip"] for f in flows} | {f["device_b_ip"] for f in flows}
     assert {"8.8.8.8", "93.184.216.34", "10.6.1.5"} <= flow_ips
+
+
+def test_gateway_hide_external_never_hides_a_private_ip_sharing_the_mac(client, tmp_path):
+    """Regression test: a real host on a *different* private subnet, whose
+    traffic happens to be routed through the same gateway (so it's also
+    captured with the gateway's MAC as sender -- inter-VLAN routing, same
+    mechanism as the public-IP forwarding pattern), must never be swept up
+    as a "gateway duplicate" just because it shares that MAC. Only the
+    public-IP duplicates are a forwarding artifact; a private IP is always
+    a genuine, distinct local asset."""
+    gateway_mac = "aa:bb:cc:00:02:02"
+    reply1 = Ether(src=gateway_mac) / IP(src="8.8.8.8", dst="10.6.2.5", ttl=64) / TCP(
+        sport=443, dport=51000, flags="SA", window=8192
+    )
+    reply2 = Ether(src=gateway_mac) / IP(src="93.184.216.34", dst="10.6.2.5", ttl=64) / TCP(
+        sport=443, dport=51001, flags="SA", window=8192
+    )
+    # a real host on a different private subnet, reached via the same gateway
+    routed_reply = Ether(src=gateway_mac) / IP(src="192.168.9.20", dst="10.6.2.5", ttl=63) / TCP(
+        sport=445, dport=51002, flags="SA", window=8192
+    )
+    pcap_path = tmp_path / "gateway_routed.pcap"
+    wrpcap(str(pcap_path), [reply1, reply2, routed_reply])
+    with open(pcap_path, "rb") as f:
+        client.post("/api/capture/pcap", files={"file": ("gateway_routed.pcap", f, "application/vnd.tcpdump.pcap")})
+
+    devices = client.get("/api/inventory/devices", params={"hide_external": "true"}).json()
+    device_ips = {d["ip"] for d in devices}
+    assert "192.168.9.20" in device_ips
+    assert "10.6.2.5" in device_ips
 
 
 def test_health_endpoint(client):

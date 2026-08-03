@@ -99,13 +99,17 @@ def rule_unauthenticated_ot_protocols(device: Device) -> list[dict]:
     for proto in device.protocols:
         if proto.role != "server" or proto.protocol not in OT_PROTOCOLS:
             continue
+        # PROFINET (pnio_ps/pn-dcp/pn-alarm) has no port at all -- it runs
+        # raw over Ethernet, not IP/UDP -- so proto.port is None for it,
+        # unlike every port-based OT protocol above.
+        port_label = proto.port if proto.port is not None else "N/D"
         findings.append(
             {
                 "rule_id": f"ot-protocol-exposure:{proto.protocol}",
-                "title": f"Protocolo OT sin autenticación/cifrado expuesto: {proto.protocol} (puerto {proto.port})",
+                "title": f"Protocolo OT sin autenticación/cifrado expuesto: {proto.protocol} (puerto {port_label})",
                 "description": _OT_DESCRIPTION_TEMPLATE.format(protocol=proto.protocol),
                 "severity": "high",
-                "evidence": f"Servicio OT '{proto.protocol}' visto en {proto.transport}/{proto.port}, "
+                "evidence": f"Servicio OT '{proto.protocol}' visto en {proto.transport}/{port_label}, "
                 f"{proto.packet_count} paquete(s).",
             }
         )
