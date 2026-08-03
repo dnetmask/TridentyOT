@@ -62,7 +62,7 @@ SUBTYPE_LABELS = {
     FIREWALL: "Firewall",
     ACCESS_POINT: "Access Point",
     ROUTER_NAT: "Router/NAT",
-    TRANSPORT_CONTROLLER: "Controlador de transporte",
+    TRANSPORT_CONTROLLER: "Transportador",
 }
 
 # Substring match against the OUI vendor string (already resolved by
@@ -208,7 +208,7 @@ def classify_device_type(
     elif vendor_cat == OTHER:
         scores[OTHER] += 2.0
         subtype_hint = TRANSPORT_CONTROLLER
-        evidence.append(f'Fabricante de controladores de transporte ("{vendor}")')
+        evidence.append(f'Fabricante de transportadores ("{vendor}")')
     elif vendor_cat == "it":
         scores[SERVER] += 0.5
         scores[WORKSTATION] += 0.5
