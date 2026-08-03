@@ -124,7 +124,7 @@
   }
   .sidebar .user-box button { margin-top: 10px; width: 100%; }
 
-  main { flex: 1; padding: 24px 28px; max-width: 1200px; }
+  main { flex: 1; padding: 24px 28px; max-width: 100%; min-width: 0; }
   .tab { display: none; }
   .tab.active { display: block; }
   .card {
@@ -158,10 +158,16 @@
   button.action.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
   button.action.danger { background: var(--crit); color: white; }
   button.action:disabled { opacity: 0.5; cursor: not-allowed; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px; border-bottom: 1px solid var(--border); }
-  td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: auto; }
+  th { text-align: left; color: var(--muted); font-weight: 600; padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
   tr:hover td { background: rgba(59, 169, 255, 0.05); }
+  tr.filter-row th { padding: 3px 6px 6px; background: var(--panel); }
+  tr.filter-row input.col-filter {
+    width: 100%; box-sizing: border-box; font-size: 11.5px; font-weight: 400;
+    padding: 3px 6px; border-radius: 5px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--text);
+  }
   .badge {
     display: inline-block;
     padding: 2px 8px;
@@ -203,9 +209,10 @@
   .stat-tile .stat-num.network { color: var(--info); }
   .stat-tile .stat-label { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
   .refresh-timer { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
-  .table-scroll { overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+  .table-scroll { overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
   .table-scroll table { width: 100%; border-collapse: collapse; }
-  .table-scroll thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  .table-scroll thead th { position: sticky; top: 0; background: var(--panel); z-index: 2; }
+  .table-scroll thead tr.filter-row th { top: 24px; z-index: 1; }
   .table-scroll tbody tr:nth-child(even) td { background: var(--zebra); }
   .table-scroll tbody tr:hover td { background: rgba(59, 169, 255, 0.08); }
   .protocol-list { font-size: 12px; color: var(--muted); }
@@ -393,7 +400,20 @@
       </div>
       <div class="viewer-note viewer-only hidden">Perfil visualizador: solo lectura, no puedes iniciar/detener capturas ni subir archivos.</div>
       <table>
-        <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>Origen</th><th>Estado</th><th>Avance</th><th>Paquetes</th><th>Inicio</th><th></th></tr></thead>
+        <thead>
+        <tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>Origen</th><th>Estado</th><th>Avance</th><th>Paquetes</th><th>Inicio</th><th></th></tr>
+        <tr class="filter-row">
+          <th data-col="id"><input class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="nombre"><input class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="tipo"><input class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="origen"><input class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="estado"><input class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th></th>
+          <th data-col="paquetes"><input class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="inicio"><input class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th></th>
+        </tr>
+        </thead>
         <tbody id="sessions-body"><tr><td colspan="9" class="empty">Sin datos</td></tr></tbody>
       </table>
     </div>
@@ -440,11 +460,25 @@
       <div class="stat-row" id="inventory-stats"></div>
       <div class="table-scroll" id="devices-scroll">
         <table>
-          <thead><tr>
+          <thead>
+          <tr>
             <th data-col="ip">IP</th><th data-col="nombre">Nombre</th><th data-col="tipo">Tipo</th><th data-col="subtipo">Subtipo</th><th data-col="fabricante">Fabricante</th>
             <th data-col="mac">MAC</th><th data-col="so">SO estimado</th><th data-col="confianza">Confianza</th>
             <th data-col="protocolos">Protocolos</th><th data-col="visto">Últ. visto</th>
-          </tr></thead>
+          </tr>
+          <tr class="filter-row">
+            <th data-col="ip"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="nombre"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="tipo"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="subtipo"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="fabricante"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="mac"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="so"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="confianza"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="protocolos"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="visto"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+          </tr>
+          </thead>
           <tbody id="devices-body"><tr><td colspan="10" class="empty">Sin datos</td></tr></tbody>
         </table>
       </div>
@@ -469,10 +503,24 @@
         </div>
       </div>
       <div class="stat-row" id="flows-stats"></div>
-      <table>
-        <thead><tr><th>Origen</th><th>Destino</th><th>Protocolo</th><th>Puerto</th><th>Transporte</th><th>Paquetes</th><th>Primero</th><th>Último</th></tr></thead>
-        <tbody id="flows-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
-      </table>
+      <div class="table-scroll" id="flows-scroll">
+        <table>
+          <thead>
+          <tr><th>Origen</th><th>Destino</th><th>Protocolo</th><th>Puerto</th><th>Transporte</th><th>Paquetes</th><th>Primero</th><th>Último</th></tr>
+          <tr class="filter-row">
+            <th data-col="origen"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="destino"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="protocolo"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="puerto"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="transporte"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="paquetes"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="primero"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="ultimo"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+          </tr>
+          </thead>
+          <tbody id="flows-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
@@ -495,10 +543,22 @@
         </div>
       </div>
       <div class="stat-row" id="vulns-stats"></div>
-      <table>
-        <thead><tr><th>Severidad</th><th>Dispositivo</th><th>Nombre</th><th>Hallazgo</th><th>Fuente</th><th>Evidencia</th></tr></thead>
-        <tbody id="findings-body"><tr><td colspan="6" class="empty">Sin datos</td></tr></tbody>
-      </table>
+      <div class="table-scroll" id="findings-scroll">
+        <table>
+          <thead>
+          <tr><th>Severidad</th><th>Dispositivo</th><th>Nombre</th><th>Hallazgo</th><th>Fuente</th><th>Evidencia</th></tr>
+          <tr class="filter-row">
+            <th data-col="severidad"><input class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="dispositivo"><input class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="nombre"><input class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="hallazgo"><input class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="fuente"><input class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="evidencia"><input class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+          </tr>
+          </thead>
+          <tbody id="findings-body"><tr><td colspan="6" class="empty">Sin datos</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
@@ -531,7 +591,15 @@
         <h2>Usuarios</h2>
       </div>
       <table>
-        <thead><tr><th>Usuario</th><th>Perfil</th><th>Creado</th><th></th></tr></thead>
+        <thead>
+        <tr><th>Usuario</th><th>Perfil</th><th>Creado</th><th></th></tr>
+        <tr class="filter-row">
+          <th data-col="usuario"><input class="col-filter" placeholder="Filtrar…" oninput="renderUsersTable()" /></th>
+          <th data-col="perfil"><input class="col-filter" placeholder="Filtrar…" oninput="renderUsersTable()" /></th>
+          <th data-col="creado"><input class="col-filter" placeholder="Filtrar…" oninput="renderUsersTable()" /></th>
+          <th></th>
+        </tr>
+        </thead>
         <tbody id="users-body"><tr><td colspan="4" class="empty">Sin datos</td></tr></tbody>
       </table>
     </div>
@@ -743,6 +811,8 @@ function activateTab(name) {
   // visible (display:block) -- a tab loaded in the background while hidden
   // would otherwise measure everything as 0px.
   if (name === 'inventory') fitTableScroll('devices-scroll');
+  if (name === 'flows') fitTableScroll('flows-scroll');
+  if (name === 'vulns') fitTableScroll('findings-scroll');
 }
 
 $$('.sidebar nav button').forEach(btn => {
@@ -785,22 +855,29 @@ function progressCell(s) {
   </div>`;
 }
 
+let allSessions = [];
+
 async function loadSessions() {
+  allSessions = await api('/api/capture/sessions');
+  renderSessionsTable();
+}
+
+function renderSessionsTable() {
   const tbody = $('#sessions-body');
-  const sessions = await api('/api/capture/sessions');
-  if (!sessions.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin sesiones aún</td></tr>'; return; }
+  if (!allSessions.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin sesiones aún</td></tr>'; return; }
   const editor = isEditor();
-  tbody.innerHTML = sessions.map(s => `
+  tbody.innerHTML = allSessions.map(s => `
     <tr>
-      <td>${s.id}</td><td>${s.name}</td><td>${s.source_type}</td><td>${s.source}</td>
-      <td class="status-${s.status}">${s.status}${s.error_message ? ' — ' + s.error_message : ''}</td>
+      <td data-col="id">${s.id}</td><td data-col="nombre">${s.name}</td><td data-col="tipo">${s.source_type}</td><td data-col="origen">${s.source}</td>
+      <td data-col="estado" class="status-${s.status}">${s.status}${s.error_message ? ' — ' + s.error_message : ''}</td>
       <td>${progressCell(s)}</td>
-      <td>${s.packet_count}</td><td>${fmtDate(s.started_at)}</td>
+      <td data-col="paquetes">${s.packet_count}</td><td data-col="inicio">${fmtDate(s.started_at)}</td>
       <td>
         ${editor && s.status === 'running' && s.source_type === 'live' ? `<button class="action danger" onclick="stopLive(${s.id})">Detener</button>` : ''}
         ${editor ? `<button class="action secondary" onclick="deleteSession(${s.id})">Borrar</button>` : ''}
       </td>
     </tr>`).join('');
+  applyColumnFilters('sessions-body');
 }
 
 async function stopLive(id) {
@@ -903,11 +980,66 @@ function fitTableScroll(wrapperId, rowsToShow = 7) {
   if (!wrapper) return;
   const table = wrapper.querySelector('table');
   const thead = table && table.querySelector('thead');
-  const rows = table ? table.querySelectorAll('tbody tr') : [];
+  // Only rows a column filter hasn't hidden count towards the "show ~7
+  // rows before scrolling" height -- otherwise a filtered-out row (height
+  // 0) could get counted in the first N and undercount the real height.
+  const rows = table ? Array.from(table.querySelectorAll('tbody tr')).filter(r => r.style.display !== 'none') : [];
   if (!thead || rows.length <= rowsToShow) { wrapper.style.maxHeight = 'none'; return; }
   let height = thead.getBoundingClientRect().height;
   for (let i = 0; i < rowsToShow; i++) height += rows[i].getBoundingClientRect().height;
   wrapper.style.maxHeight = Math.ceil(height) + 'px';
+}
+
+// ---------- generic per-column text filters (all tables) ----------
+function getColumnFilters(theadEl) {
+  const filters = {};
+  if (!theadEl) return filters;
+  theadEl.querySelectorAll('tr.filter-row th[data-col]').forEach(th => {
+    const inp = th.querySelector('input.col-filter');
+    const val = inp ? inp.value.trim().toLowerCase() : '';
+    if (val) filters[th.dataset.col] = val;
+  });
+  return filters;
+}
+
+// Hides/shows already-rendered <tr> in tbodyId based on its table's
+// filter-row inputs, matched against the [data-col] cell in each row --
+// keeps filtering independent of exactly how each cell renders (badges,
+// pills, formatted dates...) since it just reads the cell's own text.
+function applyColumnFilters(tbodyId) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  const table = tbody.closest('table');
+  const filters = getColumnFilters(table.querySelector('thead'));
+  const filterKeys = Object.keys(filters);
+  const dataRows = Array.from(tbody.querySelectorAll('tr')).filter(tr => !tr.classList.contains('no-match-row'));
+  let visibleCount = 0;
+  dataRows.forEach(tr => {
+    const match = filterKeys.every(col => {
+      const cell = tr.querySelector(`[data-col="${col}"]`);
+      return !cell || (cell.textContent || '').toLowerCase().includes(filters[col]);
+    });
+    tr.style.display = match ? '' : 'none';
+    if (match) visibleCount++;
+  });
+
+  let noMatchRow = tbody.querySelector('tr.no-match-row');
+  const hasRealRows = dataRows.some(tr => !tr.querySelector('td.empty'));
+  if (hasRealRows && filterKeys.length && visibleCount === 0) {
+    if (!noMatchRow) {
+      const headerCols = table.querySelectorAll('thead tr:first-child th').length;
+      noMatchRow = document.createElement('tr');
+      noMatchRow.className = 'no-match-row';
+      noMatchRow.innerHTML = `<td colspan="${headerCols}" class="empty">Sin resultados para el filtro</td>`;
+      tbody.appendChild(noMatchRow);
+    }
+    noMatchRow.style.display = '';
+  } else if (noMatchRow) {
+    noMatchRow.style.display = 'none';
+  }
+
+  const scrollWrapper = table.closest('.table-scroll');
+  if (scrollWrapper) fitTableScroll(scrollWrapper.id);
 }
 
 async function loadDevices() {
@@ -1008,7 +1140,7 @@ function renderDevicesTable() {
       <td data-col="visto">${fmtDate(d.last_seen)}</td>
     </tr>`).join('');
   applyColumnVisibility();
-  fitTableScroll('devices-scroll');
+  applyColumnFilters('devices-body');
 }
 
 async function showDeviceDetail(id) {
@@ -1184,7 +1316,11 @@ function renderFlowsTable() {
   const statsFlows = hideExternal ? allFlows.filter(f => !isFlowExternal(f, deviceById)) : allFlows;
   renderFlowStats(statsFlows);
   const flows = cat ? statsFlows.filter(f => f.category === cat) : statsFlows;
-  if (!flows.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin flujos detectados aún</td></tr>'; return; }
+  if (!flows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin flujos detectados aún</td></tr>';
+    fitTableScroll('flows-scroll');
+    return;
+  }
   tbody.innerHTML = flows.map(f => {
     const aDevice = deviceById.get(f.device_a_id);
     const bDevice = deviceById.get(f.device_b_id);
@@ -1194,16 +1330,17 @@ function renderFlowsTable() {
     const externalPill = ' <span class="pill external">Externo</span>';
     return `
     <tr>
-      <td>${aLabel}${aIsServer ? ' <span class="pill">servidor</span>' : ''}${aDevice && aDevice.is_external ? externalPill : ''}</td>
-      <td>${bLabel}${!aIsServer ? ' <span class="pill">servidor</span>' : ''}${bDevice && bDevice.is_external ? externalPill : ''}</td>
-      <td>${f.protocol}${f.category === 'OT' ? ' <span class="pill ot">OT</span>' : ''}</td>
-      <td>${f.port ?? '—'}</td>
-      <td>${f.transport}</td>
-      <td>${f.packet_count}</td>
-      <td class="muted">${fmtDate(f.first_seen)}</td>
-      <td class="muted">${fmtDate(f.last_seen)}</td>
+      <td data-col="origen">${aLabel}${aIsServer ? ' <span class="pill">servidor</span>' : ''}${aDevice && aDevice.is_external ? externalPill : ''}</td>
+      <td data-col="destino">${bLabel}${!aIsServer ? ' <span class="pill">servidor</span>' : ''}${bDevice && bDevice.is_external ? externalPill : ''}</td>
+      <td data-col="protocolo">${f.protocol}${f.category === 'OT' ? ' <span class="pill ot">OT</span>' : ''}</td>
+      <td data-col="puerto">${f.port ?? '—'}</td>
+      <td data-col="transporte">${f.transport}</td>
+      <td data-col="paquetes">${f.packet_count}</td>
+      <td data-col="primero" class="muted">${fmtDate(f.first_seen)}</td>
+      <td data-col="ultimo" class="muted">${fmtDate(f.last_seen)}</td>
     </tr>`;
   }).join('');
+  applyColumnFilters('flows-body');
 }
 
 $('#flow-category-filter').addEventListener('change', renderFlowsTable);
@@ -1231,16 +1368,21 @@ function renderFindingsTable() {
   const tbody = $('#findings-body');
   const sev = $('#severity-filter').value;
   const findings = sev ? allFindings.filter(f => f.severity === sev) : allFindings;
-  if (!findings.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">Sin hallazgos. Ejecuta un escaneo.</td></tr>'; return; }
+  if (!findings.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">Sin hallazgos. Ejecuta un escaneo.</td></tr>';
+    fitTableScroll('findings-scroll');
+    return;
+  }
   tbody.innerHTML = findings.map(f => `
     <tr>
-      <td>${sevBadge(f.severity)}</td>
-      <td class="clickable" onclick="jumpToDevice(${f.device_id})">${f.device_ip || '#' + f.device_id}</td>
-      <td>${f.device_name || '<span class="muted">—</span>'}</td>
-      <td><b>${f.title}</b><br/><span class="muted">${f.description}</span></td>
-      <td>${f.source}${f.cve_id ? ' · ' + f.cve_id : ''}</td>
-      <td class="muted">${f.evidence || '—'}</td>
+      <td data-col="severidad">${sevBadge(f.severity)}</td>
+      <td data-col="dispositivo" class="clickable" onclick="jumpToDevice(${f.device_id})">${f.device_ip || '#' + f.device_id}</td>
+      <td data-col="nombre">${f.device_name || '<span class="muted">—</span>'}</td>
+      <td data-col="hallazgo"><b>${f.title}</b><br/><span class="muted">${f.description}</span></td>
+      <td data-col="fuente">${f.source}${f.cve_id ? ' · ' + f.cve_id : ''}</td>
+      <td data-col="evidencia" class="muted">${f.evidence || '—'}</td>
     </tr>`).join('');
+  applyColumnFilters('findings-body');
 }
 
 $('#severity-filter').addEventListener('change', renderFindingsTable);
@@ -1301,25 +1443,33 @@ $('#export-vuln-pdf-btn').addEventListener('click', () => {
 });
 
 // ---------- Users tab (editor only) ----------
+let allUsers = [];
+
 async function loadUsers() {
   if (!isEditor()) return;
+  allUsers = await api('/api/users');
+  renderUsersTable();
+}
+
+function renderUsersTable() {
   const tbody = $('#users-body');
-  const users = await api('/api/users');
-  tbody.innerHTML = users.map(u => `
+  tbody.innerHTML = allUsers.map(u => `
     <tr>
-      <td>${u.username}${u.id === currentUser.id ? ' <span class="pill">tú</span>' : ''}</td>
+      <td data-col="usuario">${u.username}${u.id === currentUser.id ? ' <span class="pill">tú</span>' : ''}</td>
       <td>
+        <span data-col="perfil" style="display:none">${u.role === 'editor' ? 'Editor' : 'Visualizador'}</span>
         <select onchange="changeUserRole(${u.id}, this.value)" ${u.id === currentUser.id ? 'disabled' : ''}>
           <option value="viewer" ${u.role === 'viewer' ? 'selected' : ''}>Visualizador</option>
           <option value="editor" ${u.role === 'editor' ? 'selected' : ''}>Editor</option>
         </select>
       </td>
-      <td class="muted">${fmtDate(u.created_at)}</td>
+      <td data-col="creado" class="muted">${fmtDate(u.created_at)}</td>
       <td>
         <button class="action secondary" onclick="resetUserPassword(${u.id})">Restablecer contraseña</button>
         <button class="action danger" onclick="deleteUser(${u.id})" ${u.id === currentUser.id ? 'disabled' : ''}>Eliminar</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin usuarios</td></tr>';
+  applyColumnFilters('users-body');
 }
 
 async function changeUserRole(id, role) {
