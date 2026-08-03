@@ -397,20 +397,21 @@
     <div class="card">
       <div class="flex-between">
         <h2>Sesiones de captura</h2>
+        <button class="action secondary" onclick="clearColumnFilters('sessions-body', renderSessionsTable)">Limpiar filtros</button>
       </div>
       <div class="viewer-note viewer-only hidden">Perfil visualizador: solo lectura, no puedes iniciar/detener capturas ni subir archivos.</div>
       <table>
         <thead>
         <tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>Origen</th><th>Estado</th><th>Avance</th><th>Paquetes</th><th>Inicio</th><th></th></tr>
         <tr class="filter-row">
-          <th data-col="id"><input class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
-          <th data-col="nombre"><input class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
-          <th data-col="tipo"><input class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
-          <th data-col="origen"><input class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
-          <th data-col="estado"><input class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="id"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="tipo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="origen"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="estado"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
           <th></th>
-          <th data-col="paquetes"><input class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
-          <th data-col="inicio"><input class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="paquetes"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="inicio"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
           <th></th>
         </tr>
         </thead>
@@ -441,6 +442,7 @@
           <label style="display:inline-flex;align-items:center;gap:6px;margin:0;" title="Un equipo se marca Externo cuando nunca se le capturó transmitiendo (sin MAC) y su IP parece pública -- es decir, fuera de esta red, alcanzado solo a través de un router.">
             <input type="checkbox" id="hide-external-checkbox" style="width:auto" /> Ocultar equipos externos
           </label>
+          <button class="action secondary" onclick="clearColumnFilters('devices-body', renderDevicesTable)">Limpiar filtros</button>
           <button class="action secondary" id="columns-btn">Columnas</button>
           <div id="columns-panel" class="columns-panel hidden">
             <div class="columns-panel-title">Columnas visibles</div>
@@ -467,16 +469,16 @@
             <th data-col="protocolos">Protocolos</th><th data-col="visto">Últ. visto</th>
           </tr>
           <tr class="filter-row">
-            <th data-col="ip"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
-            <th data-col="nombre"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
-            <th data-col="tipo"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
-            <th data-col="subtipo"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
-            <th data-col="fabricante"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
-            <th data-col="mac"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
-            <th data-col="so"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
-            <th data-col="confianza"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
-            <th data-col="protocolos"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
-            <th data-col="visto"><input class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="ip"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="tipo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="subtipo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="fabricante"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="mac"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="so"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="confianza"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="protocolos"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="visto"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
           </tr>
           </thead>
           <tbody id="devices-body"><tr><td colspan="10" class="empty">Sin datos</td></tr></tbody>
@@ -500,6 +502,7 @@
             <option value="OT">Solo OT</option>
             <option value="IT">Solo IT</option>
           </select>
+          <button class="action secondary" onclick="clearColumnFilters('flows-body', renderFlowsTable)">Limpiar filtros</button>
         </div>
       </div>
       <div class="stat-row" id="flows-stats"></div>
@@ -508,14 +511,14 @@
           <thead>
           <tr><th>Origen</th><th>Destino</th><th>Protocolo</th><th>Puerto</th><th>Transporte</th><th>Paquetes</th><th>Primero</th><th>Último</th></tr>
           <tr class="filter-row">
-            <th data-col="origen"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
-            <th data-col="destino"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
-            <th data-col="protocolo"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
-            <th data-col="puerto"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
-            <th data-col="transporte"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
-            <th data-col="paquetes"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
-            <th data-col="primero"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
-            <th data-col="ultimo"><input class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="origen"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="destino"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="protocolo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="puerto"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="transporte"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="paquetes"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="primero"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="ultimo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
           </tr>
           </thead>
           <tbody id="flows-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
@@ -538,6 +541,7 @@
             <option value="low">Low</option>
             <option value="info">Info</option>
           </select>
+          <button class="action secondary" onclick="clearColumnFilters('findings-body', renderFindingsTable)">Limpiar filtros</button>
           <button class="action secondary" id="export-vuln-pdf-btn">Exportar PDF</button>
           <button class="action editor-only" id="scan-all-btn">Ejecutar escaneo completo</button>
         </div>
@@ -548,12 +552,12 @@
           <thead>
           <tr><th>Severidad</th><th>Dispositivo</th><th>Nombre</th><th>Hallazgo</th><th>Fuente</th><th>Evidencia</th></tr>
           <tr class="filter-row">
-            <th data-col="severidad"><input class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
-            <th data-col="dispositivo"><input class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
-            <th data-col="nombre"><input class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
-            <th data-col="hallazgo"><input class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
-            <th data-col="fuente"><input class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
-            <th data-col="evidencia"><input class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="severidad"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="dispositivo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="hallazgo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="fuente"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="evidencia"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
           </tr>
           </thead>
           <tbody id="findings-body"><tr><td colspan="6" class="empty">Sin datos</td></tr></tbody>
@@ -589,14 +593,15 @@
     <div class="card">
       <div class="flex-between">
         <h2>Usuarios</h2>
+        <button class="action secondary" onclick="clearColumnFilters('users-body', renderUsersTable)">Limpiar filtros</button>
       </div>
       <table>
         <thead>
         <tr><th>Usuario</th><th>Perfil</th><th>Creado</th><th></th></tr>
         <tr class="filter-row">
-          <th data-col="usuario"><input class="col-filter" placeholder="Filtrar…" oninput="renderUsersTable()" /></th>
-          <th data-col="perfil"><input class="col-filter" placeholder="Filtrar…" oninput="renderUsersTable()" /></th>
-          <th data-col="creado"><input class="col-filter" placeholder="Filtrar…" oninput="renderUsersTable()" /></th>
+          <th data-col="usuario"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderUsersTable()" /></th>
+          <th data-col="perfil"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderUsersTable()" /></th>
+          <th data-col="creado"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderUsersTable()" /></th>
           <th></th>
         </tr>
         </thead>
@@ -877,6 +882,7 @@ function renderSessionsTable() {
         ${editor ? `<button class="action secondary" onclick="deleteSession(${s.id})">Borrar</button>` : ''}
       </td>
     </tr>`).join('');
+  populateColumnDatalists('sessions-body');
   applyColumnFilters('sessions-body');
 }
 
@@ -1042,6 +1048,62 @@ function applyColumnFilters(tbodyId) {
   if (scrollWrapper) fitTableScroll(scrollWrapper.id);
 }
 
+const MAX_DATALIST_OPTIONS = 200;
+const MAX_DATALIST_OPTION_LENGTH = 60;
+
+// Refreshes each column's <datalist> with the distinct values currently on
+// screen, so a filter input's native suggestion dropdown lets you *pick* a
+// value instead of only typing one -- while still just being a text input,
+// so partial/substring search keeps working the same either way. Built from
+// the same [data-col] cells applyColumnFilters reads, before it hides any
+// row, so the suggestions always reflect every row this render produced,
+// not just whatever currently happens to be visible.
+function populateColumnDatalists(tbodyId) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  const table = tbody.closest('table');
+  const filterRow = table.querySelector('thead tr.filter-row');
+  if (!filterRow) return;
+  const dataRows = Array.from(tbody.querySelectorAll('tr')).filter(tr => !tr.querySelector('td.empty'));
+  filterRow.querySelectorAll('th[data-col]').forEach(th => {
+    const col = th.dataset.col;
+    const input = th.querySelector('input.col-filter');
+    if (!input) return;
+    let datalistId = input.getAttribute('list');
+    if (!datalistId) {
+      datalistId = `dl-${tbodyId}-${col}`;
+      input.setAttribute('list', datalistId);
+    }
+    let datalist = document.getElementById(datalistId);
+    if (!datalist) {
+      datalist = document.createElement('datalist');
+      datalist.id = datalistId;
+      input.insertAdjacentElement('afterend', datalist);
+    }
+    const values = new Set();
+    dataRows.forEach(tr => {
+      const cell = tr.querySelector(`[data-col="${col}"]`);
+      let text = cell ? cell.textContent.trim().replace(/\s+/g, ' ') : '';
+      if (!text) return;
+      if (text.length > MAX_DATALIST_OPTION_LENGTH) text = text.slice(0, MAX_DATALIST_OPTION_LENGTH);
+      values.add(text);
+    });
+    datalist.innerHTML = Array.from(values).sort().slice(0, MAX_DATALIST_OPTIONS)
+      .map(v => `<option value="${v.replace(/"/g, '&quot;')}"></option>`).join('');
+  });
+}
+
+// "Limpiar filtros" button handler -- resets every column filter for one
+// table at once, on top of each input's own native per-column clear (x)
+// button (type="search").
+function clearColumnFilters(tbodyId, rerender) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  const table = tbody.closest('table');
+  table.querySelectorAll('thead tr.filter-row input.col-filter').forEach(inp => { inp.value = ''; });
+  rerender();
+}
+
 async function loadDevices() {
   // hide_external also collapses a detected gateway's duplicate public-IP
   // rows (see routes_inventory.list_devices) -- same opt-in toggle as
@@ -1095,7 +1157,6 @@ function deviceSubtypeBadge(d) {
 
 function renderDeviceStats(devices) {
   const total = devices.length;
-  const otCount = devices.filter(d => d.is_ot_suspected).length;
   const plcCount = devices.filter(d => d.display_device_type === 'plc').length;
   const hmiCount = devices.filter(d => d.display_device_type === 'hmi').length;
   const serverCount = devices.filter(d => d.display_device_type === 'server').length;
@@ -1104,7 +1165,6 @@ function renderDeviceStats(devices) {
   const otherCount = total - plcCount - hmiCount - serverCount - workstationCount - networkCount;
   $('#inventory-stats').innerHTML = `
     <div class="stat-tile"><div class="stat-num">${total}</div><div class="stat-label">Dispositivos detectados</div></div>
-    <div class="stat-tile"><div class="stat-num ot">${otCount}</div><div class="stat-label">Dispositivos OT</div></div>
     <div class="stat-tile"><div class="stat-num plc">${plcCount}</div><div class="stat-label">PLC</div></div>
     <div class="stat-tile"><div class="stat-num hmi">${hmiCount}</div><div class="stat-label">HMI</div></div>
     <div class="stat-tile"><div class="stat-num server">${serverCount}</div><div class="stat-label">Servidores/VM</div></div>
@@ -1140,6 +1200,7 @@ function renderDevicesTable() {
       <td data-col="visto">${fmtDate(d.last_seen)}</td>
     </tr>`).join('');
   applyColumnVisibility();
+  populateColumnDatalists('devices-body');
   applyColumnFilters('devices-body');
 }
 
@@ -1340,6 +1401,7 @@ function renderFlowsTable() {
       <td data-col="ultimo" class="muted">${fmtDate(f.last_seen)}</td>
     </tr>`;
   }).join('');
+  populateColumnDatalists('flows-body');
   applyColumnFilters('flows-body');
 }
 
@@ -1382,6 +1444,7 @@ function renderFindingsTable() {
       <td data-col="fuente">${f.source}${f.cve_id ? ' · ' + f.cve_id : ''}</td>
       <td data-col="evidencia" class="muted">${f.evidence || '—'}</td>
     </tr>`).join('');
+  populateColumnDatalists('findings-body');
   applyColumnFilters('findings-body');
 }
 
@@ -1469,6 +1532,7 @@ function renderUsersTable() {
         <button class="action danger" onclick="deleteUser(${u.id})" ${u.id === currentUser.id ? 'disabled' : ''}>Eliminar</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin usuarios</td></tr>';
+  populateColumnDatalists('users-body');
   applyColumnFilters('users-body');
 }
 
