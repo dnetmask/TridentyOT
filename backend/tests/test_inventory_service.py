@@ -20,7 +20,7 @@ from scapy.layers.netbios import NBNSHeader, NBNSRegistrationRequest
 from scapy.packet import Raw
 
 from app.capture.packet_processor import process_packet
-from app.inventory.inventory_service import _looks_like_text_banner, ingest_packet_record
+from app.inventory.inventory_service import IngestCache, _looks_like_text_banner, ingest_packet_record
 from app.models import Device, DeviceProtocol, Flow
 
 
@@ -54,6 +54,74 @@ def test_ingest_repeated_packets_increments_count_not_rows(db_session, org_id):
     rows = db_session.query(DeviceProtocol).all()
     assert len(rows) == 1
     assert rows[0].packet_count == 3
+
+
+def test_ingest_with_shared_cache_still_increments_count_not_rows(db_session, org_id):
+    """Same behavior as test_ingest_repeated_packets_increments_count_not_rows,
+    but with an IngestCache shared across calls -- exactly how
+    pcap_loader.py/live_capture.py use it for a whole file/batch. Device,
+    protocol, and flow aggregation must produce identical results whether
+    or not the caller opts into the cache; only the number of SQL round
+    trips it takes to get there should differ (see
+    test_shared_cache_avoids_requerying_the_database below)."""
+    cache = IngestCache()
+    for _ in range(3):
+        pkt = Ether() / IP(src="10.0.0.5", dst="10.0.0.50", ttl=64) / TCP(sport=51000, dport=502, flags="A", window=1024)
+        ingest_packet_record(db_session, process_packet(pkt), org_id, cache=cache)
+    db_session.commit()
+
+    device_rows = db_session.query(Device).all()
+    assert len(device_rows) == 2
+
+    protocol_rows = db_session.query(DeviceProtocol).all()
+    assert len(protocol_rows) == 1
+    assert protocol_rows[0].packet_count == 3
+
+    flow_rows = db_session.query(Flow).all()
+    assert len(flow_rows) == 1
+    assert flow_rows[0].packet_count == 3
+
+
+def test_shared_cache_avoids_requerying_the_database(db_session, org_id):
+    """The whole point of IngestCache (see its docstring): a long capture
+    re-touches the same handful of devices/protocols/flows on nearly every
+    packet, and re-querying the database for that same row on every single
+    one is what turned a 97MB pcap upload from ~2-4 minutes on SQLite into
+    40+ minutes after the move to Postgres, purely from per-round-trip
+    network latency. A second, third, ... packet between the same device
+    pair on the same protocol/port must not re-query devices/
+    device_protocols/flows by their unique key once the cache is warm --
+    the one remaining SELECT is apply_device_type_guess's classification
+    recompute, which isn't cache-covered (a coarser aggregate over
+    potentially several rows, not a single unique-key lookup)."""
+    from sqlalchemy import event
+
+    from app.db import engine
+
+    cache = IngestCache()
+    select_statements = []
+
+    def _record(conn, cursor, statement, parameters, context, executemany):
+        if statement.strip().upper().startswith("SELECT"):
+            select_statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", _record)
+    try:
+        # First packet: genuinely new devices/protocol/flow -- SELECTs are
+        # expected (and unavoidable) here.
+        pkt = Ether() / IP(src="10.0.0.5", dst="10.0.0.50", ttl=64) / TCP(sport=51000, dport=502, flags="A", window=1024)
+        ingest_packet_record(db_session, process_packet(pkt), org_id, cache=cache)
+        db_session.commit()
+
+        select_statements.clear()
+        # Second, identical-shape packet: everything involved is already
+        # cached -- the only SELECT left is apply_device_type_guess's.
+        ingest_packet_record(db_session, process_packet(pkt), org_id, cache=cache)
+    finally:
+        event.remove(engine, "before_cursor_execute", _record)
+
+    assert len(select_statements) == 1
+    assert "device_protocols" in select_statements[0] and "role" in select_statements[0]
 
 
 def test_arp_only_host_is_registered(db_session, org_id):

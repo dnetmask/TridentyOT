@@ -56,6 +56,33 @@ def _looks_like_text_banner(payload: bytes) -> str | None:
     return first_line
 
 
+class IngestCache:
+    """Per-run in-memory lookup cache for get_or_create_device/upsert_protocol/
+    upsert_flow, keyed by the same tuple each is uniquely constrained on.
+
+    A real capture re-touches the same handful of devices/protocols/flows
+    on nearly every packet (a PLC polling loop, a client's repeated
+    requests to the same server, ...) -- without this, ingest_packet_record
+    re-queries the database for that same row on every single packet. That
+    round trip is cheap against SQLite's in-process access, but at
+    Postgres's per-round-trip network/protocol latency it dominates: a 97MB
+    pcap upload that took 2-4 minutes on SQLite took 40+ minutes after the
+    move to Postgres, with nothing else about the workload having changed.
+
+    Scoped to one caller-owned run (the whole file for a pcap upload, one
+    batch for live capture -- see pcap_loader.py/live_capture.py) rather
+    than being global: the cached ORM objects are only valid for as long as
+    the Session that loaded them stays open, and a cache entry for one
+    organization must never leak into another's lookup.
+    """
+
+    def __init__(self) -> None:
+        self.devices_by_ip: dict[tuple[int, str], Device] = {}
+        self.devices_by_mac: dict[tuple[int, str], Device] = {}
+        self.protocols: dict[tuple[int, str, int | None, str], DeviceProtocol] = {}
+        self.flows: dict[tuple[int, int, str, int | None], Flow] = {}
+
+
 def _is_real_unicast_mac(mac: str | None) -> bool:
     """Broadcast/multicast addresses (ff:ff:ff:ff:ff:ff, 01:00:5e:.., etc.)
     identify a link-layer destination class, never a specific host's own
@@ -78,6 +105,7 @@ def get_or_create_device(
     mac: str | None,
     organization_id: int,
     capture_session_id: int | None = None,
+    cache: IngestCache | None = None,
 ) -> Device | None:
     if mac is not None and not _is_real_unicast_mac(mac):
         mac = None
@@ -88,27 +116,34 @@ def get_or_create_device(
 
     device = None
     if ip:
-        # ip alone isn't actually unique (the DB constraint is on the
-        # (organization_id, mac, ip) triple, and two NULL macs don't
-        # collide under it either) -- a large/long capture can genuinely
-        # produce two rows for the same ip (e.g. an address briefly
-        # reused/conflicting on the LAN, or two uploads racing each other).
-        # Picking the oldest deterministically instead of one_or_none()
-        # means that anomaly gets tolerated and converged on rather than
-        # crashing every ingest that touches this ip afterwards.
-        device = (
-            session.query(Device)
-            .filter(Device.organization_id == organization_id, Device.ip == ip)
-            .order_by(Device.id.asc())
-            .first()
-        )
+        if cache is not None:
+            device = cache.devices_by_ip.get((organization_id, ip))
+        if device is None:
+            # ip alone isn't actually unique (the DB constraint is on the
+            # (organization_id, mac, ip) triple, and two NULL macs don't
+            # collide under it either) -- a large/long capture can genuinely
+            # produce two rows for the same ip (e.g. an address briefly
+            # reused/conflicting on the LAN, or two uploads racing each
+            # other). Picking the oldest deterministically instead of
+            # one_or_none() means that anomaly gets tolerated and converged
+            # on rather than crashing every ingest that touches this ip
+            # afterwards.
+            device = (
+                session.query(Device)
+                .filter(Device.organization_id == organization_id, Device.ip == ip)
+                .order_by(Device.id.asc())
+                .first()
+            )
     if device is None and mac:
-        device = (
-            session.query(Device)
-            .filter(Device.organization_id == organization_id, Device.mac == mac, Device.ip.is_(None))
-            .order_by(Device.id.asc())
-            .first()
-        )
+        if cache is not None:
+            device = cache.devices_by_mac.get((organization_id, mac))
+        if device is None:
+            device = (
+                session.query(Device)
+                .filter(Device.organization_id == organization_id, Device.mac == mac, Device.ip.is_(None))
+                .order_by(Device.id.asc())
+                .first()
+            )
 
     now = utcnow()
     if device is None:
@@ -123,15 +158,29 @@ def get_or_create_device(
         )
         session.add(device)
         session.flush()
-        return device
+    else:
+        if mac and not device.mac:
+            device.mac = mac
+        if ip and not device.ip:
+            device.ip = ip
+        if device.vendor is None:
+            device.vendor = lookup_vendor(device.mac)
+        device.last_seen = now
 
-    if mac and not device.mac:
-        device.mac = mac
-    if ip and not device.ip:
-        device.ip = ip
-    if device.vendor is None:
-        device.vendor = lookup_vendor(device.mac)
-    device.last_seen = now
+    if cache is not None:
+        # Mirrors the two lookup queries above exactly: a device with an ip
+        # is only ever found (or matched) via the ip branch, regardless of
+        # whether it also has a mac, so any stale mac-only cache entry for
+        # it (from before it had an ip) must be dropped -- otherwise a later
+        # mac-only lookup would resolve to a device the real "mac == mac AND
+        # ip IS NULL" query could no longer match.
+        if device.ip:
+            cache.devices_by_ip[(organization_id, device.ip)] = device
+            if device.mac:
+                cache.devices_by_mac.pop((organization_id, device.mac), None)
+        elif device.mac:
+            cache.devices_by_mac[(organization_id, device.mac)] = device
+
     return device
 
 
@@ -342,17 +391,21 @@ def upsert_protocol(
     role: str,
     banner: str | None = None,
     capture_session_id: int | None = None,
+    cache: IngestCache | None = None,
 ) -> DeviceProtocol:
-    existing = (
-        session.query(DeviceProtocol)
-        .filter(
-            DeviceProtocol.device_id == device.id,
-            DeviceProtocol.protocol == proto_info.protocol,
-            DeviceProtocol.port == port,
-            DeviceProtocol.role == role,
+    key = (device.id, proto_info.protocol, port, role)
+    existing = cache.protocols.get(key) if cache is not None else None
+    if existing is None:
+        existing = (
+            session.query(DeviceProtocol)
+            .filter(
+                DeviceProtocol.device_id == device.id,
+                DeviceProtocol.protocol == proto_info.protocol,
+                DeviceProtocol.port == port,
+                DeviceProtocol.role == role,
+            )
+            .one_or_none()
         )
-        .one_or_none()
-    )
     now = utcnow()
     if existing is None:
         existing = DeviceProtocol(
@@ -378,6 +431,9 @@ def upsert_protocol(
     if proto_info.category == "OT":
         device.is_ot_suspected = True
 
+    if cache is not None:
+        cache.protocols[key] = existing
+
     return existing
 
 
@@ -390,22 +446,26 @@ def upsert_flow(
     port: int | None,
     proto_info: ProtocolInfo,
     capture_session_id: int | None = None,
+    cache: IngestCache | None = None,
 ) -> Flow:
     """Aggregates both directions of a TCP/UDP conversation between two
     devices into a single row, normalized by device id so the reverse
     direction doesn't create a duplicate."""
     device_a, device_b = sorted((device_x, device_y), key=lambda d: d.id)
 
-    existing = (
-        session.query(Flow)
-        .filter(
-            Flow.device_a_id == device_a.id,
-            Flow.device_b_id == device_b.id,
-            Flow.transport == transport,
-            Flow.port == port,
+    key = (device_a.id, device_b.id, transport, port)
+    existing = cache.flows.get(key) if cache is not None else None
+    if existing is None:
+        existing = (
+            session.query(Flow)
+            .filter(
+                Flow.device_a_id == device_a.id,
+                Flow.device_b_id == device_b.id,
+                Flow.transport == transport,
+                Flow.port == port,
+            )
+            .one_or_none()
         )
-        .one_or_none()
-    )
     now = utcnow()
     if existing is None:
         existing = Flow(
@@ -425,6 +485,10 @@ def upsert_flow(
     else:
         existing.packet_count += 1
         existing.last_seen = now
+
+    if cache is not None:
+        cache.flows[key] = existing
+
     return existing
 
 
@@ -460,12 +524,16 @@ _CDP_LLDP_GUESS = OsGuess(
 
 
 def ingest_packet_record(
-    session: Session, record: PacketRecord, organization_id: int, capture_session_id: int | None = None
+    session: Session,
+    record: PacketRecord,
+    organization_id: int,
+    capture_session_id: int | None = None,
+    cache: IngestCache | None = None,
 ) -> None:
     if record.transport == "arp":
         device = get_or_create_device(
             session, ip=record.src_ip, mac=record.src_mac, organization_id=organization_id,
-            capture_session_id=capture_session_id,
+            capture_session_id=capture_session_id, cache=cache,
         )
         if device is not None:
             # A device only ever seen via ARP has no protocol/OS evidence at
@@ -482,7 +550,8 @@ def ingest_packet_record(
         # alone (it'll be merged with an IP-keyed row later if the same MAC
         # is ever seen sending ordinary IP traffic; see get_or_create_device).
         device = get_or_create_device(
-            session, ip=None, mac=record.src_mac, organization_id=organization_id, capture_session_id=capture_session_id
+            session, ip=None, mac=record.src_mac, organization_id=organization_id,
+            capture_session_id=capture_session_id, cache=cache,
         )
         if device is not None:
             if record.l2_hostname:
@@ -506,7 +575,8 @@ def ingest_packet_record(
         # protocol rule: no os_signature contradicting it (no TCP/IP stack
         # involved) reads as PLC, exactly right for a PROFINET IO device.
         device = get_or_create_device(
-            session, ip=None, mac=record.src_mac, organization_id=organization_id, capture_session_id=capture_session_id
+            session, ip=None, mac=record.src_mac, organization_id=organization_id,
+            capture_session_id=capture_session_id, cache=cache,
         )
         if device is not None:
             if record.l2_hostname:
@@ -514,8 +584,18 @@ def ingest_packet_record(
             if record.l2_device_reference:
                 device.model = record.l2_device_reference
             proto_info = ProtocolInfo(record.l2_protocol or PROFINET_OTHER, OT, True)
-            upsert_protocol(session, device, proto_info, None, "profinet", "server", capture_session_id=capture_session_id)
-            session.flush()
+            device_protocol = upsert_protocol(
+                session, device, proto_info, None, "profinet", "server",
+                capture_session_id=capture_session_id, cache=cache,
+            )
+            # A brand-new row's add() isn't visible to apply_device_type_
+            # guess's query below without a flush first (autoflush is off)
+            # -- always true without a cache. With one, an already-existing
+            # row never needs it (see upsert_flow's comment above for why),
+            # so this only actually flushes for a device/protocol pair
+            # that's genuinely new this run.
+            if cache is None or device_protocol in session.new:
+                session.flush()
             apply_device_type_guess(session, device)
         return
 
@@ -534,12 +614,26 @@ def ingest_packet_record(
     # flow) actually needs a real device on both ends.
     src_device = get_or_create_device(
         session, ip=record.src_ip, mac=record.src_mac, organization_id=organization_id,
-        capture_session_id=capture_session_id,
+        capture_session_id=capture_session_id, cache=cache,
     )
     dst_device = get_or_create_device(
-        session, ip=record.dst_ip, mac=None, organization_id=organization_id, capture_session_id=capture_session_id
+        session, ip=record.dst_ip, mac=None, organization_id=organization_id,
+        capture_session_id=capture_session_id, cache=cache,
     )
-    session.flush()
+    # get_or_create_device() already flushes internally the moment it adds a
+    # brand-new device (its caller-visible .id has to be usable as a
+    # foreign key right away), so this isn't needed for the two devices
+    # themselves. But without a cache, upsert_protocol/upsert_flow below
+    # find-or-create purely via a plain SELECT (autoflush is off) -- so an
+    # earlier packet's still-unflushed Flow/DeviceProtocol INSERT would be
+    # invisible to this packet's query, and a second attempt to insert the
+    # exact same key 500 microseconds later fails the unique constraint.
+    # A cache sidesteps that entirely (a repeat key is found in the dict,
+    # never re-queried via SQL at all), so this flush -- and the extra
+    # round trip it costs on literally every packet -- is only needed when
+    # the caller isn't using one.
+    if cache is None:
+        session.flush()
 
     # Applied unconditionally on src_device, independent of dst_device --
     # unlike the protocol/flow bookkeeping below, this doesn't need a real
@@ -583,7 +677,7 @@ def ingest_packet_record(
 
         banner = _looks_like_text_banner(record.payload)
         proto_info = classify(server_port, payload=record.payload)
-        upsert_protocol(
+        server_device_protocol = upsert_protocol(
             session,
             server_device,
             proto_info,
@@ -592,6 +686,7 @@ def ingest_packet_record(
             "server",
             banner,
             capture_session_id=capture_session_id,
+            cache=cache,
         )
         # upsert_protocol's own add() of a brand-new row isn't visible to
         # apply_device_type_guess's query without a flush first (autoflush
@@ -599,8 +694,12 @@ def ingest_packet_record(
         # the same protocol before ever being classified from it
         # (benchmarked: the extra flush costs ~2% on a real capture, not
         # worth trading for a device that never gets classified because a
-        # capture only ever saw one packet from it).
-        session.flush()
+        # capture only ever saw one packet from it). Always true without a
+        # cache; with one, an already-existing row never needs it (see
+        # upsert_flow's comment above), so this only actually flushes for a
+        # device/protocol pair that's genuinely new this run.
+        if cache is None or server_device_protocol in session.new:
+            session.flush()
         apply_device_type_guess(session, server_device)
         upsert_flow(
             session,
@@ -611,6 +710,7 @@ def ingest_packet_record(
             server_port,
             proto_info,
             capture_session_id=capture_session_id,
+            cache=cache,
         )
 
     if record.hostname_hints:

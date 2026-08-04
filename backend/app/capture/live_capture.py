@@ -33,7 +33,7 @@ from scapy.sendrecv import AsyncSniffer
 from app.capture.packet_processor import PacketRecord, process_packet
 from app.db import session_scope
 from app.i18n import bilingual, encode_i18n
-from app.inventory.inventory_service import apply_gateway_detection, ingest_packet_record
+from app.inventory.inventory_service import IngestCache, apply_gateway_detection, ingest_packet_record
 from app.models import CaptureSession
 
 logger = logging.getLogger(__name__)
@@ -160,12 +160,20 @@ class _CaptureWorker:
             capture_session = db.get(CaptureSession, self.capture_session_id)
             if capture_session is None or capture_session.status != "running":
                 return
+            # Scoped to this one batch, not the capture session as a whole:
+            # session_scope() opens a fresh Session per batch, and a cached
+            # ORM object doesn't survive past the Session that loaded it.
+            # Still a real win within a batch of up to BATCH_MAX_RECORDS --
+            # e.g. a PLC's polling loop hits the same device/protocol/flow
+            # repeatedly inside that window (see IngestCache's docstring).
+            cache = IngestCache()
             for record in batch:
                 ingest_packet_record(
                     db,
                     record,
                     organization_id=capture_session.organization_id,
                     capture_session_id=self.capture_session_id,
+                    cache=cache,
                 )
             # Whole-table pass, not per-packet: the router/NAT gateway
             # pattern (one MAC shared by several public IPs) only shows up

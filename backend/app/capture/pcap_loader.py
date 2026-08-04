@@ -12,7 +12,7 @@ from scapy.utils import PcapReader
 from sqlalchemy.orm import Session
 
 from app.capture.packet_processor import process_packet
-from app.inventory.inventory_service import apply_gateway_detection, ingest_packet_record
+from app.inventory.inventory_service import IngestCache, apply_gateway_detection, ingest_packet_record
 from app.models import CaptureSession
 
 # Minimum wall-clock time between progress commits. This is a *time* bound,
@@ -42,6 +42,14 @@ _LOCK_YIELD_SECONDS = 0.05
 
 def process_pcap_file(db_session: Session, filepath: str, capture_session: CaptureSession) -> None:
     count = 0
+    # One cache for the whole file: real traffic re-touches the same
+    # handful of devices/protocols/flows on nearly every packet, and
+    # without this ingest_packet_record re-queries the database for that
+    # same row every single time -- cheap against SQLite's in-process
+    # access, but dominant at Postgres's per-round-trip latency (see
+    # IngestCache's docstring; this is what turned a 97MB pcap's ~2-4
+    # minute upload into 40+ minutes after the move to Postgres).
+    cache = IngestCache()
     try:
         capture_session.total_bytes = os.path.getsize(filepath)
         db_session.commit()
@@ -55,6 +63,7 @@ def process_pcap_file(db_session: Session, filepath: str, capture_session: Captu
                         record,
                         organization_id=capture_session.organization_id,
                         capture_session_id=capture_session.id,
+                        cache=cache,
                     )
                 count += 1
                 now = time.monotonic()
