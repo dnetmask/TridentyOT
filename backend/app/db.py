@@ -183,11 +183,43 @@ def _rebuild_device_unique_constraint() -> None:
         )
 
 
+def _widen_device_identity_text_columns() -> None:
+    """firmware_version/custom_firmware_version/model/custom_model briefly
+    shipped as VARCHAR(128) (see models.py). Postgres enforces that limit
+    strictly, and real-world values routinely exceed it -- a CDP Software
+    Version TLV is often a full multi-line IOS banner (version, copyright,
+    compile date -- easily 200-400+ characters). Unlike a missing column,
+    _add_missing_columns() above never revisits a column that already
+    exists with the wrong type, so a database that picked up the narrow
+    version needs this explicit widen -- without it, every packet from a
+    device with an over-limit value fails to commit, which on a live
+    capture (see live_capture.py's _ingest_batch, which has no per-record
+    error handling) silently kills the consumer thread and freezes the
+    capture. SQLite never enforces VARCHAR length at all, so this is a
+    Postgres-only fixup; safe to re-run every startup, since widening an
+    already-correctly-sized column is a no-op.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    inspector = inspect(engine)
+    if "devices" not in inspector.get_table_names():
+        return
+    existing_columns = {col["name"] for col in inspector.get_columns("devices")}
+    with engine.begin() as conn:
+        for column in ("firmware_version", "custom_firmware_version"):
+            if column in existing_columns:
+                conn.execute(text(f'ALTER TABLE devices ALTER COLUMN "{column}" TYPE TEXT'))
+        for column in ("model", "custom_model"):
+            if column in existing_columns:
+                conn.execute(text(f'ALTER TABLE devices ALTER COLUMN "{column}" TYPE VARCHAR(255)'))
+
+
 def init_db() -> None:
     from app import models  # noqa: F401  (ensure models are registered)
 
     Base.metadata.create_all(bind=engine)
     _add_missing_columns()
+    _widen_device_identity_text_columns()
     _ensure_default_organization_and_backfill()
     _rebuild_device_unique_constraint()
 

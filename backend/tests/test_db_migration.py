@@ -232,3 +232,26 @@ def test_migration_backfills_a_default_organization_and_rebuilds_the_device_uniq
 
     with Session() as session:
         assert session.query(Organization).count() == 1
+
+
+def test_firmware_and_model_columns_are_not_narrowly_length_bounded():
+    """Regression test for a real bug: devices.firmware_version and
+    devices.model briefly shipped as VARCHAR(128). SQLite never enforces a
+    VARCHAR length, so that limit only ever bit on Postgres -- a CDP
+    Software Version TLV is routinely a full multi-line IOS banner (200-400+
+    characters), and an INSERT/UPDATE exceeding the column's limit fails
+    outright there. On a live capture, that failure had no per-record
+    handling to catch it (see live_capture.py's _consume_loop), so it
+    silently killed the consumer thread and froze the capture with no
+    error shown anywhere. firmware_version/custom_firmware_version must
+    stay unbounded (Text); model/custom_model must stay wide enough (>=255)
+    for any real-world Platform/productName/order-code string.
+    """
+    columns = Device.__table__.columns
+    for name in ("firmware_version", "custom_firmware_version"):
+        assert getattr(columns[name].type, "length", None) is None, (
+            f"devices.{name} must be an unbounded Text column, not a length-bounded VARCHAR"
+        )
+    for name in ("model", "custom_model"):
+        length = columns[name].type.length
+        assert length is None or length >= 255, f"devices.{name} must allow at least 255 characters"

@@ -23,6 +23,7 @@ invisibly inside the kernel.
 """
 
 import datetime
+import logging
 import queue
 import threading
 import time
@@ -34,6 +35,8 @@ from app.db import session_scope
 from app.i18n import bilingual, encode_i18n
 from app.inventory.inventory_service import apply_gateway_detection, ingest_packet_record
 from app.models import CaptureSession
+
+logger = logging.getLogger(__name__)
 
 # Bound the queue so a consumer that falls permanently behind (DB down,
 # disk full) can't grow memory without limit -- it drops instead (counted
@@ -103,7 +106,25 @@ class _CaptureWorker:
         while True:
             batch = self._drain_batch()
             if batch:
-                self._ingest_batch(batch)
+                # A batch that fails to commit (e.g. a value violating a
+                # column constraint -- see the devices.firmware_version
+                # VARCHAR-length incident this guards against) must not
+                # kill this thread: an unhandled exception here is a
+                # daemon thread dying silently, with the sniffer left
+                # running and no consumer left to drain its queue -- from
+                # the UI, a capture that simply stops advancing forever,
+                # with no error shown anywhere. Losing the one bad batch
+                # and continuing is far better than that.
+                try:
+                    self._ingest_batch(batch)
+                except Exception:
+                    logger.exception(
+                        "Capture session %d: failed to ingest a batch of %d record(s); dropping it and continuing",
+                        self.capture_session_id,
+                        len(batch),
+                    )
+                    with self._dropped_lock:
+                        self._dropped_since_last_batch += len(batch)
             elif self._stop_event.is_set():
                 return
 

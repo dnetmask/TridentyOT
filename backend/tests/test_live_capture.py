@@ -111,3 +111,51 @@ def test_stop_flushes_whatever_is_still_queued(db_session, org_id):
 
     db_session.refresh(session_obj)
     assert session_obj.packet_count == 10
+
+
+def test_a_failed_batch_does_not_kill_the_consumer_thread(db_session, org_id, monkeypatch):
+    """Regression test for a real bug: a batch that fails to commit (e.g.
+    a value violating a DB column constraint -- this happened for real
+    with devices.firmware_version's since-widened VARCHAR(128) limit) must
+    not silently kill the consumer thread. Before this fix, an unhandled
+    exception here left the sniffer running with nothing left to drain its
+    queue -- a capture that just stops advancing forever, with no error
+    shown anywhere. The thread must survive and keep ingesting later
+    batches instead."""
+    import app.capture.live_capture as live_capture_module
+
+    session_obj = _running_session(db_session, org_id)
+    worker = _CaptureWorker(session_obj.id, interface="dummy0", bpf_filter=None)
+
+    real_ingest = live_capture_module.ingest_packet_record
+    calls = {"count": 0}
+
+    def _flaky_ingest(session, record, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("simulated DB constraint violation")
+        return real_ingest(session, record, **kwargs)
+
+    monkeypatch.setattr(live_capture_module, "ingest_packet_record", _flaky_ingest)
+
+    worker._queue.put(_make_record("10.0.9.50", "10.0.9.210"))
+    worker._consumer_thread.start()
+    try:
+        assert _wait_until(lambda: calls["count"] >= 1), "first (failing) batch never attempted"
+        assert worker._consumer_thread.is_alive(), "consumer thread died after a failed batch"
+
+        worker._queue.put(_make_record("10.0.9.51", "10.0.9.210"))
+
+        def _second_batch_committed():
+            db_session.refresh(session_obj)
+            return session_obj.packet_count >= 1
+
+        assert _wait_until(_second_batch_committed), f"packet_count stuck at {session_obj.packet_count}"
+    finally:
+        worker._stop_event.set()
+        worker._consumer_thread.join(timeout=2)
+
+    db_session.refresh(session_obj)
+    assert session_obj.packet_count == 1  # only the 2nd record's batch actually committed
+    assert session_obj.dropped_count == 1  # the 1st record's failed batch counted as dropped
+    assert db_session.query(Device).filter(Device.ip == "10.0.9.51").one_or_none() is not None

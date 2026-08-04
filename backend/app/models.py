@@ -112,8 +112,17 @@ class Device(Base):
     # hostname/vendor above. Left blank (not guessed) for protocols that
     # don't self-report it -- notably PROFINET DCP, which has no firmware
     # field in its Identify response.
-    firmware_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    custom_firmware_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    #
+    # Text, not a bounded VARCHAR: a CDP Software Version TLV is routinely
+    # a full multi-line banner (IOS version, copyright, compile date --
+    # easily 200-400+ characters), and unlike a Postgres VARCHAR(n) a plain
+    # string column never rejects the row for exceeding it. On a live
+    # capture, that rejection has no per-record handling to catch it (see
+    # live_capture.py's _ingest_batch) -- it kills the consumer thread
+    # outright, silently freezing the capture at whatever packet last made
+    # it through the queue.
+    firmware_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    custom_firmware_version: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Manufacturer's model/order-code reference for this specific unit --
     # e.g. an EtherNet/IP CIP productName ("1756-L83E"), a Siemens MLFB
@@ -121,9 +130,11 @@ class Device(Base):
     # a switch/router's CDP Platform TLV. Distinct from hostname: a
     # hostname is how a site names this specific asset ("plc-line3"); a
     # model is what the vendor calls the product itself, and is often the
-    # same value across every identical unit on the network.
-    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    custom_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # same value across every identical unit on the network. String(255),
+    # matching hostname/vendor above -- these are short identifiers in
+    # practice, unlike the free-text firmware banners above.
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    custom_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # device_type is auto-detected (see app/fingerprint/device_classifier.py);
     # custom_device_type is a manual override, same pattern as custom_name/vendor.
