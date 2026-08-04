@@ -77,6 +77,20 @@ def process_pcap_file(db_session: Session, filepath: str, capture_session: Captu
         capture_session.bytes_processed = capture_session.total_bytes
         capture_session.status = "completed"
     except Exception as exc:
+        # If the failure was a DB-level error (a flush/commit that violated
+        # a constraint, e.g. the devices.firmware_version VARCHAR-length
+        # incident this pattern guards against generally), the session's
+        # transaction is left in a failed state on Postgres -- any further
+        # statement on it raises "current transaction is aborted" until an
+        # explicit rollback. Without this, the finally block's own commit()
+        # below would raise *that* new exception instead, which propagates
+        # out of this function entirely uncaught (nothing above this frame
+        # catches it either -- see routes_capture.py's background task).
+        # The capture_session row would then never actually reach status
+        # "error": it freezes at whatever the last successful progress
+        # commit recorded, indistinguishable in the UI from a capture still
+        # quietly running.
+        db_session.rollback()
         capture_session.status = "error"
         capture_session.error_message = str(exc)
         capture_session.packet_count = count
