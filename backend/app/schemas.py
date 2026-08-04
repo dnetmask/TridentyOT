@@ -189,6 +189,102 @@ class UserSelfUpdateRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Organization -> Site -> Zone -> Sensor hierarchy (see docs, Parte C)
+# ---------------------------------------------------------------------------
+
+
+class OrganizationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    slug: str
+    deployment_mode: str
+    default_locale: str
+    created_at: datetime.datetime
+
+
+class OrganizationCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    slug: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    deployment_mode: Literal["self_hosted", "managed"] = "managed"
+    default_locale: Literal["es", "en"] = "es"
+    # Bootstraps the organization's first admin user in the same call --
+    # otherwise a freshly created organization has no user able to log
+    # into it, since POST /api/users always scopes to the caller's own
+    # organization and a super_admin (the only caller of this endpoint)
+    # has none.
+    admin_username: str = Field(min_length=1, max_length=64)
+    admin_password: str = Field(min_length=4, max_length=256)
+
+
+class OrganizationWithAdminOut(BaseModel):
+    organization: OrganizationOut
+    admin_user: UserOut
+
+
+class SiteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    organization_id: int
+    name: str
+    city: str | None
+    country: str | None
+    timezone: str | None
+    created_at: datetime.datetime
+
+
+class SiteCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    city: str | None = None
+    country: str | None = None
+    timezone: str | None = None
+    # Only used (and required) when the caller is a super_admin, who has no
+    # organization of their own to default to -- ignored for an admin,
+    # whose site always belongs to their own organization.
+    organization_id: int | None = None
+
+
+class ZoneOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    site_id: int
+    name: str
+    description: str | None
+    security_level: str | None
+    created_at: datetime.datetime
+
+
+class ZoneCreateRequest(BaseModel):
+    site_id: int
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    # IEC 62443 security level -- deliberately optional, see docs (Parte C).
+    security_level: Literal["SL0", "SL1", "SL2", "SL3", "SL4"] | None = None
+
+
+class SensorOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    zone_id: int
+    name: str
+    description: str | None
+    kind: str
+    last_seen_at: datetime.datetime | None
+    created_at: datetime.datetime
+
+
+class SensorCreateRequest(BaseModel):
+    zone_id: int
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    kind: Literal["live", "external"] = "live"
+
+
+# ---------------------------------------------------------------------------
 # Locale-aware response construction.
 #
 # device_type_evidence / title / description / evidence are stored as

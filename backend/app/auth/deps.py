@@ -49,3 +49,9 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role not in (ROLE_ADMIN, ROLE_SUPER_ADMIN):
         raise HTTPException(status_code=403, detail=message("auth.admin_required", user.locale))
     return user
+
+
+def require_super_admin(user: User = Depends(get_current_user)) -> User:
+    if user.role != ROLE_SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail=message("auth.super_admin_required", user.locale))
+    return user

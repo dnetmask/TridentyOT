@@ -115,12 +115,16 @@ ya capturado, y a partir de eso construye:
    con varias organizaciones compartiendo una misma instancia/base de datos. Todo dato de captura
    (dispositivos, sesiones, hallazgos) queda asociado a su organización y las consultas de la API
    nunca cruzan esa frontera para admin/visualizador -- un Super Admin, en cambio, ve todas las
-   organizaciones a la vez (ver `tests/test_multi_tenancy.py`). Cada organización, además, ya
-   puede tener varios `Site` (sedes) → `Zone` (áreas de despliegue) → `Sensor`, aunque todavía sin
-   pantalla de alta -- toda instalación existente recibe automáticamente un Sitio/Zona/Sensor
-   "Default" al migrar. Cada usuario tiene además un idioma preferido (**español** o **inglés**,
-   ver más abajo) que se aplica tanto a la interfaz como al texto que generan los motores de
-   fingerprint/vulnerabilidades.
+   organizaciones a la vez (ver `tests/test_multi_tenancy.py`). Un Super Admin da de alta nuevas
+   organizaciones (con su primer usuario admin incluido) desde la pestaña **Organizaciones**; cada
+   organización, a su vez, organiza sus sensores en `Site` (sede) → `Zone` (área de despliegue,
+   con nivel de seguridad IEC&nbsp;62443 opcional) → `Sensor`, dados de alta por su propio admin
+   desde la pestaña **Infraestructura** (visible en modo lectura para cualquier rol, ya que la
+   plataforma también sirve para inventario/topología pura de TI). Toda instalación existente antes
+   de este esquema recibió automáticamente un Sitio/Zona/Sensor "Default" al migrar (ver
+   `tests/test_hierarchy.py`). Cada usuario tiene además un idioma preferido (**español** o
+   **inglés**, ver más abajo) que se aplica tanto a la interfaz como al texto que generan los
+   motores de fingerprint/vulnerabilidades.
 
 ## Estructura
 

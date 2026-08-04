@@ -68,6 +68,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "Esta acción requiere el perfil de administrador",
         "en": "This action requires the administrator role",
     },
+    "auth.super_admin_required": {
+        "es": "Esta acción requiere el perfil de Super Admin",
+        "en": "This action requires the Super Admin role",
+    },
     "auth.invalid_credentials": {
         "es": "Usuario o contraseña incorrectos",
         "en": "Incorrect username or password",
@@ -102,6 +106,17 @@ MESSAGES: dict[str, dict[str, str]] = {
         "en": "Session is not a live capture",
     },
     "inventory.device_not_found": {"es": "Dispositivo no encontrado", "en": "Device not found"},
+    "organizations.duplicate_slug": {
+        "es": "Ya existe una organización con ese identificador",
+        "en": "An organization with that slug already exists",
+    },
+    "sites.not_found": {"es": "Sitio no encontrado", "en": "Site not found"},
+    "sites.organization_id_required": {
+        "es": "Debes indicar la organización para este sitio",
+        "en": "You must specify the organization for this site",
+    },
+    "zones.not_found": {"es": "Zona no encontrada", "en": "Zone not found"},
+    "sensors.not_found": {"es": "Sensor no encontrado", "en": "Sensor not found"},
 }
 
 

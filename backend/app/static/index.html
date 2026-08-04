@@ -348,6 +348,8 @@
       <button data-tab="flows" data-i18n="nav.flows">Flujos</button>
       <button data-tab="vulns" data-i18n="nav.vulns">Vulnerabilidades</button>
       <button data-tab="users" id="nav-users" data-i18n="nav.users">Usuarios</button>
+      <button data-tab="infra" data-i18n="nav.infra">Infraestructura</button>
+      <button data-tab="organizations" class="super-admin-only hidden" id="nav-organizations" data-i18n="nav.organizations">Organizaciones</button>
     </nav>
 
     <div class="spacer"></div>
@@ -624,6 +626,203 @@
     </div>
   </section>
 
+  <section id="tab-infra" class="tab">
+    <div class="card admin-only">
+      <h2 data-i18n="infra.create_site_title">Crear sitio</h2>
+      <div class="row">
+        <div>
+          <label data-i18n="infra.site_name">Nombre</label>
+          <input id="new-site-name" placeholder="Planta Bogotá" />
+        </div>
+        <div>
+          <label data-i18n="infra.site_city">Ciudad</label>
+          <input id="new-site-city" />
+        </div>
+        <div>
+          <label data-i18n="infra.site_country">País</label>
+          <input id="new-site-country" />
+        </div>
+        <div>
+          <label data-i18n="infra.site_timezone">Zona horaria</label>
+          <input id="new-site-timezone" placeholder="America/Bogota" />
+        </div>
+        <div class="super-admin-only hidden">
+          <label data-i18n="infra.organization">Organización</label>
+          <select id="new-site-organization"></select>
+        </div>
+        <button class="action" id="create-site-btn" data-i18n="infra.create_btn">Crear</button>
+      </div>
+      <div id="create-site-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="flex-between">
+        <h2 data-i18n="infra.sites_title">Sitios</h2>
+        <button class="action secondary" onclick="clearColumnFilters('sites-body', renderSitesTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
+      </div>
+      <table>
+        <thead>
+        <tr><th data-i18n="infra.site_name">Nombre</th><th data-i18n="infra.site_city">Ciudad</th><th data-i18n="infra.site_country">País</th><th data-i18n="infra.site_timezone">Zona horaria</th></tr>
+        <tr class="filter-row">
+          <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSitesTable()" /></th>
+          <th data-col="ciudad"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSitesTable()" /></th>
+          <th data-col="pais"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSitesTable()" /></th>
+          <th data-col="zona"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSitesTable()" /></th>
+        </tr>
+        </thead>
+        <tbody id="sites-body"><tr><td colspan="4" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card admin-only">
+      <h2 data-i18n="infra.create_zone_title">Crear zona</h2>
+      <div class="row">
+        <div>
+          <label data-i18n="infra.zone_site">Sitio</label>
+          <select id="new-zone-site"></select>
+        </div>
+        <div>
+          <label data-i18n="infra.zone_name">Nombre</label>
+          <input id="new-zone-name" placeholder="Línea 1" />
+        </div>
+        <div>
+          <label data-i18n="infra.zone_description">Descripción</label>
+          <input id="new-zone-description" />
+        </div>
+        <div>
+          <label data-i18n="infra.zone_security_level">Nivel de seguridad (IEC 62443)</label>
+          <select id="new-zone-security-level">
+            <option value="" data-i18n="infra.security_level_none">Sin clasificar</option>
+            <option value="SL0">SL0</option>
+            <option value="SL1">SL1</option>
+            <option value="SL2">SL2</option>
+            <option value="SL3">SL3</option>
+            <option value="SL4">SL4</option>
+          </select>
+        </div>
+        <button class="action" id="create-zone-btn" data-i18n="infra.create_btn">Crear</button>
+      </div>
+      <div id="create-zone-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="flex-between">
+        <h2 data-i18n="infra.zones_title">Zonas</h2>
+        <button class="action secondary" onclick="clearColumnFilters('zones-body', renderZonesTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
+      </div>
+      <table>
+        <thead>
+        <tr><th data-i18n="infra.zone_site">Sitio</th><th data-i18n="infra.zone_name">Nombre</th><th data-i18n="infra.zone_description">Descripción</th><th data-i18n="infra.zone_security_level">Nivel de seguridad</th></tr>
+        <tr class="filter-row">
+          <th data-col="sitio"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderZonesTable()" /></th>
+          <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderZonesTable()" /></th>
+          <th data-col="descripcion"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderZonesTable()" /></th>
+          <th data-col="nivel"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderZonesTable()" /></th>
+        </tr>
+        </thead>
+        <tbody id="zones-body"><tr><td colspan="4" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card admin-only">
+      <h2 data-i18n="infra.create_sensor_title">Crear sensor</h2>
+      <div class="row">
+        <div>
+          <label data-i18n="infra.sensor_zone">Zona</label>
+          <select id="new-sensor-zone"></select>
+        </div>
+        <div>
+          <label data-i18n="infra.sensor_name">Nombre</label>
+          <input id="new-sensor-name" placeholder="Sensor línea 1" />
+        </div>
+        <div>
+          <label data-i18n="infra.sensor_description">Descripción</label>
+          <input id="new-sensor-description" />
+        </div>
+        <div>
+          <label data-i18n="infra.sensor_kind">Tipo</label>
+          <select id="new-sensor-kind">
+            <option value="live" data-i18n="infra.sensor_kind_live">En vivo</option>
+            <option value="external" data-i18n="infra.sensor_kind_external">Externo (solo pcap)</option>
+          </select>
+        </div>
+        <button class="action" id="create-sensor-btn" data-i18n="infra.create_btn">Crear</button>
+      </div>
+      <div id="create-sensor-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="flex-between">
+        <h2 data-i18n="infra.sensors_title">Sensores</h2>
+        <button class="action secondary" onclick="clearColumnFilters('sensors-body', renderSensorsTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
+      </div>
+      <table>
+        <thead>
+        <tr><th data-i18n="infra.sensor_zone">Zona</th><th data-i18n="infra.sensor_name">Nombre</th><th data-i18n="infra.sensor_kind">Tipo</th><th data-i18n="infra.sensor_description">Descripción</th></tr>
+        <tr class="filter-row">
+          <th data-col="zona"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSensorsTable()" /></th>
+          <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSensorsTable()" /></th>
+          <th data-col="tipo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSensorsTable()" /></th>
+          <th data-col="descripcion"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSensorsTable()" /></th>
+        </tr>
+        </thead>
+        <tbody id="sensors-body"><tr><td colspan="4" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-organizations" class="tab super-admin-only hidden">
+    <div class="card">
+      <h2 data-i18n="orgs.create_title">Crear organización</h2>
+      <div class="row">
+        <div>
+          <label data-i18n="orgs.name">Nombre</label>
+          <input id="new-org-name" placeholder="Cervecería SA" />
+        </div>
+        <div>
+          <label data-i18n="orgs.slug">Identificador</label>
+          <input id="new-org-slug" placeholder="cerveceria-sa" />
+        </div>
+        <div>
+          <label data-i18n="orgs.deployment_mode">Modo</label>
+          <select id="new-org-deployment-mode">
+            <option value="managed" data-i18n="orgs.deployment_managed">Consola central</option>
+            <option value="self_hosted" data-i18n="orgs.deployment_self_hosted">Auto-alojado</option>
+          </select>
+        </div>
+        <div>
+          <label data-i18n="orgs.admin_username">Usuario admin</label>
+          <input id="new-org-admin-username" />
+        </div>
+        <div>
+          <label data-i18n="orgs.admin_password">Contraseña admin</label>
+          <input id="new-org-admin-password" type="password" />
+        </div>
+        <button class="action" id="create-org-btn" data-i18n="orgs.create_btn">Crear</button>
+      </div>
+      <div id="create-org-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="flex-between">
+        <h2 data-i18n="orgs.title">Organizaciones</h2>
+        <button class="action secondary" onclick="clearColumnFilters('orgs-body', renderOrganizationsTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
+      </div>
+      <table>
+        <thead>
+        <tr><th data-i18n="orgs.name">Nombre</th><th data-i18n="orgs.slug">Identificador</th><th data-i18n="orgs.deployment_mode">Modo</th><th data-i18n="users.col_created">Creado</th></tr>
+        <tr class="filter-row">
+          <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderOrganizationsTable()" /></th>
+          <th data-col="id"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderOrganizationsTable()" /></th>
+          <th data-col="modo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderOrganizationsTable()" /></th>
+          <th data-col="creado"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderOrganizationsTable()" /></th>
+        </tr>
+        </thead>
+        <tbody id="orgs-body"><tr><td colspan="4" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
   </main>
 </div>
 
@@ -691,6 +890,8 @@ const I18N = {
   'nav.flows': { es: 'Flujos', en: 'Flows' },
   'nav.vulns': { es: 'Vulnerabilidades', en: 'Vulnerabilities' },
   'nav.users': { es: 'Usuarios', en: 'Users' },
+  'nav.infra': { es: 'Infraestructura', en: 'Infrastructure' },
+  'nav.organizations': { es: 'Organizaciones', en: 'Organizations' },
   'nav.logout': { es: 'Cerrar sesión', en: 'Log out' },
   'login.title': { es: 'Ingresa a TridentyOT', en: 'Sign in to TridentyOT' },
   'login.username': { es: 'Usuario', en: 'Username' },
@@ -774,6 +975,39 @@ const I18N = {
   'users.create_btn': { es: 'Crear', en: 'Create' },
   'users.title': { es: 'Usuarios', en: 'Users' },
   'users.col_created': { es: 'Creado', en: 'Created' },
+  'infra.create_site_title': { es: 'Crear sitio', en: 'Create site' },
+  'infra.site_name': { es: 'Nombre', en: 'Name' },
+  'infra.site_city': { es: 'Ciudad', en: 'City' },
+  'infra.site_country': { es: 'País', en: 'Country' },
+  'infra.site_timezone': { es: 'Zona horaria', en: 'Timezone' },
+  'infra.organization': { es: 'Organización', en: 'Organization' },
+  'infra.create_btn': { es: 'Crear', en: 'Create' },
+  'infra.sites_title': { es: 'Sitios', en: 'Sites' },
+  'infra.create_zone_title': { es: 'Crear zona', en: 'Create zone' },
+  'infra.zone_site': { es: 'Sitio', en: 'Site' },
+  'infra.zone_name': { es: 'Nombre', en: 'Name' },
+  'infra.zone_description': { es: 'Descripción', en: 'Description' },
+  'infra.zone_security_level': { es: 'Nivel de seguridad (IEC 62443)', en: 'Security level (IEC 62443)' },
+  'infra.security_level_none': { es: 'Sin clasificar', en: 'Unclassified' },
+  'infra.zones_title': { es: 'Zonas', en: 'Zones' },
+  'infra.create_sensor_title': { es: 'Crear sensor', en: 'Create sensor' },
+  'infra.sensor_zone': { es: 'Zona', en: 'Zone' },
+  'infra.sensor_name': { es: 'Nombre', en: 'Name' },
+  'infra.sensor_description': { es: 'Descripción', en: 'Description' },
+  'infra.sensor_kind': { es: 'Tipo', en: 'Kind' },
+  'infra.sensor_kind_live': { es: 'En vivo', en: 'Live' },
+  'infra.sensor_kind_external': { es: 'Externo (solo pcap)', en: 'External (pcap only)' },
+  'infra.sensors_title': { es: 'Sensores', en: 'Sensors' },
+  'orgs.create_title': { es: 'Crear organización', en: 'Create organization' },
+  'orgs.name': { es: 'Nombre', en: 'Name' },
+  'orgs.slug': { es: 'Identificador', en: 'Slug' },
+  'orgs.deployment_mode': { es: 'Modo', en: 'Mode' },
+  'orgs.deployment_managed': { es: 'Consola central', en: 'Central console' },
+  'orgs.deployment_self_hosted': { es: 'Auto-alojado', en: 'Self-hosted' },
+  'orgs.admin_username': { es: 'Usuario admin', en: 'Admin username' },
+  'orgs.admin_password': { es: 'Contraseña admin', en: 'Admin password' },
+  'orgs.create_btn': { es: 'Crear', en: 'Create' },
+  'orgs.title': { es: 'Organizaciones', en: 'Organizations' },
 };
 
 function getStoredLocale() {
@@ -861,9 +1095,15 @@ function isAdmin() {
   return !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin');
 }
 
+function isSuperAdmin() {
+  return !!currentUser && currentUser.role === 'super_admin';
+}
+
 function applyRoleVisibility() {
   const admin = isAdmin();
+  const superAdmin = isSuperAdmin();
   $$('.admin-only').forEach(el => el.classList.toggle('hidden', !admin));
+  $$('.super-admin-only').forEach(el => el.classList.toggle('hidden', !superAdmin));
   $$('.viewer-only').forEach(el => el.classList.toggle('hidden', admin));
   $('#nav-users').classList.toggle('hidden', !admin);
 }
@@ -937,6 +1177,10 @@ async function refreshAllData() {
   loadFlows();
   loadFindings();
   if (isAdmin()) loadUsers();
+  loadSites();
+  loadZones();
+  loadSensors();
+  if (isSuperAdmin()) loadOrganizations();
 }
 
 async function autoScanVulnerabilities() {
@@ -1810,6 +2054,199 @@ $('#create-user-btn').addEventListener('click', async () => {
     $('#new-user-password').value = '';
     loadUsers();
   } catch (e) { $('#create-user-error').textContent = e.message; }
+});
+
+// ---------- Infraestructura tab (Sitios / Zonas / Sensores) ----------
+let allSites = [];
+let allZones = [];
+let allSensors = [];
+let allOrganizations = [];
+
+const SENSOR_KIND_LABELS = { live: 'En vivo', external: 'Externo (solo pcap)' };
+
+async function loadSites() {
+  allSites = await api('/api/sites');
+  renderSitesTable();
+  populateSiteSelects();
+}
+
+function renderSitesTable() {
+  const tbody = $('#sites-body');
+  tbody.innerHTML = allSites.map(s => `
+    <tr>
+      <td data-col="nombre">${s.name}</td>
+      <td data-col="ciudad">${s.city || ''}</td>
+      <td data-col="pais">${s.country || ''}</td>
+      <td data-col="zona">${s.timezone || ''}</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin sitios</td></tr>';
+  populateColumnDatalists('sites-body');
+  applyColumnFilters('sites-body');
+}
+
+function populateSiteSelects() {
+  const select = $('#new-zone-site');
+  if (!select) return;
+  const previous = select.value;
+  select.innerHTML = allSites.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  if (previous && allSites.some(s => String(s.id) === previous)) select.value = previous;
+}
+
+async function loadZones() {
+  allZones = await api('/api/zones');
+  renderZonesTable();
+  populateZoneSelects();
+}
+
+function renderZonesTable() {
+  const tbody = $('#zones-body');
+  const siteName = id => (allSites.find(s => s.id === id) || {}).name || `#${id}`;
+  tbody.innerHTML = allZones.map(z => `
+    <tr>
+      <td data-col="sitio">${siteName(z.site_id)}</td>
+      <td data-col="nombre">${z.name}</td>
+      <td data-col="descripcion">${z.description || ''}</td>
+      <td data-col="nivel">${z.security_level || 'Sin clasificar'}</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin zonas</td></tr>';
+  populateColumnDatalists('zones-body');
+  applyColumnFilters('zones-body');
+}
+
+function populateZoneSelects() {
+  const select = $('#new-sensor-zone');
+  if (!select) return;
+  const previous = select.value;
+  const siteName = id => (allSites.find(s => s.id === id) || {}).name || `#${id}`;
+  select.innerHTML = allZones.map(z => `<option value="${z.id}">${siteName(z.site_id)} — ${z.name}</option>`).join('');
+  if (previous && allZones.some(z => String(z.id) === previous)) select.value = previous;
+}
+
+async function loadSensors() {
+  allSensors = await api('/api/sensors');
+  renderSensorsTable();
+}
+
+function renderSensorsTable() {
+  const tbody = $('#sensors-body');
+  const zoneName = id => (allZones.find(z => z.id === id) || {}).name || `#${id}`;
+  tbody.innerHTML = allSensors.map(s => `
+    <tr>
+      <td data-col="zona">${zoneName(s.zone_id)}</td>
+      <td data-col="nombre">${s.name}</td>
+      <td data-col="tipo">${SENSOR_KIND_LABELS[s.kind] || s.kind}</td>
+      <td data-col="descripcion">${s.description || ''}</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin sensores</td></tr>';
+  populateColumnDatalists('sensors-body');
+  applyColumnFilters('sensors-body');
+}
+
+$('#create-site-btn').addEventListener('click', async () => {
+  const name = $('#new-site-name').value.trim();
+  const city = $('#new-site-city').value.trim();
+  const country = $('#new-site-country').value.trim();
+  const timezone = $('#new-site-timezone').value.trim();
+  const organizationSelect = $('#new-site-organization');
+  const payload = { name, city: city || null, country: country || null, timezone: timezone || null };
+  if (isSuperAdmin() && organizationSelect.value) payload.organization_id = Number(organizationSelect.value);
+  $('#create-site-error').textContent = '';
+  try {
+    await api('/api/sites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    $('#new-site-name').value = '';
+    $('#new-site-city').value = '';
+    $('#new-site-country').value = '';
+    $('#new-site-timezone').value = '';
+    loadSites();
+  } catch (e) { $('#create-site-error').textContent = e.message; }
+});
+
+$('#create-zone-btn').addEventListener('click', async () => {
+  const site_id = Number($('#new-zone-site').value);
+  const name = $('#new-zone-name').value.trim();
+  const description = $('#new-zone-description').value.trim();
+  const security_level = $('#new-zone-security-level').value || null;
+  $('#create-zone-error').textContent = '';
+  try {
+    await api('/api/zones', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ site_id, name, description: description || null, security_level }),
+    });
+    $('#new-zone-name').value = '';
+    $('#new-zone-description').value = '';
+    $('#new-zone-security-level').value = '';
+    loadZones();
+  } catch (e) { $('#create-zone-error').textContent = e.message; }
+});
+
+$('#create-sensor-btn').addEventListener('click', async () => {
+  const zone_id = Number($('#new-sensor-zone').value);
+  const name = $('#new-sensor-name').value.trim();
+  const description = $('#new-sensor-description').value.trim();
+  const kind = $('#new-sensor-kind').value;
+  $('#create-sensor-error').textContent = '';
+  try {
+    await api('/api/sensors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zone_id, name, description: description || null, kind }),
+    });
+    $('#new-sensor-name').value = '';
+    $('#new-sensor-description').value = '';
+    loadSensors();
+  } catch (e) { $('#create-sensor-error').textContent = e.message; }
+});
+
+// ---------- Organizaciones tab (Super Admin only) ----------
+async function loadOrganizations() {
+  allOrganizations = await api('/api/organizations');
+  renderOrganizationsTable();
+  populateOrganizationSelect();
+}
+
+function renderOrganizationsTable() {
+  const tbody = $('#orgs-body');
+  const DEPLOYMENT_LABELS = { managed: 'Consola central', self_hosted: 'Auto-alojado' };
+  tbody.innerHTML = allOrganizations.map(o => `
+    <tr>
+      <td data-col="nombre">${o.name}</td>
+      <td data-col="id">${o.slug}</td>
+      <td data-col="modo">${DEPLOYMENT_LABELS[o.deployment_mode] || o.deployment_mode}</td>
+      <td data-col="creado" class="muted">${fmtDate(o.created_at)}</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin organizaciones</td></tr>';
+  populateColumnDatalists('orgs-body');
+  applyColumnFilters('orgs-body');
+}
+
+function populateOrganizationSelect() {
+  const select = $('#new-site-organization');
+  if (!select) return;
+  const previous = select.value;
+  select.innerHTML = allOrganizations.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+  if (previous && allOrganizations.some(o => String(o.id) === previous)) select.value = previous;
+}
+
+$('#create-org-btn').addEventListener('click', async () => {
+  const name = $('#new-org-name').value.trim();
+  const slug = $('#new-org-slug').value.trim();
+  const deployment_mode = $('#new-org-deployment-mode').value;
+  const admin_username = $('#new-org-admin-username').value.trim();
+  const admin_password = $('#new-org-admin-password').value;
+  $('#create-org-error').textContent = '';
+  try {
+    await api('/api/organizations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, slug, deployment_mode, admin_username, admin_password }),
+    });
+    $('#new-org-name').value = '';
+    $('#new-org-slug').value = '';
+    $('#new-org-admin-username').value = '';
+    $('#new-org-admin-password').value = '';
+    loadOrganizations();
+  } catch (e) { $('#create-org-error').textContent = e.message; }
 });
 
 $('#theme-switch').addEventListener('click', toggleTheme);
