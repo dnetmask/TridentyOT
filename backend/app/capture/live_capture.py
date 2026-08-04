@@ -31,6 +31,7 @@ from scapy.sendrecv import AsyncSniffer
 
 from app.capture.packet_processor import PacketRecord, process_packet
 from app.db import session_scope
+from app.i18n import bilingual, encode_i18n
 from app.inventory.inventory_service import apply_gateway_detection, ingest_packet_record
 from app.models import CaptureSession
 
@@ -139,12 +140,17 @@ class _CaptureWorker:
             if capture_session is None or capture_session.status != "running":
                 return
             for record in batch:
-                ingest_packet_record(db, record, capture_session_id=self.capture_session_id)
+                ingest_packet_record(
+                    db,
+                    record,
+                    organization_id=capture_session.organization_id,
+                    capture_session_id=self.capture_session_id,
+                )
             # Whole-table pass, not per-packet: the router/NAT gateway
             # pattern (one MAC shared by several public IPs) only shows up
             # once enough distinct public IPs have accumulated, which no
             # single packet's ingest can tell on its own.
-            apply_gateway_detection(db)
+            apply_gateway_detection(db, capture_session.organization_id)
             capture_session.packet_count += len(batch)
             capture_session.dropped_count += dropped
 
@@ -204,4 +210,9 @@ def mark_orphaned_live_sessions_stopped() -> None:
         for session_obj in orphaned:
             session_obj.status = "stopped"
             session_obj.ended_at = now
-            session_obj.error_message = "Interrumpida: el servidor se reinició mientras esta captura estaba activa."
+            session_obj.error_message = encode_i18n(
+                bilingual(
+                    es="Interrumpida: el servidor se reinició mientras esta captura estaba activa.",
+                    en="Interrupted: the server restarted while this capture was active.",
+                )
+            )

@@ -50,7 +50,12 @@ def process_pcap_file(db_session: Session, filepath: str, capture_session: Captu
             for pkt in reader:
                 record = process_packet(pkt)
                 if record is not None:
-                    ingest_packet_record(db_session, record, capture_session_id=capture_session.id)
+                    ingest_packet_record(
+                        db_session,
+                        record,
+                        organization_id=capture_session.organization_id,
+                        capture_session_id=capture_session.id,
+                    )
                 count += 1
                 now = time.monotonic()
                 if now - last_commit >= _PROGRESS_COMMIT_INTERVAL_SECONDS:
@@ -67,7 +72,7 @@ def process_pcap_file(db_session: Session, filepath: str, capture_session: Captu
         # Whole-table pass: the router/NAT gateway pattern (one MAC shared
         # by several public IPs) only shows up once the file has been read
         # in full, not from any single packet.
-        apply_gateway_detection(db_session)
+        apply_gateway_detection(db_session, capture_session.organization_id)
         capture_session.packet_count = count
         capture_session.bytes_processed = capture_session.total_bytes
         capture_session.status = "completed"

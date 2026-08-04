@@ -9,9 +9,10 @@ from app.capture.live_capture import live_capture_manager
 from app.capture.pcap_loader import process_pcap_file
 from app.config import DATA_DIR, DEFAULT_LIVE_CAPTURE_FILTER
 from app.db import get_db, session_scope
+from app.i18n import message
 from app.inventory.inventory_service import purge_capture_session, wipe_all_capture_data
 from app.models import CaptureSession, User
-from app.schemas import CaptureSessionOut, StartLiveCaptureRequest
+from app.schemas import CaptureSessionOut, StartLiveCaptureRequest, capture_session_out
 
 router = APIRouter(prefix="/api/capture", tags=["capture"])
 
@@ -29,24 +30,39 @@ def list_interfaces(_user: User = Depends(get_current_user)):
 
 
 @router.get("/sessions", response_model=list[CaptureSessionOut])
-def list_sessions(db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
-    return db.query(CaptureSession).order_by(CaptureSession.started_at.desc()).all()
+def list_sessions(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    sessions = (
+        db.query(CaptureSession)
+        .filter(CaptureSession.organization_id == user.organization_id)
+        .order_by(CaptureSession.started_at.desc())
+        .all()
+    )
+    return [capture_session_out(s, user.locale) for s in sessions]
+
+
+def _get_own_session(db: Session, user: User, session_id: int) -> CaptureSession:
+    session_obj = (
+        db.query(CaptureSession)
+        .filter(CaptureSession.id == session_id, CaptureSession.organization_id == user.organization_id)
+        .one_or_none()
+    )
+    if session_obj is None:
+        raise HTTPException(status_code=404, detail=message("capture.session_not_found", user.locale))
+    return session_obj
 
 
 @router.get("/sessions/{session_id}", response_model=CaptureSessionOut)
-def get_session(session_id: int, db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
-    session_obj = db.get(CaptureSession, session_id)
-    if session_obj is None:
-        raise HTTPException(status_code=404, detail="Capture session not found")
-    return session_obj
+def get_session(session_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return capture_session_out(_get_own_session(db, user, session_id), user.locale)
 
 
 @router.post("/live/start", response_model=CaptureSessionOut)
 def start_live_capture(
-    payload: StartLiveCaptureRequest, db: Session = Depends(get_db), _user: User = Depends(require_editor)
+    payload: StartLiveCaptureRequest, db: Session = Depends(get_db), user: User = Depends(require_editor)
 ):
     bpf_filter = payload.bpf_filter or DEFAULT_LIVE_CAPTURE_FILTER
     session_obj = CaptureSession(
+        organization_id=user.organization_id,
         name=payload.name or f"live:{payload.interface}",
         source_type="live",
         source=payload.interface,
@@ -66,16 +82,14 @@ def start_live_capture(
         db.commit()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return session_obj
+    return capture_session_out(session_obj, user.locale)
 
 
 @router.post("/live/stop/{session_id}", response_model=CaptureSessionOut)
-def stop_live_capture(session_id: int, db: Session = Depends(get_db), _user: User = Depends(require_editor)):
-    session_obj = db.get(CaptureSession, session_id)
-    if session_obj is None:
-        raise HTTPException(status_code=404, detail="Capture session not found")
+def stop_live_capture(session_id: int, db: Session = Depends(get_db), user: User = Depends(require_editor)):
+    session_obj = _get_own_session(db, user, session_id)
     if session_obj.source_type != "live":
-        raise HTTPException(status_code=400, detail="Session is not a live capture")
+        raise HTTPException(status_code=400, detail=message("capture.not_a_live_session", user.locale))
 
     # Best-effort: if this process is actually tracking a sniffer for it,
     # stop it. If not -- e.g. the server restarted since this session
@@ -88,14 +102,12 @@ def stop_live_capture(session_id: int, db: Session = Depends(get_db), _user: Use
     session_obj.ended_at = datetime.datetime.now(datetime.timezone.utc)
     db.commit()
     db.refresh(session_obj)
-    return session_obj
+    return capture_session_out(session_obj, user.locale)
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
-def delete_session(session_id: int, db: Session = Depends(get_db), _user: User = Depends(require_editor)):
-    session_obj = db.get(CaptureSession, session_id)
-    if session_obj is None:
-        raise HTTPException(status_code=404, detail="Capture session not found")
+def delete_session(session_id: int, db: Session = Depends(get_db), user: User = Depends(require_editor)):
+    session_obj = _get_own_session(db, user, session_id)
 
     if session_obj.source_type == "live":
         live_capture_manager.stop(session_id)  # no-op if not actually tracked
@@ -107,12 +119,13 @@ def delete_session(session_id: int, db: Session = Depends(get_db), _user: User =
 
 
 @router.delete("/wipe")
-def wipe_database(db: Session = Depends(get_db), _user: User = Depends(require_editor)):
+def wipe_database(db: Session = Depends(get_db), user: User = Depends(require_editor)):
     """Clears every capture session, device, protocol, flow, and
-    vulnerability finding, so a completely blank capture can start --
-    user accounts are never touched by this."""
+    vulnerability finding belonging to the caller's organization, so a
+    completely blank capture can start -- user accounts are never touched
+    by this."""
     live_capture_manager.stop_all()
-    counts = wipe_all_capture_data(db)
+    counts = wipe_all_capture_data(db, user.organization_id)
     db.commit()
     return counts
 
@@ -130,7 +143,7 @@ async def upload_pcap(
     background_tasks: BackgroundTasks,
     file: UploadFile,
     db: Session = Depends(get_db),
-    _user: User = Depends(require_editor),
+    user: User = Depends(require_editor),
 ):
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     dest_path = UPLOAD_DIR / f"{uuid4().hex}_{file.filename}"
@@ -138,6 +151,7 @@ async def upload_pcap(
     dest_path.write_bytes(content)
 
     session_obj = CaptureSession(
+        organization_id=user.organization_id,
         name=file.filename or "upload.pcap",
         source_type="pcap",
         source=file.filename or "upload.pcap",
@@ -148,4 +162,4 @@ async def upload_pcap(
     db.refresh(session_obj)
 
     background_tasks.add_task(_process_pcap_background, str(dest_path), session_obj.id)
-    return session_obj
+    return capture_session_out(session_obj, user.locale)

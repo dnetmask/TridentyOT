@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user, require_editor
 from app.db import get_db
+from app.i18n import message
 from app.models import Device, User, VulnerabilityFinding
-from app.schemas import ScanRequest, VulnerabilityFindingOut
+from app.schemas import ScanRequest, VulnerabilityFindingOut, vulnerability_finding_out
 from app.vuln.engine import scan_all_devices, scan_device
 
 router = APIRouter(prefix="/api/vuln", tags=["vulnerabilities"])
@@ -15,21 +16,33 @@ def list_findings(
     severity: str | None = None,
     device_id: int | None = None,
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
-    query = db.query(VulnerabilityFinding).options(joinedload(VulnerabilityFinding.device))
+    query = (
+        db.query(VulnerabilityFinding)
+        .join(Device, VulnerabilityFinding.device_id == Device.id)
+        .filter(Device.organization_id == user.organization_id)
+        .options(joinedload(VulnerabilityFinding.device))
+    )
     if severity:
         query = query.filter(VulnerabilityFinding.severity == severity)
     if device_id:
         query = query.filter(VulnerabilityFinding.device_id == device_id)
-    return query.order_by(VulnerabilityFinding.created_at.desc()).all()
+    findings = query.order_by(VulnerabilityFinding.created_at.desc()).all()
+    return [vulnerability_finding_out(f, user.locale) for f in findings]
 
 
 @router.post("/scan", response_model=list[VulnerabilityFindingOut])
-def trigger_scan(payload: ScanRequest, db: Session = Depends(get_db), _user: User = Depends(require_editor)):
+def trigger_scan(payload: ScanRequest, db: Session = Depends(get_db), user: User = Depends(require_editor)):
     if payload.device_id is not None:
-        device = db.get(Device, payload.device_id)
+        device = (
+            db.query(Device)
+            .filter(Device.id == payload.device_id, Device.organization_id == user.organization_id)
+            .one_or_none()
+        )
         if device is None:
-            raise HTTPException(status_code=404, detail="Device not found")
-        return scan_device(db, device, use_nvd=payload.use_nvd)
-    return scan_all_devices(db, use_nvd=payload.use_nvd)
+            raise HTTPException(status_code=404, detail=message("vuln.device_not_found", user.locale))
+        findings = scan_device(db, device, use_nvd=payload.use_nvd)
+    else:
+        findings = scan_all_devices(db, user.organization_id, use_nvd=payload.use_nvd)
+    return [vulnerability_finding_out(f, user.locale) for f in findings]

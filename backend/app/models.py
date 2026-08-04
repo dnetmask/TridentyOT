@@ -18,10 +18,37 @@ def utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
 
+# Deployment modes an Organization can run under -- see docs on multi-tenant
+# support. "self_hosted" is one org per instance/database (a large client
+# running its own sensor/console); "managed" is one of several orgs sharing
+# a central console instance. Both share the exact same schema: the only
+# difference is how many Organization rows a given deployment ever has.
+DEPLOYMENT_SELF_HOSTED = "self_hosted"
+DEPLOYMENT_MANAGED = "managed"
+
+
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    slug: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    deployment_mode: Mapped[str] = mapped_column(String(16), default=DEPLOYMENT_SELF_HOSTED)
+    # Default locale for new users created under this org; each user can
+    # still override it individually (see User.locale).
+    default_locale: Mapped[str] = mapped_column(String(5), default="es")
+    created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
+
+
 class CaptureSession(Base):
     __tablename__ = "capture_sessions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Nullable at the DB level only because it's added via an additive
+    # ALTER TABLE to databases that predate multi-tenancy (see db.py's
+    # _ensure_default_organization_and_backfill) -- every row, old or new,
+    # always has one in practice, same pattern as Device.capture_session_id.
+    organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), default="")
     source_type: Mapped[str] = mapped_column(String(16))  # "live" | "pcap"
     source: Mapped[str] = mapped_column(String(255))  # interface name or original filename
@@ -52,9 +79,17 @@ class CaptureSession(Base):
 
 class Device(Base):
     __tablename__ = "devices"
-    __table_args__ = (UniqueConstraint("mac", "ip", name="uq_device_mac_ip"),)
+    # Scoped by organization: two different clients' networks can
+    # (and, on shared physical vendor gear, sometimes do) see the exact same
+    # MAC/IP pair without being the same asset -- see
+    # db._rebuild_device_unique_constraint for how a pre-multi-tenant
+    # database's old (mac, ip) index gets migrated to this one.
+    __table_args__ = (UniqueConstraint("organization_id", "mac", "ip", name="uq_device_org_mac_ip"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Nullable at the DB level for the same additive-migration reason as
+    # CaptureSession.organization_id above.
+    organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id"), nullable=True, index=True)
     mac: Mapped[str | None] = mapped_column(String(17), nullable=True, index=True)
     ip: Mapped[str | None] = mapped_column(String(45), nullable=True, index=True)
 
@@ -257,10 +292,19 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Nullable at the DB level for the same additive-migration reason as
+    # CaptureSession.organization_id above. Username stays globally unique
+    # (not scoped per-org) for now -- every deployment today has exactly one
+    # organization; per-org username scoping is follow-up work for when a
+    # single instance actually serves more than one (see roadmap).
+    organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id"), nullable=True, index=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     password_salt: Mapped[str] = mapped_column(String(32))
     password_hash: Mapped[str] = mapped_column(String(64))
     role: Mapped[str] = mapped_column(String(16))  # "editor" | "viewer"
+    # UI/evidence text language preference -- see app/i18n. Defaults to "es"
+    # on creation; changeable by the user themself via PATCH /api/auth/me.
+    locale: Mapped[str] = mapped_column(String(5), default="es")
     created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
 
     tokens: Mapped[list["AuthToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")

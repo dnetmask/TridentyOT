@@ -2,7 +2,7 @@ import logging
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, event, inspect, text
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import DATABASE_URL
 
@@ -107,11 +107,89 @@ def _add_missing_columns() -> None:
                         )
 
 
+def _ensure_default_organization_and_backfill() -> None:
+    """`organization_id` on User/CaptureSession/Device is a column that, on
+    a database created before multi-tenant support existed, _add_missing_
+    columns() above just added as NULL (there's no scalar default like 0/""
+    to backfill an FK with). This is the org-specific follow-up: make sure
+    at least one Organization row exists -- creating a default one on first
+    startup, exactly like seed_default_admin() does for the admin user --
+    and point every NULL organization_id at it. Idempotent: a no-op once
+    nothing is left to backfill, same as _add_missing_columns.
+    """
+    from app.models import CaptureSession, Device, Organization, User
+
+    # Session(engine), not SessionLocal(): SessionLocal is a sessionmaker
+    # bound once at import time to whatever engine object existed *then* --
+    # rebinding the module-level `engine` name afterward (as tests that
+    # monkeypatch db_module.engine do) doesn't change what it's bound to.
+    # Session(engine) resolves the current `engine` global at call time,
+    # same as inspect(engine)/engine.begin() elsewhere in this module.
+    with Session(engine) as session:
+        org = session.query(Organization).order_by(Organization.id.asc()).first()
+        if org is None:
+            org = Organization(name="Default Organization", slug="default")
+            session.add(org)
+            session.flush()
+            logger.info("Migrating schema: created default organization (id=%s)", org.id)
+
+        for model in (User, CaptureSession, Device):
+            result = session.query(model).filter(model.organization_id.is_(None)).update(
+                {"organization_id": org.id}, synchronize_session=False
+            )
+            if result:
+                logger.info(
+                    "Migrating schema: backfilled %d row(s) in %s.organization_id to org %d",
+                    result,
+                    model.__tablename__,
+                    org.id,
+                )
+        session.commit()
+
+
+def _rebuild_device_unique_constraint() -> None:
+    """devices used to be unique on (mac, ip) alone; multi-tenancy needs
+    (organization_id, mac, ip) instead, since two different organizations'
+    networks can see the same MAC/IP pair without being the same asset.
+    `Base.metadata.create_all()` never alters an existing table's
+    constraints, so a database that still has the old index needs it
+    swapped explicitly -- a brand-new database already gets the new
+    definition straight from create_all() and this is a same-name no-op
+    for it.
+    """
+    inspector = inspect(engine)
+    if "devices" not in inspector.get_table_names():
+        return
+
+    names = {uc["name"] for uc in inspector.get_unique_constraints("devices")}
+    names |= {ix["name"] for ix in inspector.get_indexes("devices")}
+    if "uq_device_org_mac_ip" in names:
+        return
+
+    with engine.begin() as conn:
+        if "uq_device_mac_ip" in names:
+            logger.info("Migrating schema: rebuilding devices unique constraint to include organization_id")
+            # engine.dialect.name, not DATABASE_URL.startswith(...): this
+            # function operates on whatever `engine` currently is (see
+            # inspect(engine)/engine.begin() above), which a test can point
+            # at a different database than the one DATABASE_URL --
+            # resolved once, at module import time -- still describes.
+            if engine.dialect.name == "sqlite":
+                conn.execute(text("DROP INDEX IF EXISTS uq_device_mac_ip"))
+            else:
+                conn.execute(text("ALTER TABLE devices DROP CONSTRAINT IF EXISTS uq_device_mac_ip"))
+        conn.execute(
+            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_device_org_mac_ip ON devices (organization_id, mac, ip)")
+        )
+
+
 def init_db() -> None:
     from app import models  # noqa: F401  (ensure models are registered)
 
     Base.metadata.create_all(bind=engine)
     _add_missing_columns()
+    _ensure_default_organization_and_backfill()
+    _rebuild_device_unique_constraint()
 
 
 @contextmanager

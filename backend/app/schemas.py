@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.i18n import render_i18n
+
 
 class DeviceProtocolOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -140,6 +142,7 @@ class UserOut(BaseModel):
     id: int
     username: str
     role: str
+    locale: str
     created_at: datetime.datetime
 
 
@@ -164,3 +167,50 @@ class UserUpdateRequest(BaseModel):
 
     password: str | None = Field(default=None, min_length=4, max_length=256)
     role: Literal["editor", "viewer"] | None = None
+
+
+class UserSelfUpdateRequest(BaseModel):
+    """Fields any authenticated user (editor or viewer) can change about
+    their own account, as opposed to UserUpdateRequest which is
+    editor-only and can target any user."""
+
+    locale: Literal["es", "en"] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Locale-aware response construction.
+#
+# device_type_evidence / title / description / evidence are stored as
+# app.i18n-encoded JSON (see fingerprint/device_classifier.py, identity_
+# detect.py, vuln/rules.py, vuln/engine.py) so one row serves every locale.
+# These helpers render that JSON into the requesting user's language at
+# response time, in place of the plain from_attributes conversion the
+# *Out models would otherwise do on their own.
+# ---------------------------------------------------------------------------
+
+
+def device_out(device, locale: str) -> DeviceOut:
+    data = DeviceOut.model_validate(device).model_dump()
+    data["device_type_evidence"] = render_i18n(device.device_type_evidence, locale)
+    return DeviceOut(**data)
+
+
+def device_detail_out(device, locale: str) -> DeviceDetailOut:
+    data = DeviceDetailOut.model_validate(device).model_dump()
+    data["device_type_evidence"] = render_i18n(device.device_type_evidence, locale)
+    data["findings"] = [vulnerability_finding_out(f, locale).model_dump() for f in device.findings]
+    return DeviceDetailOut(**data)
+
+
+def vulnerability_finding_out(finding, locale: str) -> VulnerabilityFindingOut:
+    data = VulnerabilityFindingOut.model_validate(finding).model_dump()
+    data["title"] = render_i18n(finding.title, locale)
+    data["description"] = render_i18n(finding.description, locale)
+    data["evidence"] = render_i18n(finding.evidence, locale)
+    return VulnerabilityFindingOut(**data)
+
+
+def capture_session_out(session_obj, locale: str) -> CaptureSessionOut:
+    data = CaptureSessionOut.model_validate(session_obj).model_dump()
+    data["error_message"] = render_i18n(session_obj.error_message, locale)
+    return CaptureSessionOut(**data)

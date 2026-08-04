@@ -45,6 +45,7 @@ from scapy.layers.inet import TCP, UDP
 from scapy.packet import Packet
 
 from app.fingerprint.device_classifier import HMI, NETWORK_DEVICE, PLC
+from app.i18n import bilingual, encode_i18n
 
 try:
     from scapy.contrib.enipTCP import ENIPTCP, ENIPListIdentityItem, _deviceTypeList
@@ -143,16 +144,16 @@ def extract_enip_identity(pkt: Packet) -> IdentityHint | None:
         return None
 
     mapped_type, mapped_secondary = _CIP_DEVICE_TYPE_MAP.get(device_type_name, (None, None))
-    bits = ["Identidad EtherNet/IP (CIP)"]
+    bits = [bilingual(es="Identidad EtherNet/IP (CIP)", en="EtherNet/IP (CIP) identity")]
     if device_type_name:
-        bits.append(f'tipo declarado "{device_type_name}"')
+        bits.append(bilingual(es=f'tipo declarado "{device_type_name}"', en=f'declared type "{device_type_name}"'))
     if product_name:
-        bits.append(f'producto "{product_name}"')
+        bits.append(bilingual(es=f'producto "{product_name}"', en=f'product "{product_name}"'))
     return IdentityHint(
         hostname=product_name or None,
         device_type=mapped_type,
         device_type_secondary=mapped_secondary,
-        evidence="; ".join(bits),
+        evidence=encode_i18n(*bits),
     )
 
 
@@ -193,12 +194,17 @@ def extract_modbus_identity(pkt: Packet) -> IdentityHint | None:
     if not vendor and not product:
         return None
 
-    bits = ["Identificación de dispositivo Modbus (función 0x2B/0x0E)"]
+    bits = [
+        bilingual(
+            es="Identificación de dispositivo Modbus (función 0x2B/0x0E)",
+            en="Modbus device identification (function 0x2B/0x0E)",
+        )
+    ]
     if vendor:
-        bits.append(f'fabricante "{vendor}"')
+        bits.append(bilingual(es=f'fabricante "{vendor}"', en=f'vendor "{vendor}"'))
     if product:
-        bits.append(f'producto "{product}"')
-    return IdentityHint(vendor=vendor, hostname=product, evidence="; ".join(bits))
+        bits.append(bilingual(es=f'producto "{product}"', en=f'product "{product}"'))
+    return IdentityHint(vendor=vendor, hostname=product, evidence=encode_i18n(*bits))
 
 
 def extract_modbus_legacy_slave_id(pkt: Packet) -> IdentityHint | None:
@@ -218,7 +224,13 @@ def extract_modbus_legacy_slave_id(pkt: Packet) -> IdentityHint | None:
     if not raw:
         return None
     return IdentityHint(
-        hostname=raw, evidence=f'Identificación de dispositivo Modbus (Report Slave ID): "{raw}"'
+        hostname=raw,
+        evidence=encode_i18n(
+            bilingual(
+                es=f'Identificación de dispositivo Modbus (Report Slave ID): "{raw}"',
+                en=f'Modbus device identification (Report Slave ID): "{raw}"',
+            )
+        ),
     )
 
 
@@ -236,7 +248,12 @@ def extract_dhcp_vendor_class(pkt: Packet) -> IdentityHint | None:
             if vendor_class:
                 return IdentityHint(
                     vendor=vendor_class,
-                    evidence=f'DHCP Vendor Class Identifier (opción 60): "{vendor_class}"',
+                    evidence=encode_i18n(
+                        bilingual(
+                            es=f'DHCP Vendor Class Identifier (opción 60): "{vendor_class}"',
+                            en=f'DHCP Vendor Class Identifier (option 60): "{vendor_class}"',
+                        )
+                    ),
                 )
     return None
 
@@ -269,10 +286,10 @@ def extract_http_identity(pkt: Packet) -> IdentityHint | None:
         return None
     bits = []
     if server:
-        bits.append(f'encabezado HTTP Server: "{server}"')
+        bits.append(bilingual(es=f'encabezado HTTP Server: "{server}"', en=f'HTTP Server header: "{server}"'))
     if title:
-        bits.append(f'título de página: "{title}"')
-    return IdentityHint(vendor=server or None, hostname=title or None, evidence="; ".join(bits))
+        bits.append(bilingual(es=f'título de página: "{title}"', en=f'page title: "{title}"'))
+    return IdentityHint(vendor=server or None, hostname=title or None, evidence=encode_i18n(*bits))
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +314,12 @@ def extract_ssdp_identity(pkt: Packet) -> IdentityHint | None:
     server = _decode(server_match.group(1)).strip()
     if not server:
         return None
-    return IdentityHint(vendor=server, evidence=f'SSDP/UPnP encabezado Server: "{server}"')
+    return IdentityHint(
+        vendor=server,
+        evidence=encode_i18n(
+            bilingual(es=f'SSDP/UPnP encabezado Server: "{server}"', en=f'SSDP/UPnP Server header: "{server}"')
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -350,12 +372,12 @@ def extract_mdns_txt_identity(pkt: Packet) -> IdentityHint | None:
         vendor = pairs.get("manufacturer") or pairs.get("vendor") or pairs.get("usb_mfg")
         if not model and not vendor:
             continue
-        bits = ["mDNS TXT"]
+        bits = [bilingual(es="mDNS TXT", en="mDNS TXT")]
         if vendor:
-            bits.append(f'fabricante "{vendor}"')
+            bits.append(bilingual(es=f'fabricante "{vendor}"', en=f'vendor "{vendor}"'))
         if model:
-            bits.append(f'modelo "{model}"')
-        return IdentityHint(vendor=vendor or None, hostname=model or None, evidence="; ".join(bits))
+            bits.append(bilingual(es=f'modelo "{model}"', en=f'model "{model}"'))
+        return IdentityHint(vendor=vendor or None, hostname=model or None, evidence=encode_i18n(*bits))
     return None
 
 
@@ -407,7 +429,12 @@ def extract_s7comm_identity(pkt: Packet) -> IdentityHint | None:
         vendor="Siemens AG",
         hostname=order_code,
         device_type=PLC,
-        evidence=f'S7comm: código de referencia Siemens en respuesta SZL: "{order_code}"',
+        evidence=encode_i18n(
+            bilingual(
+                es=f'S7comm: código de referencia Siemens en respuesta SZL: "{order_code}"',
+                en=f'S7comm: Siemens order code in SZL response: "{order_code}"',
+            )
+        ),
     )
 
 
@@ -496,12 +523,17 @@ def extract_bacnet_identity(pkt: Packet) -> IdentityHint | None:
 
     if device_instance is None and vendor_id is None:
         return None
-    bits = ["BACnet I-Am"]
+    bits = [bilingual(es="BACnet I-Am", en="BACnet I-Am")]
     if device_instance is not None:
-        bits.append(f"instancia de dispositivo {device_instance}")
+        bits.append(bilingual(es=f"instancia de dispositivo {device_instance}", en=f"device instance {device_instance}"))
     if vendor_id is not None:
-        bits.append(f"ID de fabricante BACnet {vendor_id} (consultar el registro de fabricantes de ASHRAE)")
-    return IdentityHint(evidence="; ".join(bits))
+        bits.append(
+            bilingual(
+                es=f"ID de fabricante BACnet {vendor_id} (consultar el registro de fabricantes de ASHRAE)",
+                en=f"BACnet vendor ID {vendor_id} (look up in ASHRAE's vendor registry)",
+            )
+        )
+    return IdentityHint(evidence=encode_i18n(*bits))
 
 
 _EXTRACTORS = (

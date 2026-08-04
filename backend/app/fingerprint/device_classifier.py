@@ -20,6 +20,8 @@ certainty.
 
 from dataclasses import dataclass, field
 
+from app.i18n import bilingual
+
 PLC = "plc"
 HMI = "hmi"
 SERVER = "server"
@@ -121,7 +123,9 @@ _CONFIDENCE_SATURATION = 4.0
 class DeviceTypeGuess:
     device_type: str
     confidence: float  # 0.0 - 1.0
-    evidence: list[str] = field(default_factory=list)
+    # Each item is a bilingual() dict -- see app.i18n -- ready to be passed
+    # straight to encode_i18n() for storage in Device.device_type_evidence.
+    evidence: list[dict] = field(default_factory=list)
     device_type_secondary: str | None = None
 
 
@@ -170,12 +174,17 @@ def classify_device_type(
     server_protocol_count: int,
 ) -> DeviceTypeGuess:
     scores = {PLC: 0.0, HMI: 0.0, SERVER: 0.0, WORKSTATION: 0.0, NETWORK_DEVICE: 0.0, OTHER: 0.0}
-    evidence: list[str] = []
+    evidence: list[dict] = []
     subtype_hint: str | None = None
 
     if os_signature == "cdp_lldp_announcement":
         scores[NETWORK_DEVICE] += 3.0
-        evidence.append("Se anuncia activamente como switch/router (CDP/LLDP)")
+        evidence.append(
+            bilingual(
+                es="Se anuncia activamente como switch/router (CDP/LLDP)",
+                en="Actively announces itself as a switch/router (CDP/LLDP)",
+            )
+        )
 
     if has_ot_server_protocol:
         # A device serving Modbus/S7comm/... from a general-purpose OS is
@@ -185,34 +194,50 @@ def classify_device_type(
         if os_signature in ("windows", "linux"):
             scores[HMI] += 3.0
             evidence.append(
-                "Sirve un protocolo industrial pero corre en un SO de propósito general "
-                "(Windows/Linux) -- HMI/estación SCADA, no un PLC embebido"
+                bilingual(
+                    es="Sirve un protocolo industrial pero corre en un SO de propósito general "
+                    "(Windows/Linux) -- HMI/estación SCADA, no un PLC embebido",
+                    en="Serves an industrial protocol but runs on a general-purpose OS "
+                    "(Windows/Linux) -- HMI/SCADA workstation, not an embedded PLC",
+                )
             )
         else:
             scores[PLC] += 3.0
-            evidence.append("Sirve un protocolo industrial (Modbus/S7comm/EtherNet-IP/DNP3/...)")
+            evidence.append(
+                bilingual(
+                    es="Sirve un protocolo industrial (Modbus/S7comm/EtherNet-IP/DNP3/...)",
+                    en="Serves an industrial protocol (Modbus/S7comm/EtherNet-IP/DNP3/...)",
+                )
+            )
 
     vendor_cat = _vendor_category(vendor)
     if vendor_cat == PLC:
         scores[PLC] += 2.0
-        evidence.append(f'Fabricante industrial ("{vendor}")')
+        evidence.append(bilingual(es=f'Fabricante industrial ("{vendor}")', en=f'Industrial vendor ("{vendor}")'))
     elif vendor_cat == NETWORK_DEVICE:
         scores[NETWORK_DEVICE] += 2.0
-        evidence.append(f'Fabricante de redes ("{vendor}")')
+        evidence.append(bilingual(es=f'Fabricante de redes ("{vendor}")', en=f'Networking vendor ("{vendor}")'))
     elif vendor_cat == HMI:
         scores[HMI] += 2.0
-        evidence.append(f'Fabricante de HMI ("{vendor}")')
+        evidence.append(bilingual(es=f'Fabricante de HMI ("{vendor}")', en=f'HMI vendor ("{vendor}")'))
     elif vendor_cat == SERVER:
         scores[SERVER] += 2.0
-        evidence.append(f'Fabricante de virtualización ("{vendor}") -- interfaz de máquina virtual')
+        evidence.append(
+            bilingual(
+                es=f'Fabricante de virtualización ("{vendor}") -- interfaz de máquina virtual',
+                en=f'Virtualization vendor ("{vendor}") -- virtual machine NIC',
+            )
+        )
     elif vendor_cat == OTHER:
         scores[OTHER] += 2.0
         subtype_hint = TRANSPORT_CONTROLLER
-        evidence.append(f'Fabricante de transportadores ("{vendor}")')
+        evidence.append(
+            bilingual(es=f'Fabricante de transportadores ("{vendor}")', en=f'Conveyor/transport vendor ("{vendor}")')
+        )
     elif vendor_cat == "it":
         scores[SERVER] += 0.5
         scores[WORKSTATION] += 0.5
-        evidence.append(f'Fabricante IT genérico ("{vendor}")')
+        evidence.append(bilingual(es=f'Fabricante IT genérico ("{vendor}")', en=f'Generic IT vendor ("{vendor}")'))
 
     host_cat = _hostname_category(hostname)
     # Weighted slightly above a vendor-only match: a site's own naming
@@ -222,30 +247,55 @@ def classify_device_type(
     # than a PLC, so a hostname match should win a tie against vendor alone.
     if host_cat == HMI:
         scores[HMI] += 2.5
-        evidence.append(f'Nombre sugiere HMI ("{hostname}")')
+        evidence.append(bilingual(es=f'Nombre sugiere HMI ("{hostname}")', en=f'Hostname suggests HMI ("{hostname}")'))
     elif host_cat == PLC:
         scores[PLC] += 2.5
-        evidence.append(f'Nombre sugiere PLC/RTU ("{hostname}")')
+        evidence.append(
+            bilingual(es=f'Nombre sugiere PLC/RTU ("{hostname}")', en=f'Hostname suggests PLC/RTU ("{hostname}")')
+        )
     elif host_cat == SERVER:
         scores[SERVER] += 2.5
-        evidence.append(f'Nombre sugiere servidor ("{hostname}")')
+        evidence.append(
+            bilingual(es=f'Nombre sugiere servidor ("{hostname}")', en=f'Hostname suggests server ("{hostname}")')
+        )
     elif host_cat == WORKSTATION:
         scores[WORKSTATION] += 2.5
-        evidence.append(f'Nombre sugiere estación de trabajo ("{hostname}")')
+        evidence.append(
+            bilingual(
+                es=f'Nombre sugiere estación de trabajo ("{hostname}")',
+                en=f'Hostname suggests workstation ("{hostname}")',
+            )
+        )
     elif host_cat == NETWORK_DEVICE:
         scores[NETWORK_DEVICE] += 2.5
-        evidence.append(f'Nombre sugiere equipo de red ("{hostname}")')
+        evidence.append(
+            bilingual(
+                es=f'Nombre sugiere equipo de red ("{hostname}")', en=f'Hostname suggests network device ("{hostname}")'
+            )
+        )
 
     if os_signature == "embedded_ot":
         scores[PLC] += 1.0
-        evidence.append("Pila TCP/IP embebida, sin extensiones modernas (SACK/timestamps/wscale)")
+        evidence.append(
+            bilingual(
+                es="Pila TCP/IP embebida, sin extensiones modernas (SACK/timestamps/wscale)",
+                en="Embedded TCP/IP stack, missing modern extensions (SACK/timestamps/wscale)",
+            )
+        )
     elif os_signature in ("windows", "linux", "bsd_macos"):
         if server_protocol_count >= _MANY_SERVER_PROTOCOLS_THRESHOLD:
             scores[SERVER] += 1.5
-            evidence.append(f"Sirve {server_protocol_count} protocolos distintos (típico de servidor)")
+            evidence.append(
+                bilingual(
+                    es=f"Sirve {server_protocol_count} protocolos distintos (típico de servidor)",
+                    en=f"Serves {server_protocol_count} distinct protocols (typical of a server)",
+                )
+            )
         elif server_protocol_count == 0:
             scores[WORKSTATION] += 1.0
-            evidence.append("Solo actúa como cliente, no expone servicios")
+            evidence.append(
+                bilingual(es="Solo actúa como cliente, no expone servicios", en="Only acts as a client, exposes no services")
+            )
 
     best_type = max(scores, key=scores.get)
     best_score = scores[best_type]

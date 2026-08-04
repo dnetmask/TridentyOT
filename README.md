@@ -106,6 +106,14 @@ ya capturado, y a partir de eso construye:
 6. **Usuarios y control de acceso**: login con usuario/contraseña, dos perfiles —**editor**
    (control total) y **visualizador** (solo lectura)—. Al primer arranque se crea el usuario
    `admin`/`admin` (perfil editor); cámbialo cuanto antes desde la pestaña **Usuarios**.
+7. **Multi-organización e idioma**: el esquema de base de datos está preparado desde ya para dos
+   topologías de despliegue -- un cliente grande que **auto-aloja** su propia instancia (una sola
+   `Organization`, creada automáticamente en el primer arranque) o una futura **consola central**
+   con varias organizaciones compartiendo una misma instancia/base de datos. Todo dato de captura
+   (dispositivos, sesiones, hallazgos) queda asociado a su organización y las consultas de la API
+   nunca cruzan esa frontera (ver `tests/test_multi_tenancy.py`). Cada usuario tiene además un
+   idioma preferido (**español** o **inglés**, ver más abajo) que se aplica tanto a la interfaz
+   como al texto que generan los motores de fingerprint/vulnerabilidades.
 
 ## Estructura
 
@@ -156,11 +164,16 @@ Abre `http://localhost:8000` para el dashboard. La documentación interactiva de
 docker compose up -d --build
 ```
 
-Esto construye la imagen desde `backend/Dockerfile` (Python 3.11 + FastAPI + Scapy + libpcap/tcpdump)
-y publica el dashboard/API en `http://localhost:8000`. La base de datos SQLite y los archivos
-`.pcap` subidos quedan en el volumen con nombre `tridentyot_data`, por lo que sobreviven a
-`docker compose down` y a reinicios del contenedor (verificado: los dispositivos y hallazgos siguen
-ahí después de un `docker restart`).
+Esto levanta dos servicios: `db` (Postgres 16, la base de datos primaria de la app) y `tridentyot`
+(la imagen construida desde `backend/Dockerfile`: Python 3.11 + FastAPI + Scapy + libpcap/tcpdump),
+publicando el dashboard/API en `http://localhost:8000`. Los datos de Postgres y los archivos
+`.pcap` subidos quedan en los volúmenes con nombre `tridentyot_pgdata`/`tridentyot_data`, por lo que
+sobreviven a `docker compose down` y a reinicios del contenedor (verificado: los dispositivos y
+hallazgos siguen ahí después de un `docker restart`).
+
+Un sensor de un solo cliente que prefiera no operar un servidor Postgres propio puede seguir
+usando SQLite en su lugar -- ver `TRIDENTYOT_DATABASE_URL` en la tabla de variables de entorno más
+abajo; en ese caso el servicio `db` puede quitarse del compose.
 
 ```bash
 docker compose logs -f tridentyot   # ver logs
@@ -270,6 +283,22 @@ curl -X POST http://localhost:8000/api/vuln/scan \
 
 `use_nvd: false` limita el escaneo a las reglas locales (sin salir a internet).
 
+### Idioma (español/inglés)
+
+El dashboard tiene un interruptor de idioma en la barra lateral (junto al de tema claro/oscuro)
+que traduce la navegación, títulos de sección, encabezados de tabla y formularios entre **español**
+y **inglés**. La elección se guarda en la cuenta del usuario (`PATCH /api/auth/me`, campo `locale`)
+y se aplica también al texto que generan los motores de fingerprint y vulnerabilidades
+(`device_type_evidence`, título/descripción/evidencia de cada hallazgo) -- ese texto se guarda una
+sola vez en ambos idiomas y se traduce al vuelo según quién lo consulte, así que dos usuarios de la
+misma organización pueden ver el mismo hallazgo cada uno en su propio idioma. Las descripciones de
+CVE que vienen directamente de NVD no se traducen (son texto de un tercero, siempre en inglés).
+Cobertura actual: la interfaz estática (menú, títulos, encabezados, formularios) y todo el texto de
+evidencia/hallazgos generado por el backend están cubiertos; algunas etiquetas generadas
+dinámicamente en las tablas (por ejemplo botones "Detener"/"Borrar" o el mensaje de tabla vacía)
+todavía se muestran en español pase lo que pase -- ver `app/i18n` en el backend y el diccionario
+`I18N` en `static/index.html`.
+
 ### Tema claro/oscuro
 
 El dashboard sigue por defecto la preferencia del sistema operativo (`prefers-color-scheme`), y
@@ -310,8 +339,9 @@ PDF**) ya con esa vista lista -- sin depender de ningún servicio externo de gen
 
 | Variable | Descripción | Default |
 |---|---|---|
-| `TRIDENTYOT_DATA_DIR` | Directorio de datos (DB SQLite, archivos pcap subidos) | `backend/data` |
-| `TRIDENTYOT_DATABASE_URL` | URL de SQLAlchemy (soporta Postgres, etc.) | SQLite en `TRIDENTYOT_DATA_DIR` |
+| `TRIDENTYOT_DATA_DIR` | Directorio de archivos pcap subidos (y de la DB si se usa SQLite) | `backend/data` |
+| `TRIDENTYOT_DATABASE_URL` | URL de SQLAlchemy completa; si se define, ignora las variables `TRIDENTYOT_POSTGRES_*` de abajo. Acepta `sqlite:///...` para un despliegue sin Postgres | Postgres armado con las variables `TRIDENTYOT_POSTGRES_*` |
+| `TRIDENTYOT_POSTGRES_HOST` / `_PORT` / `_DB` / `_USER` / `_PASSWORD` | Credenciales de Postgres usadas para construir `TRIDENTYOT_DATABASE_URL` por defecto | `db` / `5432` / `tridentyot` / `tridentyot` / `tridentyot` |
 | `NVD_API_KEY` | API key de NVD (opcional, sube el límite de tasa a 50 req/30s) | — |
 | `NVD_CACHE_TTL_SECONDS` | Tiempo de vida del caché de resultados de NVD | 86400 (24h) |
 | `TRIDENTYOT_DEFAULT_FILTER` | Filtro BPF por defecto para captura en vivo | `ip or arp` |
@@ -327,6 +357,16 @@ dispositivos), sin borrar ni tocar los datos ya existentes. Basta con actualizar
 (`git pull` / reconstruir la imagen Docker) y reiniciar — no hace falta borrar la base de datos.
 Esto cubre columnas nuevas, que es como ha evolucionado el esquema hasta ahora; un cambio más
 profundo (renombrar o eliminar una columna) sí requeriría una migración manual.
+
+Una instalación previa a la organización/multi-tenant (sin columna `organization_id`) se migra
+igual de forma automática y sin intervención: al iniciar, la app crea una `Organization` por
+defecto y le asigna todos los usuarios/dispositivos/sesiones existentes -- una instalación
+de un solo cliente sigue funcionando exactamente igual después de actualizar, sin ningún dato
+visible ni comportamiento distinto (verificado en `tests/test_db_migration.py` contra una base
+con el esquema anterior). Migrar de SQLite a Postgres, en cambio, sí es manual: no hay una
+herramienta de copia de datos entre motores incluida todavía -- para un despliegue nuevo, definir
+`TRIDENTYOT_DATABASE_URL` (o las variables `TRIDENTYOT_POSTGRES_*`) apuntando a Postgres desde el
+primer arranque evita tener que migrar después.
 
 ## Tests
 

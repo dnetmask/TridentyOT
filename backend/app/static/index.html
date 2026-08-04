@@ -320,14 +320,14 @@
     <div class="login-logo">
       <img class="logo-mark" id="login-logo" src="/brand/mark_light.png" alt="TridentyOT" height="68" />
     </div>
-    <h1>Ingresa a TridentyOT</h1>
+    <h1 data-i18n="login.title">Ingresa a TridentyOT</h1>
     <form id="login-form">
-      <label>Usuario</label>
+      <label data-i18n="login.username">Usuario</label>
       <input id="login-username" autocomplete="username" required />
-      <label>Contraseña</label>
+      <label data-i18n="login.password">Contraseña</label>
       <input id="login-password" type="password" autocomplete="current-password" required />
       <div id="login-error"></div>
-      <button type="submit" class="action">Entrar</button>
+      <button type="submit" class="action" data-i18n="login.submit">Entrar</button>
     </form>
   </div>
 </div>
@@ -339,18 +339,25 @@
       <div class="logo-lockup">
         <img class="logo-full" id="sidebar-logo" src="/brand/lockup_light.png" alt="TridentyOT" height="35" />
       </div>
-      <div class="subtitle">Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)</div>
+      <div class="subtitle" data-i18n="app.subtitle">Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)</div>
     </div>
 
     <nav>
-      <button data-tab="capture" class="active">Captura</button>
-      <button data-tab="inventory">Inventario</button>
-      <button data-tab="flows">Flujos</button>
-      <button data-tab="vulns">Vulnerabilidades</button>
-      <button data-tab="users" id="nav-users">Usuarios</button>
+      <button data-tab="capture" class="active" data-i18n="nav.capture">Captura</button>
+      <button data-tab="inventory" data-i18n="nav.inventory">Inventario</button>
+      <button data-tab="flows" data-i18n="nav.flows">Flujos</button>
+      <button data-tab="vulns" data-i18n="nav.vulns">Vulnerabilidades</button>
+      <button data-tab="users" id="nav-users" data-i18n="nav.users">Usuarios</button>
     </nav>
 
     <div class="spacer"></div>
+
+    <div class="theme-toggle">
+      <span id="lang-toggle-label">ES</span>
+      <button class="theme-switch" id="lang-switch" aria-label="Switch language / cambiar idioma" type="button">
+        <span class="knob"></span>
+      </button>
+    </div>
 
     <div class="theme-toggle">
       <span id="theme-toggle-label">Oscuro</span>
@@ -362,7 +369,7 @@
     <div class="user-box">
       <div class="uname" id="current-username">—</div>
       <div class="urole" id="current-role">—</div>
-      <button class="action secondary" id="logout-btn">Cerrar sesión</button>
+      <button class="action secondary" id="logout-btn" data-i18n="nav.logout">Cerrar sesión</button>
     </div>
   </aside>
 
@@ -370,29 +377,29 @@
 
   <section id="tab-capture" class="tab active">
     <div class="card editor-only">
-      <h2>Captura en vivo</h2>
+      <h2 data-i18n="capture.live_title">Captura en vivo</h2>
       <div class="row">
         <div>
-          <label>Interfaz de red</label>
+          <label data-i18n="capture.interface">Interfaz de red</label>
           <select id="iface-select"><option value="">(cargando...)</option></select>
         </div>
         <div>
-          <label>Filtro BPF</label>
+          <label data-i18n="capture.bpf_filter">Filtro BPF</label>
           <input id="bpf-filter" value="ip or arp" size="24" />
         </div>
-        <button class="action" id="start-live-btn">Iniciar captura</button>
+        <button class="action" id="start-live-btn" data-i18n="capture.start">Iniciar captura</button>
       </div>
-      <p class="muted" style="margin-top:10px">
+      <p class="muted" style="margin-top:10px" data-i18n="capture.live_hint">
         Requiere que el proceso tenga permisos de captura raw (root o CAP_NET_RAW) y que libpcap
         esté disponible en el host, además de estar conectado a un puerto SPAN/mirror o al segmento a inspeccionar.
       </p>
     </div>
 
     <div class="card editor-only">
-      <h2>Analizar archivo .pcap / .pcapng</h2>
+      <h2 data-i18n="capture.pcap_title">Analizar archivo .pcap / .pcapng</h2>
       <div id="pcap-dropzone" class="dropzone">
-        Arrastra aquí un archivo <b>.pcap</b>/<b>.pcapng</b>, o
-        <label for="pcap-file" style="color:var(--accent); cursor:pointer; text-decoration:underline;">selecciónalo</label>
+        <span data-i18n="capture.dropzone_text" data-i18n-html>Arrastra aquí un archivo <b>.pcap</b>/<b>.pcapng</b>, o</span>
+        <label for="pcap-file" style="color:var(--accent); cursor:pointer; text-decoration:underline;" data-i18n="capture.dropzone_pick">selecciónalo</label>
         <input type="file" id="pcap-file" accept=".pcap,.pcapng,.cap" style="display:none" />
         <div id="pcap-file-name" class="muted" style="margin-top:8px;"></div>
       </div>
@@ -400,13 +407,13 @@
 
     <div class="card">
       <div class="flex-between">
-        <h2>Sesiones de captura</h2>
-        <button class="action secondary" onclick="clearColumnFilters('sessions-body', renderSessionsTable)">Limpiar filtros</button>
+        <h2 data-i18n="capture.sessions_title">Sesiones de captura</h2>
+        <button class="action secondary" onclick="clearColumnFilters('sessions-body', renderSessionsTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
       </div>
-      <div class="viewer-note viewer-only hidden">Perfil visualizador: solo lectura, no puedes iniciar/detener capturas ni subir archivos.</div>
+      <div class="viewer-note viewer-only hidden" data-i18n="capture.viewer_note">Perfil visualizador: solo lectura, no puedes iniciar/detener capturas ni subir archivos.</div>
       <table>
         <thead>
-        <tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>Origen</th><th>Estado</th><th>Avance</th><th>Paquetes</th><th>Inicio</th><th></th></tr>
+        <tr><th data-i18n="capture.col_id">ID</th><th data-i18n="capture.col_name">Nombre</th><th data-i18n="capture.col_type">Tipo</th><th data-i18n="capture.col_source">Origen</th><th data-i18n="capture.col_status">Estado</th><th data-i18n="capture.col_progress">Avance</th><th data-i18n="capture.col_packets">Paquetes</th><th data-i18n="capture.col_start">Inicio</th><th></th></tr>
         <tr class="filter-row">
           <th data-col="id"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
           <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
@@ -424,42 +431,42 @@
     </div>
 
     <div class="card editor-only" style="border-color:var(--crit);">
-      <h2>Zona de peligro</h2>
-      <p class="muted" style="margin-top:6px;">
+      <h2 data-i18n="capture.danger_title">Zona de peligro</h2>
+      <p class="muted" style="margin-top:6px;" data-i18n="capture.danger_text" data-i18n-html>
         Borra todas las sesiones de captura, dispositivos, protocolos, flujos y hallazgos de
         vulnerabilidades -- para arrancar una captura completamente en blanco. Los usuarios no se
         ven afectados. <b>Esta acción no se puede deshacer.</b>
       </p>
-      <button class="action danger" id="wipe-db-btn" style="margin-top:10px;">Borrar toda la base de datos</button>
+      <button class="action danger" id="wipe-db-btn" style="margin-top:10px;" data-i18n="capture.wipe_btn">Borrar toda la base de datos</button>
     </div>
   </section>
 
   <section id="tab-inventory" class="tab">
     <div class="card">
       <div class="flex-between">
-        <h2>Dispositivos detectados</h2>
+        <h2 data-i18n="inventory.title">Dispositivos detectados</h2>
         <div class="row" style="position:relative;">
           <span id="inventory-refresh-timer" class="refresh-timer"></span>
           <label style="display:inline-flex;align-items:center;gap:6px;margin:0;">
-            <input type="checkbox" id="ot-only-checkbox" style="width:auto" /> Solo dispositivos OT
+            <input type="checkbox" id="ot-only-checkbox" style="width:auto" /> <span data-i18n="inventory.ot_only">Solo dispositivos OT</span>
           </label>
           <label style="display:inline-flex;align-items:center;gap:6px;margin:0;" title="Un equipo se marca Externo cuando nunca se le capturó transmitiendo (sin MAC) y su IP parece pública -- es decir, fuera de esta red, alcanzado solo a través de un router.">
-            <input type="checkbox" id="hide-external-checkbox" style="width:auto" /> Ocultar equipos externos
+            <input type="checkbox" id="hide-external-checkbox" style="width:auto" /> <span data-i18n="inventory.hide_external">Ocultar equipos externos</span>
           </label>
-          <button class="action secondary" onclick="clearColumnFilters('devices-body', renderDevicesTable)">Limpiar filtros</button>
-          <button class="action secondary" id="columns-btn">Columnas</button>
+          <button class="action secondary" onclick="clearColumnFilters('devices-body', renderDevicesTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
+          <button class="action secondary" id="columns-btn" data-i18n="inventory.columns_btn">Columnas</button>
           <div id="columns-panel" class="columns-panel hidden">
-            <div class="columns-panel-title">Columnas visibles</div>
-            <label><input type="checkbox" data-col-toggle="ip" checked /> IP</label>
-            <label><input type="checkbox" data-col-toggle="nombre" checked /> Nombre</label>
-            <label><input type="checkbox" data-col-toggle="tipo" checked /> Tipo</label>
-            <label><input type="checkbox" data-col-toggle="subtipo" checked /> Subtipo</label>
-            <label><input type="checkbox" data-col-toggle="fabricante" checked /> Fabricante</label>
+            <div class="columns-panel-title" data-i18n="inventory.columns_title">Columnas visibles</div>
+            <label><input type="checkbox" data-col-toggle="ip" checked /> <span data-i18n="inventory.col_ip">IP</span></label>
+            <label><input type="checkbox" data-col-toggle="nombre" checked /> <span data-i18n="inventory.col_name">Nombre</span></label>
+            <label><input type="checkbox" data-col-toggle="tipo" checked /> <span data-i18n="inventory.col_type">Tipo</span></label>
+            <label><input type="checkbox" data-col-toggle="subtipo" checked /> <span data-i18n="inventory.col_subtype">Subtipo</span></label>
+            <label><input type="checkbox" data-col-toggle="fabricante" checked /> <span data-i18n="inventory.col_vendor">Fabricante</span></label>
             <label><input type="checkbox" data-col-toggle="mac" checked /> MAC</label>
-            <label><input type="checkbox" data-col-toggle="so" checked /> SO estimado</label>
-            <label><input type="checkbox" data-col-toggle="confianza" checked /> Confianza</label>
-            <label><input type="checkbox" data-col-toggle="protocolos" checked /> Protocolos</label>
-            <label><input type="checkbox" data-col-toggle="visto" checked /> Últ. visto</label>
+            <label><input type="checkbox" data-col-toggle="so" checked /> <span data-i18n="inventory.col_os">SO estimado</span></label>
+            <label><input type="checkbox" data-col-toggle="confianza" checked /> <span data-i18n="inventory.col_confidence">Confianza</span></label>
+            <label><input type="checkbox" data-col-toggle="protocolos" checked /> <span data-i18n="inventory.col_protocols">Protocolos</span></label>
+            <label><input type="checkbox" data-col-toggle="visto" checked /> <span data-i18n="inventory.col_last_seen">Últ. visto</span></label>
           </div>
         </div>
       </div>
@@ -468,9 +475,9 @@
         <table>
           <thead>
           <tr>
-            <th data-col="ip">IP</th><th data-col="nombre">Nombre</th><th data-col="tipo">Tipo</th><th data-col="subtipo">Subtipo</th><th data-col="fabricante">Fabricante</th>
-            <th data-col="mac">MAC</th><th data-col="so">SO estimado</th><th data-col="confianza">Confianza</th>
-            <th data-col="protocolos">Protocolos</th><th data-col="visto">Últ. visto</th>
+            <th data-col="ip" data-i18n="inventory.col_ip">IP</th><th data-col="nombre" data-i18n="inventory.col_name">Nombre</th><th data-col="tipo" data-i18n="inventory.col_type">Tipo</th><th data-col="subtipo" data-i18n="inventory.col_subtype">Subtipo</th><th data-col="fabricante" data-i18n="inventory.col_vendor">Fabricante</th>
+            <th data-col="mac">MAC</th><th data-col="so" data-i18n="inventory.col_os">SO estimado</th><th data-col="confianza" data-i18n="inventory.col_confidence">Confianza</th>
+            <th data-col="protocolos" data-i18n="inventory.col_protocols">Protocolos</th><th data-col="visto" data-i18n="inventory.col_last_seen">Últ. visto</th>
           </tr>
           <tr class="filter-row">
             <th data-col="ip"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
@@ -495,25 +502,25 @@
   <section id="tab-flows" class="tab">
     <div class="card">
       <div class="flex-between">
-        <h2>Flujos (sesiones TCP/UDP) — quién conversa con quién</h2>
+        <h2 data-i18n="flows.title">Flujos (sesiones TCP/UDP) — quién conversa con quién</h2>
         <div class="row">
           <span id="flows-refresh-timer" class="refresh-timer"></span>
           <label style="display:inline-flex;align-items:center;gap:6px;margin:0;" title="Un equipo se marca Externo cuando nunca se le capturó transmitiendo (sin MAC) y su IP parece pública -- es decir, fuera de esta red, alcanzado solo a través de un router.">
-            <input type="checkbox" id="hide-external-flows-checkbox" style="width:auto" /> Ocultar flujos externos
+            <input type="checkbox" id="hide-external-flows-checkbox" style="width:auto" /> <span data-i18n="flows.hide_external">Ocultar flujos externos</span>
           </label>
           <select id="flow-category-filter">
-            <option value="">Todas las categorías</option>
-            <option value="OT">Solo OT</option>
-            <option value="IT">Solo IT</option>
+            <option value="" data-i18n="flows.all_categories">Todas las categorías</option>
+            <option value="OT" data-i18n="flows.ot_only">Solo OT</option>
+            <option value="IT" data-i18n="flows.it_only">Solo IT</option>
           </select>
-          <button class="action secondary" onclick="clearColumnFilters('flows-body', renderFlowsTable)">Limpiar filtros</button>
+          <button class="action secondary" onclick="clearColumnFilters('flows-body', renderFlowsTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
         </div>
       </div>
       <div class="stat-row" id="flows-stats"></div>
       <div class="table-scroll" id="flows-scroll">
         <table>
           <thead>
-          <tr><th>Origen</th><th>Destino</th><th>Protocolo</th><th>Puerto</th><th>Transporte</th><th>Paquetes</th><th>Primero</th><th>Último</th></tr>
+          <tr><th data-i18n="flows.col_source">Origen</th><th data-i18n="flows.col_dest">Destino</th><th data-i18n="flows.col_protocol">Protocolo</th><th data-i18n="flows.col_port">Puerto</th><th data-i18n="flows.col_transport">Transporte</th><th data-i18n="flows.col_packets">Paquetes</th><th data-i18n="flows.col_first">Primero</th><th data-i18n="flows.col_last">Último</th></tr>
           <tr class="filter-row">
             <th data-col="origen"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
             <th data-col="destino"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
@@ -534,27 +541,27 @@
   <section id="tab-vulns" class="tab">
     <div class="card">
       <div class="flex-between">
-        <h2>Hallazgos de vulnerabilidades</h2>
+        <h2 data-i18n="vulns.title">Hallazgos de vulnerabilidades</h2>
         <div class="row">
           <span id="vuln-scan-timer" class="refresh-timer"></span>
           <select id="severity-filter">
-            <option value="">Todas las severidades</option>
+            <option value="" data-i18n="vulns.all_severities">Todas las severidades</option>
             <option value="critical">Critical</option>
             <option value="high">High</option>
             <option value="medium">Medium</option>
             <option value="low">Low</option>
             <option value="info">Info</option>
           </select>
-          <button class="action secondary" onclick="clearColumnFilters('findings-body', renderFindingsTable)">Limpiar filtros</button>
-          <button class="action secondary" id="export-vuln-pdf-btn">Exportar PDF</button>
-          <button class="action editor-only" id="scan-all-btn">Ejecutar escaneo completo</button>
+          <button class="action secondary" onclick="clearColumnFilters('findings-body', renderFindingsTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
+          <button class="action secondary" id="export-vuln-pdf-btn" data-i18n="vulns.export_pdf">Exportar PDF</button>
+          <button class="action editor-only" id="scan-all-btn" data-i18n="vulns.scan_all">Ejecutar escaneo completo</button>
         </div>
       </div>
       <div class="stat-row" id="vulns-stats"></div>
       <div class="table-scroll" id="findings-scroll">
         <table>
           <thead>
-          <tr><th>Severidad</th><th>Dispositivo</th><th>Nombre</th><th>Hallazgo</th><th>Fuente</th><th>Evidencia</th></tr>
+          <tr><th data-i18n="vulns.col_severity">Severidad</th><th data-i18n="vulns.col_device">Dispositivo</th><th data-i18n="vulns.col_name">Nombre</th><th data-i18n="vulns.col_finding">Hallazgo</th><th data-i18n="vulns.col_source">Fuente</th><th data-i18n="vulns.col_evidence">Evidencia</th></tr>
           <tr class="filter-row">
             <th data-col="severidad"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
             <th data-col="dispositivo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
@@ -572,36 +579,36 @@
 
   <section id="tab-users" class="tab">
     <div class="card">
-      <h2>Crear usuario</h2>
+      <h2 data-i18n="users.create_title">Crear usuario</h2>
       <div class="row">
         <div>
-          <label>Usuario</label>
+          <label data-i18n="users.username">Usuario</label>
           <input id="new-user-username" />
         </div>
         <div>
-          <label>Contraseña</label>
+          <label data-i18n="users.password">Contraseña</label>
           <input id="new-user-password" type="password" />
         </div>
         <div>
-          <label>Perfil</label>
+          <label data-i18n="users.role">Perfil</label>
           <select id="new-user-role">
-            <option value="viewer">Visualizador</option>
-            <option value="editor">Editor</option>
+            <option value="viewer" data-i18n="users.role_viewer">Visualizador</option>
+            <option value="editor" data-i18n="users.role_editor">Editor</option>
           </select>
         </div>
-        <button class="action" id="create-user-btn">Crear</button>
+        <button class="action" id="create-user-btn" data-i18n="users.create_btn">Crear</button>
       </div>
       <div id="create-user-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
     </div>
 
     <div class="card">
       <div class="flex-between">
-        <h2>Usuarios</h2>
-        <button class="action secondary" onclick="clearColumnFilters('users-body', renderUsersTable)">Limpiar filtros</button>
+        <h2 data-i18n="users.title">Usuarios</h2>
+        <button class="action secondary" onclick="clearColumnFilters('users-body', renderUsersTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
       </div>
       <table>
         <thead>
-        <tr><th>Usuario</th><th>Perfil</th><th>Creado</th><th></th></tr>
+        <tr><th data-i18n="users.username">Usuario</th><th data-i18n="users.role">Perfil</th><th data-i18n="users.col_created">Creado</th><th></th></tr>
         <tr class="filter-row">
           <th data-col="usuario"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderUsersTable()" /></th>
           <th data-col="perfil"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderUsersTable()" /></th>
@@ -663,7 +670,161 @@ function toggleTheme() {
 // Apply immediately (before login screen renders) to avoid a flash of the wrong theme.
 applyStoredTheme();
 
+// ---------- language (es/en) ----------
+// Covers interface chrome (nav, section titles, table headers, forms) --
+// see [data-i18n] markup above. Content generated at detection time
+// (device_type_evidence, vulnerability title/description/evidence)
+// already comes back translated from the API, per the requesting user's
+// locale -- see app/i18n on the backend. Text built by the render*Table()
+// functions below (status labels, "Detener"/"Borrar" buttons, empty-state
+// messages) is not yet covered by this dictionary and still renders in
+// Spanish regardless of locale.
+const LOCALE_STORAGE_KEY = 'tridentyot_locale';
+
+const I18N = {
+  'app.subtitle': { es: 'Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)', en: 'Passive network inventory and vulnerability analysis (IT/OT)' },
+  'nav.capture': { es: 'Captura', en: 'Capture' },
+  'nav.inventory': { es: 'Inventario', en: 'Inventory' },
+  'nav.flows': { es: 'Flujos', en: 'Flows' },
+  'nav.vulns': { es: 'Vulnerabilidades', en: 'Vulnerabilities' },
+  'nav.users': { es: 'Usuarios', en: 'Users' },
+  'nav.logout': { es: 'Cerrar sesión', en: 'Log out' },
+  'login.title': { es: 'Ingresa a TridentyOT', en: 'Sign in to TridentyOT' },
+  'login.username': { es: 'Usuario', en: 'Username' },
+  'login.password': { es: 'Contraseña', en: 'Password' },
+  'login.submit': { es: 'Entrar', en: 'Sign in' },
+  'common.clear_filters': { es: 'Limpiar filtros', en: 'Clear filters' },
+  'capture.live_title': { es: 'Captura en vivo', en: 'Live capture' },
+  'capture.interface': { es: 'Interfaz de red', en: 'Network interface' },
+  'capture.bpf_filter': { es: 'Filtro BPF', en: 'BPF filter' },
+  'capture.start': { es: 'Iniciar captura', en: 'Start capture' },
+  'capture.live_hint': {
+    es: 'Requiere que el proceso tenga permisos de captura raw (root o CAP_NET_RAW) y que libpcap esté disponible en el host, además de estar conectado a un puerto SPAN/mirror o al segmento a inspeccionar.',
+    en: 'Requires the process to have raw-capture privileges (root or CAP_NET_RAW) and libpcap available on the host, and to be connected to a SPAN/mirror port or the segment being inspected.',
+  },
+  'capture.pcap_title': { es: 'Analizar archivo .pcap / .pcapng', en: 'Analyze a .pcap / .pcapng file' },
+  'capture.dropzone_text': { es: 'Arrastra aquí un archivo <b>.pcap</b>/<b>.pcapng</b>, o', en: 'Drop a <b>.pcap</b>/<b>.pcapng</b> file here, or' },
+  'capture.dropzone_pick': { es: 'selecciónalo', en: 'choose one' },
+  'capture.sessions_title': { es: 'Sesiones de captura', en: 'Capture sessions' },
+  'capture.viewer_note': {
+    es: 'Perfil visualizador: solo lectura, no puedes iniciar/detener capturas ni subir archivos.',
+    en: 'Viewer role: read-only, you cannot start/stop captures or upload files.',
+  },
+  'capture.col_id': { es: 'ID', en: 'ID' },
+  'capture.col_name': { es: 'Nombre', en: 'Name' },
+  'capture.col_type': { es: 'Tipo', en: 'Type' },
+  'capture.col_source': { es: 'Origen', en: 'Source' },
+  'capture.col_status': { es: 'Estado', en: 'Status' },
+  'capture.col_progress': { es: 'Avance', en: 'Progress' },
+  'capture.col_packets': { es: 'Paquetes', en: 'Packets' },
+  'capture.col_start': { es: 'Inicio', en: 'Started' },
+  'capture.danger_title': { es: 'Zona de peligro', en: 'Danger zone' },
+  'capture.danger_text': {
+    es: 'Borra todas las sesiones de captura, dispositivos, protocolos, flujos y hallazgos de vulnerabilidades -- para arrancar una captura completamente en blanco. Los usuarios no se ven afectados. <b>Esta acción no se puede deshacer.</b>',
+    en: 'Deletes every capture session, device, protocol, flow, and vulnerability finding -- for starting a completely blank capture. User accounts are unaffected. <b>This action cannot be undone.</b>',
+  },
+  'capture.wipe_btn': { es: 'Borrar toda la base de datos', en: 'Wipe entire database' },
+  'inventory.title': { es: 'Dispositivos detectados', en: 'Detected devices' },
+  'inventory.ot_only': { es: 'Solo dispositivos OT', en: 'OT devices only' },
+  'inventory.hide_external': { es: 'Ocultar equipos externos', en: 'Hide external devices' },
+  'inventory.columns_btn': { es: 'Columnas', en: 'Columns' },
+  'inventory.columns_title': { es: 'Columnas visibles', en: 'Visible columns' },
+  'inventory.col_ip': { es: 'IP', en: 'IP' },
+  'inventory.col_name': { es: 'Nombre', en: 'Name' },
+  'inventory.col_type': { es: 'Tipo', en: 'Type' },
+  'inventory.col_subtype': { es: 'Subtipo', en: 'Subtype' },
+  'inventory.col_vendor': { es: 'Fabricante', en: 'Vendor' },
+  'inventory.col_os': { es: 'SO estimado', en: 'Estimated OS' },
+  'inventory.col_confidence': { es: 'Confianza', en: 'Confidence' },
+  'inventory.col_protocols': { es: 'Protocolos', en: 'Protocols' },
+  'inventory.col_last_seen': { es: 'Últ. visto', en: 'Last seen' },
+  'flows.title': { es: 'Flujos (sesiones TCP/UDP) — quién conversa con quién', en: 'Flows (TCP/UDP sessions) — who talks to whom' },
+  'flows.hide_external': { es: 'Ocultar flujos externos', en: 'Hide external flows' },
+  'flows.all_categories': { es: 'Todas las categorías', en: 'All categories' },
+  'flows.ot_only': { es: 'Solo OT', en: 'OT only' },
+  'flows.it_only': { es: 'Solo IT', en: 'IT only' },
+  'flows.col_source': { es: 'Origen', en: 'Source' },
+  'flows.col_dest': { es: 'Destino', en: 'Destination' },
+  'flows.col_protocol': { es: 'Protocolo', en: 'Protocol' },
+  'flows.col_port': { es: 'Puerto', en: 'Port' },
+  'flows.col_transport': { es: 'Transporte', en: 'Transport' },
+  'flows.col_packets': { es: 'Paquetes', en: 'Packets' },
+  'flows.col_first': { es: 'Primero', en: 'First' },
+  'flows.col_last': { es: 'Último', en: 'Last' },
+  'vulns.title': { es: 'Hallazgos de vulnerabilidades', en: 'Vulnerability findings' },
+  'vulns.all_severities': { es: 'Todas las severidades', en: 'All severities' },
+  'vulns.export_pdf': { es: 'Exportar PDF', en: 'Export PDF' },
+  'vulns.scan_all': { es: 'Ejecutar escaneo completo', en: 'Run full scan' },
+  'vulns.col_severity': { es: 'Severidad', en: 'Severity' },
+  'vulns.col_device': { es: 'Dispositivo', en: 'Device' },
+  'vulns.col_name': { es: 'Nombre', en: 'Name' },
+  'vulns.col_finding': { es: 'Hallazgo', en: 'Finding' },
+  'vulns.col_source': { es: 'Fuente', en: 'Source' },
+  'vulns.col_evidence': { es: 'Evidencia', en: 'Evidence' },
+  'users.create_title': { es: 'Crear usuario', en: 'Create user' },
+  'users.username': { es: 'Usuario', en: 'Username' },
+  'users.password': { es: 'Contraseña', en: 'Password' },
+  'users.role': { es: 'Perfil', en: 'Role' },
+  'users.role_viewer': { es: 'Visualizador', en: 'Viewer' },
+  'users.role_editor': { es: 'Editor', en: 'Editor' },
+  'users.create_btn': { es: 'Crear', en: 'Create' },
+  'users.title': { es: 'Usuarios', en: 'Users' },
+  'users.col_created': { es: 'Creado', en: 'Created' },
+};
+
+function getStoredLocale() {
+  return localStorage.getItem(LOCALE_STORAGE_KEY); // 'es' | 'en' | null
+}
+
+function currentLocale() {
+  return (currentUser && currentUser.locale) || getStoredLocale() || 'es';
+}
+
+function applyTranslations() {
+  const locale = currentLocale();
+  document.documentElement.lang = locale;
+  $$('[data-i18n]').forEach(el => {
+    const entry = I18N[el.dataset.i18n];
+    if (!entry) return;
+    const text = entry[locale] || entry.es;
+    if (el.hasAttribute('data-i18n-html')) el.innerHTML = text;
+    else el.textContent = text;
+  });
+  updateLangToggleUI();
+}
+
+function updateLangToggleUI() {
+  const isEn = currentLocale() === 'en';
+  const label = $('#lang-toggle-label');
+  if (label) label.textContent = isEn ? 'EN' : 'ES';
+  const switchEl = $('#lang-switch');
+  if (switchEl) switchEl.classList.toggle('is-light', isEn);
+}
+
+async function setLocale(locale) {
+  localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+  if (currentUser) currentUser.locale = locale;
+  applyTranslations();
+  if (getToken()) {
+    try {
+      await api('/api/auth/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locale }),
+      });
+    } catch (e) { /* best-effort: the toggle already applied locally */ }
+  }
+}
+
+function toggleLocale() {
+  setLocale(currentLocale() === 'es' ? 'en' : 'es');
+}
+
 let currentUser = null;
+
+// Apply immediately (before login screen renders), same reasoning as the theme above.
+applyTranslations();
+
 let autoRefreshTimer = null;
 let countdownTimer = null;
 let vulnScanTimer = null;
@@ -749,6 +910,7 @@ async function bootstrapAfterLogin() {
   currentUser = await api('/api/auth/me');
   $('#current-username').textContent = currentUser.username;
   $('#current-role').textContent = currentUser.role === 'editor' ? 'Editor' : 'Visualizador';
+  applyTranslations(); // the account's saved locale (currentUser.locale) now takes over from any local guess
   applyRoleVisibility();
   showAppShell();
   loadInterfaces();
@@ -1629,6 +1791,8 @@ window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', ()
   if (!getStoredTheme()) updateThemeToggleUI();
 });
 updateThemeToggleUI();
+
+$('#lang-switch').addEventListener('click', toggleLocale);
 
 // ---------- boot ----------
 (async function boot() {

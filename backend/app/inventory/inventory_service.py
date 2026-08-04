@@ -22,6 +22,7 @@ from app.fingerprint.os_fingerprint import (
 )
 from app.fingerprint.protocol_detect import OT, PROFINET_OTHER, ProtocolInfo, classify
 from app.fingerprint.vendor_lookup import lookup_vendor
+from app.i18n import bilingual, encode_i18n
 from app.models import CaptureSession, Device, DeviceProtocol, Flow, VulnerabilityFinding, utcnow
 
 _PRINTABLE_BANNER_MIN_RATIO = 0.85
@@ -59,7 +60,11 @@ def _is_real_unicast_mac(mac: str | None) -> bool:
 
 
 def get_or_create_device(
-    session: Session, ip: str | None, mac: str | None, capture_session_id: int | None = None
+    session: Session,
+    ip: str | None,
+    mac: str | None,
+    organization_id: int,
+    capture_session_id: int | None = None,
 ) -> Device | None:
     if mac is not None and not _is_real_unicast_mac(mac):
         mac = None
@@ -71,18 +76,23 @@ def get_or_create_device(
     device = None
     if ip:
         # ip alone isn't actually unique (the DB constraint is on the
-        # (mac, ip) pair, and two NULL macs don't collide under it either)
-        # -- a large/long capture can genuinely produce two rows for the
-        # same ip (e.g. an address briefly reused/conflicting on the LAN,
-        # or two uploads racing each other). Picking the oldest
-        # deterministically instead of one_or_none() means that anomaly
-        # gets tolerated and converged on rather than crashing every
-        # ingest that touches this ip afterwards.
-        device = session.query(Device).filter(Device.ip == ip).order_by(Device.id.asc()).first()
+        # (organization_id, mac, ip) triple, and two NULL macs don't
+        # collide under it either) -- a large/long capture can genuinely
+        # produce two rows for the same ip (e.g. an address briefly
+        # reused/conflicting on the LAN, or two uploads racing each other).
+        # Picking the oldest deterministically instead of one_or_none()
+        # means that anomaly gets tolerated and converged on rather than
+        # crashing every ingest that touches this ip afterwards.
+        device = (
+            session.query(Device)
+            .filter(Device.organization_id == organization_id, Device.ip == ip)
+            .order_by(Device.id.asc())
+            .first()
+        )
     if device is None and mac:
         device = (
             session.query(Device)
-            .filter(Device.mac == mac, Device.ip.is_(None))
+            .filter(Device.organization_id == organization_id, Device.mac == mac, Device.ip.is_(None))
             .order_by(Device.id.asc())
             .first()
         )
@@ -90,6 +100,7 @@ def get_or_create_device(
     now = utcnow()
     if device is None:
         device = Device(
+            organization_id=organization_id,
             ip=ip,
             mac=mac,
             vendor=lookup_vendor(mac),
@@ -149,7 +160,7 @@ def apply_device_type_guess(session: Session, device: Device) -> None:
         return
     device.device_type = guess.device_type
     device.device_type_confidence = guess.confidence
-    device.device_type_evidence = "; ".join(guess.evidence) if guess.evidence else None
+    device.device_type_evidence = encode_i18n(*guess.evidence) if guess.evidence else None
     if guess.device_type_secondary:
         device.device_type_secondary = guess.device_type_secondary
 
@@ -186,7 +197,7 @@ def apply_identity_hints(session: Session, device: Device, hints: list[IdentityH
             device.device_type_evidence = hint.evidence
 
 
-def apply_hostname_hints(session: Session, hints: list[tuple[str, str]]) -> None:
+def apply_hostname_hints(session: Session, hints: list[tuple[str, str]], organization_id: int) -> None:
     """Enriches already-known devices with an auto-detected hostname.
 
     Only updates existing inventory entries -- never creates a device from
@@ -206,11 +217,20 @@ def apply_hostname_hints(session: Session, hints: list[tuple[str, str]]) -> None
             continue
         # ip alone isn't a unique key (see get_or_create_device) -- pick the
         # oldest of any duplicates deterministically rather than crashing.
-        device = session.query(Device).filter(Device.ip == ip).order_by(Device.id.asc()).first()
+        device = (
+            session.query(Device)
+            .filter(Device.organization_id == organization_id, Device.ip == ip)
+            .order_by(Device.id.asc())
+            .first()
+        )
         if device is None or hostname == device.hostname:
             continue
 
-        others = session.query(Device).filter(Device.hostname == hostname, Device.ip != ip).all()
+        others = (
+            session.query(Device)
+            .filter(Device.organization_id == organization_id, Device.hostname == hostname, Device.ip != ip)
+            .all()
+        )
         if others:
             for other in others:
                 other.hostname = None
@@ -227,7 +247,7 @@ def apply_hostname_hints(session: Session, hints: list[tuple[str, str]]) -> None
 _GATEWAY_MIN_PUBLIC_IPS = 2
 
 
-def apply_gateway_detection(session: Session) -> None:
+def apply_gateway_detection(session: Session, organization_id: int) -> None:
     """Detects a router/NAT gateway from a pattern purely-passive capture
     produces: when the gateway forwards a reply from some public-internet
     host onto the LAN, it is transmitting that frame -- so by this app's
@@ -262,7 +282,11 @@ def apply_gateway_detection(session: Session) -> None:
     IPs for the same MAC actually exist, which no single packet can tell
     on its own.
     """
-    devices = session.query(Device).filter(Device.mac.is_not(None)).all()
+    devices = (
+        session.query(Device)
+        .filter(Device.organization_id == organization_id, Device.mac.is_not(None))
+        .all()
+    )
     by_mac: dict[str, list[Device]] = {}
     for d in devices:
         by_mac.setdefault(d.mac, []).append(d)
@@ -279,9 +303,13 @@ def apply_gateway_detection(session: Session) -> None:
         if primary.device_type != NETWORK_DEVICE or primary.device_type_confidence < 1.0:
             primary.device_type = NETWORK_DEVICE
             primary.device_type_confidence = 1.0
-            primary.device_type_evidence = (
-                f"Una misma MAC ({mac}) aparece en {len(public_members)} IPs públicas distintas -- "
-                "consistente con un equipo que enruta/NATea tráfico hacia internet"
+            primary.device_type_evidence = encode_i18n(
+                bilingual(
+                    es=f"Una misma MAC ({mac}) aparece en {len(public_members)} IPs públicas distintas -- "
+                    "consistente con un equipo que enruta/NATea tráfico hacia internet",
+                    en=f"The same MAC ({mac}) appears on {len(public_members)} distinct public IPs -- "
+                    "consistent with a device routing/NAT-ing traffic to the internet",
+                )
             )
         if not primary.device_type_secondary:
             primary.device_type_secondary = ROUTER_NAT
@@ -414,11 +442,12 @@ _CDP_LLDP_GUESS = OsGuess(
 
 
 def ingest_packet_record(
-    session: Session, record: PacketRecord, capture_session_id: int | None = None
+    session: Session, record: PacketRecord, organization_id: int, capture_session_id: int | None = None
 ) -> None:
     if record.transport == "arp":
         device = get_or_create_device(
-            session, ip=record.src_ip, mac=record.src_mac, capture_session_id=capture_session_id
+            session, ip=record.src_ip, mac=record.src_mac, organization_id=organization_id,
+            capture_session_id=capture_session_id,
         )
         if device is not None:
             # A device only ever seen via ARP has no protocol/OS evidence at
@@ -434,7 +463,9 @@ def ingest_packet_record(
         # themselves -- no IP layer involved, so the device is keyed by MAC
         # alone (it'll be merged with an IP-keyed row later if the same MAC
         # is ever seen sending ordinary IP traffic; see get_or_create_device).
-        device = get_or_create_device(session, ip=None, mac=record.src_mac, capture_session_id=capture_session_id)
+        device = get_or_create_device(
+            session, ip=None, mac=record.src_mac, organization_id=organization_id, capture_session_id=capture_session_id
+        )
         if device is not None:
             if record.l2_hostname:
                 device.hostname = record.l2_hostname
@@ -452,7 +483,9 @@ def ingest_packet_record(
         # OT) and left to classify_device_type's existing has_ot_server_
         # protocol rule: no os_signature contradicting it (no TCP/IP stack
         # involved) reads as PLC, exactly right for a PROFINET IO device.
-        device = get_or_create_device(session, ip=None, mac=record.src_mac, capture_session_id=capture_session_id)
+        device = get_or_create_device(
+            session, ip=None, mac=record.src_mac, organization_id=organization_id, capture_session_id=capture_session_id
+        )
         if device is not None:
             if record.l2_hostname:
                 device.hostname = record.l2_hostname
@@ -476,9 +509,12 @@ def ingest_packet_record(
     # only the two-device-dependent bookkeeping below (protocol-as-server,
     # flow) actually needs a real device on both ends.
     src_device = get_or_create_device(
-        session, ip=record.src_ip, mac=record.src_mac, capture_session_id=capture_session_id
+        session, ip=record.src_ip, mac=record.src_mac, organization_id=organization_id,
+        capture_session_id=capture_session_id,
     )
-    dst_device = get_or_create_device(session, ip=record.dst_ip, mac=None, capture_session_id=capture_session_id)
+    dst_device = get_or_create_device(
+        session, ip=record.dst_ip, mac=None, organization_id=organization_id, capture_session_id=capture_session_id
+    )
     session.flush()
 
     # Applied unconditionally on src_device, independent of dst_device --
@@ -554,7 +590,7 @@ def ingest_packet_record(
         )
 
     if record.hostname_hints:
-        apply_hostname_hints(session, record.hostname_hints)
+        apply_hostname_hints(session, record.hostname_hints, organization_id)
 
 
 def purge_capture_session(session: Session, capture_session_id: int) -> None:
@@ -594,6 +630,16 @@ def purge_capture_session(session: Session, capture_session_id: int) -> None:
             .count()
         )
         if remaining_protocols or remaining_flows:
+            # Survives, but its capture_session_id FK still points at the
+            # session about to be deleted -- SQLite silently tolerates that
+            # dangling reference (no FK enforcement without a pragma this
+            # app doesn't set), but Postgres rejects the DELETE outright.
+            # Null it out: the device is now known to span more than one
+            # session, so "which session first discovered it" no longer has
+            # a single correct answer anyway (see docstring).
+            session.query(Device).filter(Device.id == device_id, Device.capture_session_id == capture_session_id).update(
+                {"capture_session_id": None}, synchronize_session=False
+            )
             continue
         session.query(VulnerabilityFinding).filter(VulnerabilityFinding.device_id == device_id).delete(
             synchronize_session=False
@@ -601,22 +647,37 @@ def purge_capture_session(session: Session, capture_session_id: int) -> None:
         session.query(Device).filter(Device.id == device_id).delete(synchronize_session=False)
 
 
-def wipe_all_capture_data(session: Session) -> dict[str, int]:
+def wipe_all_capture_data(session: Session, organization_id: int) -> dict[str, int]:
     """Clears every capture session, device, protocol, flow, and
-    vulnerability finding -- for starting a completely blank capture.
-    User accounts are never touched here: this only ever clears what
-    capturing produced, never who's allowed to use the app.
+    vulnerability finding belonging to one organization -- for starting a
+    completely blank capture. User accounts are never touched here: this
+    only ever clears what capturing produced, never who's allowed to use
+    the app. In a central console serving several organizations, this must
+    never reach beyond the calling organization's own data.
 
     Deletes in FK-safe order (children before the parents they reference)
     rather than looping purge_capture_session per session -- there's no
     "does something else still reference this" case to check when
-    everything is going away at once.
+    everything for this org is going away at once. Child tables
+    (DeviceProtocol/Flow/VulnerabilityFinding) have no organization_id of
+    their own, so they're scoped via a subquery of this org's device ids.
     """
+    device_ids = session.query(Device.id).filter(Device.organization_id == organization_id).scalar_subquery()
     counts = {
-        "findings": session.query(VulnerabilityFinding).delete(synchronize_session=False),
-        "protocols": session.query(DeviceProtocol).delete(synchronize_session=False),
-        "flows": session.query(Flow).delete(synchronize_session=False),
-        "devices": session.query(Device).delete(synchronize_session=False),
-        "sessions": session.query(CaptureSession).delete(synchronize_session=False),
+        "findings": session.query(VulnerabilityFinding)
+        .filter(VulnerabilityFinding.device_id.in_(device_ids))
+        .delete(synchronize_session=False),
+        "protocols": session.query(DeviceProtocol)
+        .filter(DeviceProtocol.device_id.in_(device_ids))
+        .delete(synchronize_session=False),
+        "flows": session.query(Flow)
+        .filter(or_(Flow.device_a_id.in_(device_ids), Flow.device_b_id.in_(device_ids)))
+        .delete(synchronize_session=False),
+        "devices": session.query(Device).filter(Device.organization_id == organization_id).delete(
+            synchronize_session=False
+        ),
+        "sessions": session.query(CaptureSession)
+        .filter(CaptureSession.organization_id == organization_id)
+        .delete(synchronize_session=False),
     }
     return counts

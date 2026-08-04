@@ -31,10 +31,12 @@ def _make_new_device_packets(n):
     ]
 
 
-def test_progress_fields_reach_100_percent_on_completion(db_session, tmp_path):
+def test_progress_fields_reach_100_percent_on_completion(db_session, org_id, tmp_path):
     pcap_path = tmp_path / "progress.pcap"
     wrpcap(str(pcap_path), _make_packets(3))
-    session_obj = CaptureSession(name="progress.pcap", source_type="pcap", source="progress.pcap", status="running")
+    session_obj = CaptureSession(
+        organization_id=org_id, name="progress.pcap", source_type="pcap", source="progress.pcap", status="running"
+    )
     db_session.add(session_obj)
     db_session.commit()
     db_session.refresh(session_obj)
@@ -48,7 +50,7 @@ def test_progress_fields_reach_100_percent_on_completion(db_session, tmp_path):
     assert session_obj.progress_percent == 100.0
 
 
-def test_progress_advances_across_periodic_commits(db_session, tmp_path, monkeypatch):
+def test_progress_advances_across_periodic_commits(db_session, org_id, tmp_path, monkeypatch):
     """With the commit interval forced down to 0s, every packet is past
     the threshold -- bytes_processed should climb monotonically across
     multiple mid-loop commits, not just jump straight from 0 to 100 at the
@@ -58,7 +60,9 @@ def test_progress_advances_across_periodic_commits(db_session, tmp_path, monkeyp
 
     pcap_path = tmp_path / "progress2.pcap"
     wrpcap(str(pcap_path), _make_packets(9))
-    session_obj = CaptureSession(name="progress2.pcap", source_type="pcap", source="progress2.pcap", status="running")
+    session_obj = CaptureSession(
+        organization_id=org_id, name="progress2.pcap", source_type="pcap", source="progress2.pcap", status="running"
+    )
     db_session.add(session_obj)
     db_session.commit()
     db_session.refresh(session_obj)

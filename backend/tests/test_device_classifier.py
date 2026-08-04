@@ -20,7 +20,7 @@ def test_ot_server_protocol_is_near_certain_plc():
     )
     assert guess.device_type == PLC
     assert guess.confidence >= 0.7
-    assert "protocolo industrial" in guess.evidence[0]
+    assert "protocolo industrial" in guess.evidence[0]["es"]
 
 
 def test_cdp_lldp_announcement_is_near_certain_network_device():
@@ -85,7 +85,7 @@ def test_hmi_hostname_alone_suggests_hmi_not_plc():
         server_protocol_count=0,
     )
     assert guess.device_type == HMI
-    assert 'Nombre sugiere HMI ("K787395-HMI01")' in guess.evidence
+    assert any(e["es"] == 'Nombre sugiere HMI ("K787395-HMI01")' for e in guess.evidence)
 
 
 def test_ot_protocol_from_windows_or_linux_is_hmi_not_plc():

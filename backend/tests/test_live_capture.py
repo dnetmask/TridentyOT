@@ -20,9 +20,10 @@ def _make_record(src_ip: str, dst_ip: str, dport: int = 502):
     return process_packet(pkt)
 
 
-def _running_session(db_session) -> CaptureSession:
+def _running_session(db_session, org_id) -> CaptureSession:
     session_obj = CaptureSession(
-        name="live:eth0", source_type="live", source="eth0", status="running", started_at=utcnow()
+        organization_id=org_id, name="live:eth0", source_type="live", source="eth0", status="running",
+        started_at=utcnow(),
     )
     db_session.add(session_obj)
     db_session.commit()
@@ -39,8 +40,8 @@ def _wait_until(predicate, timeout=2.0, interval=0.02):
     return predicate()
 
 
-def test_worker_batches_queued_records_into_the_database(db_session):
-    session_obj = _running_session(db_session)
+def test_worker_batches_queued_records_into_the_database(db_session, org_id):
+    session_obj = _running_session(db_session, org_id)
     worker = _CaptureWorker(session_obj.id, interface="dummy0", bpf_filter=None)
 
     for i in range(5):
@@ -64,8 +65,8 @@ def test_worker_batches_queued_records_into_the_database(db_session):
     assert db_session.query(Device).filter(Device.ip == "10.0.9.200").one_or_none() is not None
 
 
-def test_worker_counts_drops_once_the_queue_is_full(db_session):
-    session_obj = _running_session(db_session)
+def test_worker_counts_drops_once_the_queue_is_full(db_session, org_id):
+    session_obj = _running_session(db_session, org_id)
     worker = _CaptureWorker(session_obj.id, interface="dummy0", bpf_filter=None)
     worker._queue = queue.Queue(maxsize=2)  # force overflow with few packets
 
@@ -92,11 +93,11 @@ def test_worker_counts_drops_once_the_queue_is_full(db_session):
     assert session_obj.dropped_count == 1
 
 
-def test_stop_flushes_whatever_is_still_queued(db_session):
+def test_stop_flushes_whatever_is_still_queued(db_session, org_id):
     """Stopping mid-flight must still ingest everything already queued --
     a capture the operator explicitly stopped shouldn't silently lose the
     last batch just because the consumer hadn't gotten to it yet."""
-    session_obj = _running_session(db_session)
+    session_obj = _running_session(db_session, org_id)
     worker = _CaptureWorker(session_obj.id, interface="dummy0", bpf_filter=None)
 
     for i in range(10):

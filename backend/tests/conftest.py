@@ -31,6 +31,17 @@ def db_session():
 
 
 @pytest.fixture
+def org_id(db_session):
+    """The id of the one Organization init_db()'s startup migration always
+    creates -- every test runs against a single-tenant database, so this is
+    the organization every directly-constructed Device/CaptureSession/call
+    into inventory_service belongs to."""
+    from app.models import Organization
+
+    return db_session.query(Organization).order_by(Organization.id.asc()).first().id
+
+
+@pytest.fixture
 def anonymous_client():
     """A TestClient with no Authorization header at all, for exercising
     401s and the login flow itself."""

@@ -5,8 +5,9 @@ from app.auth.deps import get_current_user, require_editor
 from app.db import get_db
 from app.fingerprint.device_classifier import ROUTER_NAT
 from app.fingerprint.ip_scope import is_lan_ip
+from app.i18n import message
 from app.models import Device, DeviceProtocol, Flow, User
-from app.schemas import DeviceDetailOut, DeviceOut, DeviceUpdateRequest, FlowOut
+from app.schemas import DeviceDetailOut, DeviceOut, DeviceUpdateRequest, FlowOut, device_detail_out, device_out
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"])
 
@@ -17,9 +18,13 @@ def list_devices(
     protocol: str | None = None,
     hide_external: bool = False,
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
-    query = db.query(Device).options(joinedload(Device.protocols))
+    query = (
+        db.query(Device)
+        .options(joinedload(Device.protocols))
+        .filter(Device.organization_id == user.organization_id)
+    )
     if ot_only:
         query = query.filter(Device.is_ot_suspected.is_(True))
     if protocol:
@@ -55,34 +60,31 @@ def list_devices(
                 or is_lan_ip(d.ip)
             ]
         devices = [d for d in devices if not d.is_external]
-    return devices
+    return [device_out(d, user.locale) for d in devices]
 
 
-@router.get("/devices/{device_id}", response_model=DeviceDetailOut)
-def get_device(device_id: int, db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
+def _get_own_device(db: Session, user: User, device_id: int) -> Device:
     device = (
         db.query(Device)
         .options(joinedload(Device.protocols), joinedload(Device.findings))
-        .filter(Device.id == device_id)
+        .filter(Device.id == device_id, Device.organization_id == user.organization_id)
         .one_or_none()
     )
     if device is None:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail=message("inventory.device_not_found", user.locale))
     return device
+
+
+@router.get("/devices/{device_id}", response_model=DeviceDetailOut)
+def get_device(device_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return device_detail_out(_get_own_device(db, user, device_id), user.locale)
 
 
 @router.patch("/devices/{device_id}", response_model=DeviceDetailOut)
 def update_device(
-    device_id: int, payload: DeviceUpdateRequest, db: Session = Depends(get_db), _user: User = Depends(require_editor)
+    device_id: int, payload: DeviceUpdateRequest, db: Session = Depends(get_db), user: User = Depends(require_editor)
 ):
-    device = (
-        db.query(Device)
-        .options(joinedload(Device.protocols), joinedload(Device.findings))
-        .filter(Device.id == device_id)
-        .one_or_none()
-    )
-    if device is None:
-        raise HTTPException(status_code=404, detail="Device not found")
+    device = _get_own_device(db, user, device_id)
 
     updates = payload.model_dump(exclude_unset=True)
     if "custom_name" in updates:
@@ -96,7 +98,7 @@ def update_device(
 
     db.commit()
     db.refresh(device)
-    return device
+    return device_detail_out(device, user.locale)
 
 
 @router.get("/flows", response_model=list[FlowOut])
@@ -104,10 +106,13 @@ def list_flows(
     device_id: int | None = None,
     category: str | None = None,
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
-    query = db.query(Flow).options(
-        joinedload(Flow.device_a), joinedload(Flow.device_b), joinedload(Flow.server_device)
+    query = (
+        db.query(Flow)
+        .join(Device, Flow.device_a_id == Device.id)
+        .filter(Device.organization_id == user.organization_id)
+        .options(joinedload(Flow.device_a), joinedload(Flow.device_b), joinedload(Flow.server_device))
     )
     if device_id:
         query = query.filter((Flow.device_a_id == device_id) | (Flow.device_b_id == device_id))

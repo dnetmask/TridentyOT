@@ -1,16 +1,43 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: tridentyot-db
+    restart: unless-stopped
+    volumes:
+      - tridentyot_pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${TRIDENTYOT_POSTGRES_DB:-tridentyot}
+      POSTGRES_USER: ${TRIDENTYOT_POSTGRES_USER:-tridentyot}
+      POSTGRES_PASSWORD: ${TRIDENTYOT_POSTGRES_PASSWORD:-tridentyot}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TRIDENTYOT_POSTGRES_USER:-tridentyot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   tridentyot:
     build:
       context: ./backend
     image: tridentyot:latest
     container_name: tridentyot
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "8000:8000"
     volumes:
       - tridentyot_data:/data
     environment:
       TRIDENTYOT_DATA_DIR: /data
+      # Same values as the `db` service above -- change both together.
+      # Self-hosted, single-organization installs can instead point this at
+      # a local file by setting TRIDENTYOT_DATABASE_URL=sqlite:////data/tridentyot.db
+      # and dropping the `db` service/dependency entirely.
+      TRIDENTYOT_POSTGRES_HOST: db
+      TRIDENTYOT_POSTGRES_DB: ${TRIDENTYOT_POSTGRES_DB:-tridentyot}
+      TRIDENTYOT_POSTGRES_USER: ${TRIDENTYOT_POSTGRES_USER:-tridentyot}
+      TRIDENTYOT_POSTGRES_PASSWORD: ${TRIDENTYOT_POSTGRES_PASSWORD:-tridentyot}
       # Optional NVD API key: raises the public rate limit from 5 to 50
       # requests/30s. Leave unset to use the (slower, still functional)
       # unauthenticated limit.
@@ -23,7 +50,8 @@ services:
     # In the default bridge network the container only sees its own
     # virtual interface (eth0), not the host's real NICs. To capture
     # traffic from an actual host interface or SPAN/mirror port, switch to
-    # host networking instead (see README.md "Despliegue con Docker"):
+    # host networking instead (see README.md "Despliegue con Docker" and
+    # docker-compose.linux-sensor.yml):
     #
     #   network_mode: host
     #
@@ -32,3 +60,4 @@ services:
 
 volumes:
   tridentyot_data:
+  tridentyot_pgdata:

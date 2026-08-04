@@ -87,14 +87,15 @@ def test_deleting_session_keeps_a_device_still_referenced_by_another_session(cli
     assert flows_after[0]["port"] == 23
 
 
-def test_stopping_a_session_the_manager_no_longer_tracks_still_succeeds(client, db_session):
+def test_stopping_a_session_the_manager_no_longer_tracks_still_succeeds(client, db_session, org_id):
     """Regression test: previously, if the in-process live_capture_manager
     had lost track of a session (e.g. after a server restart left it stuck
     as "running" in the database), calling /live/stop used to 409 forever
     with no way to clear it. It must now succeed unconditionally for any
     live-type session."""
     orphaned = CaptureSession(
-        name="live:eth0", source_type="live", source="eth0", status="running", started_at=utcnow()
+        organization_id=org_id, name="live:eth0", source_type="live", source="eth0", status="running",
+        started_at=utcnow(),
     )
     db_session.add(orphaned)
     db_session.commit()
