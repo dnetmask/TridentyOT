@@ -91,6 +91,10 @@ def update_device(
         device.custom_name = updates["custom_name"] or None
     if "custom_vendor" in updates:
         device.custom_vendor = updates["custom_vendor"] or None
+    if "custom_firmware_version" in updates:
+        device.custom_firmware_version = updates["custom_firmware_version"] or None
+    if "custom_model" in updates:
+        device.custom_model = updates["custom_model"] or None
     if "custom_device_type" in updates:
         device.custom_device_type = updates["custom_device_type"] or None
     if "custom_device_type_secondary" in updates:

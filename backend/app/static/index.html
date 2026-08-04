@@ -462,6 +462,7 @@
             <label><input type="checkbox" data-col-toggle="tipo" checked /> <span data-i18n="inventory.col_type">Tipo</span></label>
             <label><input type="checkbox" data-col-toggle="subtipo" checked /> <span data-i18n="inventory.col_subtype">Subtipo</span></label>
             <label><input type="checkbox" data-col-toggle="fabricante" checked /> <span data-i18n="inventory.col_vendor">Fabricante</span></label>
+            <label><input type="checkbox" data-col-toggle="referencia" checked /> <span data-i18n="inventory.col_reference">Referencia</span></label>
             <label><input type="checkbox" data-col-toggle="mac" checked /> MAC</label>
             <label><input type="checkbox" data-col-toggle="so" checked /> <span data-i18n="inventory.col_os">SO estimado</span></label>
             <label><input type="checkbox" data-col-toggle="confianza" checked /> <span data-i18n="inventory.col_confidence">Confianza</span></label>
@@ -476,6 +477,7 @@
           <thead>
           <tr>
             <th data-col="ip" data-i18n="inventory.col_ip">IP</th><th data-col="nombre" data-i18n="inventory.col_name">Nombre</th><th data-col="tipo" data-i18n="inventory.col_type">Tipo</th><th data-col="subtipo" data-i18n="inventory.col_subtype">Subtipo</th><th data-col="fabricante" data-i18n="inventory.col_vendor">Fabricante</th>
+            <th data-col="referencia" data-i18n="inventory.col_reference">Referencia</th>
             <th data-col="mac">MAC</th><th data-col="so" data-i18n="inventory.col_os">SO estimado</th><th data-col="confianza" data-i18n="inventory.col_confidence">Confianza</th>
             <th data-col="protocolos" data-i18n="inventory.col_protocols">Protocolos</th><th data-col="visto" data-i18n="inventory.col_last_seen">Últ. visto</th>
           </tr>
@@ -485,6 +487,7 @@
             <th data-col="tipo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
             <th data-col="subtipo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
             <th data-col="fabricante"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="referencia"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
             <th data-col="mac"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
             <th data-col="so"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
             <th data-col="confianza"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
@@ -492,7 +495,7 @@
             <th data-col="visto"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
           </tr>
           </thead>
-          <tbody id="devices-body"><tr><td colspan="10" class="empty">Sin datos</td></tr></tbody>
+          <tbody id="devices-body"><tr><td colspan="11" class="empty">Sin datos</td></tr></tbody>
         </table>
       </div>
       <div id="device-detail" class="device-detail"></div>
@@ -734,6 +737,7 @@ const I18N = {
   'inventory.col_type': { es: 'Tipo', en: 'Type' },
   'inventory.col_subtype': { es: 'Subtipo', en: 'Subtype' },
   'inventory.col_vendor': { es: 'Fabricante', en: 'Vendor' },
+  'inventory.col_reference': { es: 'Referencia', en: 'Reference' },
   'inventory.col_os': { es: 'SO estimado', en: 'Estimated OS' },
   'inventory.col_confidence': { es: 'Confianza', en: 'Confidence' },
   'inventory.col_protocols': { es: 'Protocolos', en: 'Protocols' },
@@ -1358,7 +1362,7 @@ function renderDevicesTable() {
   renderDeviceStats(statsDevices);
   const devices = otOnly ? statsDevices.filter(d => d.is_ot_suspected) : statsDevices;
   if (!devices.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="empty">Sin dispositivos detectados aún</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" class="empty">Sin dispositivos detectados aún</td></tr>';
     fitTableScroll('devices-scroll');
     return;
   }
@@ -1369,8 +1373,9 @@ function renderDevicesTable() {
       <td data-col="tipo">${deviceTypeBadge(d)}</td>
       <td data-col="subtipo">${deviceSubtypeBadge(d)}</td>
       <td data-col="fabricante">${d.display_vendor || '<span class="muted">—</span>'}${d.custom_vendor ? '<span class="manual-tag">manual</span>' : ''}</td>
+      <td data-col="referencia">${d.display_model || '<span class="muted">—</span>'}${d.custom_model ? '<span class="manual-tag">manual</span>' : ''}</td>
       <td data-col="mac" class="mono">${d.mac || '—'}</td>
-      <td data-col="so">${d.os_guess || '—'}</td>
+      <td data-col="so">${d.os_guess || '—'}${d.display_firmware_version ? ` <span class="muted">· FW ${d.display_firmware_version}</span>` : ''}</td>
       <td data-col="confianza">${(d.os_confidence * 100).toFixed(0)}%</td>
       <td data-col="protocolos" class="protocol-list">${(d.protocol_names && d.protocol_names.length) ? d.protocol_names.join(', ') : '<span class="muted">—</span>'}</td>
       <td data-col="visto">${fmtDate(d.last_seen)}</td>
@@ -1420,12 +1425,22 @@ async function showDeviceDetail(id) {
       <input id="edit-vendor" value="${device.custom_vendor || ''}" placeholder="${device.vendor || 'sin detectar — escribe uno'}" ${editor ? '' : 'disabled'} />
       <span class="hint">${device.vendor ? `auto: ${device.vendor}` : 'no detectado automáticamente'}</span>
     </div>
+    <div class="edit-field">
+      <label>Referencia</label>
+      <input id="edit-model" value="${device.custom_model || ''}" placeholder="${device.model || 'sin detectar — escribe una'}" ${editor ? '' : 'disabled'} />
+      <span class="hint">${device.model ? `auto: ${device.model}` : 'no detectado automáticamente'}</span>
+    </div>
+    <div class="edit-field">
+      <label>Firmware</label>
+      <input id="edit-firmware" value="${device.custom_firmware_version || ''}" placeholder="${device.firmware_version || 'sin detectar — escribe uno'}" ${editor ? '' : 'disabled'} />
+      <span class="hint">${device.firmware_version ? `auto: ${device.firmware_version}` : 'no detectado automáticamente'}</span>
+    </div>
     ${editor ? `
     <div class="row" style="margin-bottom:14px;">
       <button class="action" id="save-device-btn">Guardar</button>
       <button class="action secondary" id="reset-device-btn">Restablecer a automático</button>
     </div>` : ''}
-    <p><b>SO estimado:</b> ${device.os_guess || 'desconocido'} (confianza ${(device.os_confidence*100).toFixed(0)}%)</p>
+    <p><b>SO estimado:</b> ${device.os_guess || 'desconocido'} (confianza ${(device.os_confidence*100).toFixed(0)}%)${device.display_firmware_version ? ` — <b>firmware:</b> ${device.display_firmware_version}` : ''}</p>
     <p><b>Protocolos/servicios:</b><br/>${protoRows || '<span class="muted">ninguno</span>'}</p>
     <table>
       <thead><tr><th>Severidad</th><th>Hallazgo</th><th>Ref.</th></tr></thead>
@@ -1473,10 +1488,19 @@ function toggleSubtypeFieldVisibility() {
 
 async function saveDeviceOverrides(id, reset = false) {
   const body = reset
-    ? { custom_name: null, custom_vendor: null, custom_device_type: null, custom_device_type_secondary: null }
+    ? {
+        custom_name: null,
+        custom_vendor: null,
+        custom_model: null,
+        custom_firmware_version: null,
+        custom_device_type: null,
+        custom_device_type_secondary: null,
+      }
     : {
         custom_name: $('#edit-name').value.trim() || null,
         custom_vendor: $('#edit-vendor').value.trim() || null,
+        custom_model: $('#edit-model').value.trim() || null,
+        custom_firmware_version: $('#edit-firmware').value.trim() || null,
         custom_device_type: $('#edit-device-type').value || null,
         custom_device_type_secondary: $('#edit-device-type-secondary').value || null,
       };

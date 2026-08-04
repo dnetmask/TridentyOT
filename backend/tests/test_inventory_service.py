@@ -1,4 +1,4 @@
-from scapy.contrib.cdp import CDPMsgDeviceID, CDPv2_HDR
+from scapy.contrib.cdp import CDPMsgDeviceID, CDPMsgPlatform, CDPMsgSoftwareVersion, CDPv2_HDR
 from scapy.contrib.enipTCP import ENIPTCP, ENIPListIdentity, ENIPListIdentityItem
 from scapy.contrib.lldp import (
     LLDPDUChassisID,
@@ -238,7 +238,13 @@ def test_cdp_announcement_creates_network_device_by_mac(db_session, org_id):
         Ether(src="aa:bb:cc:dd:ee:ff", dst="01:00:0c:cc:cc:cc")
         / LLC()
         / SNAP(OUI=0xC, code=0x2000)
-        / CDPv2_HDR(msg=[CDPMsgDeviceID(val=b"switch1.corp.local")])
+        / CDPv2_HDR(
+            msg=[
+                CDPMsgDeviceID(val=b"switch1.corp.local"),
+                CDPMsgPlatform(val=b"cisco WS-C2960X-24TS-L"),
+                CDPMsgSoftwareVersion(val=b"Cisco IOS Software, Version 15.2(4)E7"),
+            ]
+        )
     )
     ingest_packet_record(db_session, process_packet(Ether(bytes(pkt))), org_id)
     db_session.commit()
@@ -246,6 +252,8 @@ def test_cdp_announcement_creates_network_device_by_mac(db_session, org_id):
     device = db_session.query(Device).filter(Device.mac == "aa:bb:cc:dd:ee:ff").one()
     assert device.ip is None
     assert device.hostname == "switch1.corp.local"
+    assert device.model == "cisco WS-C2960X-24TS-L"
+    assert device.firmware_version == "Cisco IOS Software, Version 15.2(4)E7"
     assert device.os_guess == "Network appliance (router/switch/firewall)"
     assert device.os_confidence == 1.0
 
@@ -644,6 +652,8 @@ def test_enip_list_identity_sets_hmi_device_type_end_to_end(db_session, org_id):
         sinAddress="10.0.4.10",
         vendorId=1,
         deviceType=0x18,  # Human-Machine Interface
+        revisionMajor=3,
+        revisionMinor=1,
         productNameLength=len("MyHMI-9000"),
         productName="MyHMI-9000",
     )
@@ -656,11 +666,18 @@ def test_enip_list_identity_sets_hmi_device_type_end_to_end(db_session, org_id):
     assert device.device_type == "hmi"
     assert device.device_type_confidence == 1.0
     assert device.hostname == "MyHMI-9000"
+    assert device.model == "MyHMI-9000"
+    assert device.firmware_version == "3.1"
 
 
 def test_modbus_device_identification_sets_vendor_end_to_end(db_session, org_id):
-    payload = bytes([0x2B, 0x0E, 0x0E, 0x83, 0x00, 0x00, 2])
-    payload += _modbus_object(0x00, "Acme Corp") + _modbus_object(0x04, "Widget-9000")
+    payload = bytes([0x2B, 0x0E, 0x0E, 0x83, 0x00, 0x00, 4])
+    payload += (
+        _modbus_object(0x00, "Acme Corp")
+        + _modbus_object(0x02, "1.02")
+        + _modbus_object(0x04, "Widget-9000")
+        + _modbus_object(0x05, "WX-9000")
+    )
     adu = bytes([0, 1, 0, 0, 0, len(payload) + 1, 0xFF]) + payload
     pkt = Ether(bytes(Ether() / IP(src="10.0.4.11", dst="10.0.4.99", ttl=64) / TCP(sport=502, dport=51000) / adu))
     ingest_packet_record(db_session, process_packet(pkt), org_id)
@@ -669,6 +686,8 @@ def test_modbus_device_identification_sets_vendor_end_to_end(db_session, org_id)
     device = db_session.query(Device).filter(Device.ip == "10.0.4.11").one()
     assert device.vendor == "Acme Corp"
     assert device.hostname == "Widget-9000"
+    assert device.model == "WX-9000"
+    assert device.firmware_version == "1.02"
 
 
 def test_modbus_identification_never_overwrites_a_known_oui_vendor(db_session, org_id):

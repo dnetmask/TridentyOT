@@ -105,6 +105,26 @@ class Device(Base):
     os_confidence: Mapped[float] = mapped_column(Float, default=0.0)
     os_signature: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    # Self-reported firmware/software version -- from EtherNet/IP CIP List
+    # Identity (Major/Minor Revision), Modbus Read Device Identification
+    # (MajorMinorRevision), or a switch/router's CDP Software Version/LLDP
+    # System Description TLV. Same auto/custom-override pattern as
+    # hostname/vendor above. Left blank (not guessed) for protocols that
+    # don't self-report it -- notably PROFINET DCP, which has no firmware
+    # field in its Identify response.
+    firmware_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    custom_firmware_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # Manufacturer's model/order-code reference for this specific unit --
+    # e.g. an EtherNet/IP CIP productName ("1756-L83E"), a Siemens MLFB
+    # order code from S7comm SZL, a PROFINET DCP "Type of Station" block, or
+    # a switch/router's CDP Platform TLV. Distinct from hostname: a
+    # hostname is how a site names this specific asset ("plc-line3"); a
+    # model is what the vendor calls the product itself, and is often the
+    # same value across every identical unit on the network.
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    custom_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
     # device_type is auto-detected (see app/fingerprint/device_classifier.py);
     # custom_device_type is a manual override, same pattern as custom_name/vendor.
     device_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -153,6 +173,14 @@ class Device(Base):
     @property
     def display_vendor(self) -> str | None:
         return self.custom_vendor or self.vendor
+
+    @property
+    def display_firmware_version(self) -> str | None:
+        return self.custom_firmware_version or self.firmware_version
+
+    @property
+    def display_model(self) -> str | None:
+        return self.custom_model or self.model
 
     @property
     def display_device_type(self) -> str | None:

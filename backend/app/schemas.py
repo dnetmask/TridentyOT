@@ -52,6 +52,12 @@ class DeviceOut(BaseModel):
     display_vendor: str | None
     os_guess: str | None
     os_confidence: float
+    firmware_version: str | None
+    custom_firmware_version: str | None
+    display_firmware_version: str | None
+    model: str | None
+    custom_model: str | None
+    display_model: str | None
     device_type: str | None
     device_type_confidence: float
     device_type_evidence: str | None
@@ -80,6 +86,8 @@ class DeviceUpdateRequest(BaseModel):
 
     custom_name: str | None = None
     custom_vendor: str | None = None
+    custom_firmware_version: str | None = None
+    custom_model: str | None = None
     custom_device_type: Literal["plc", "hmi", "server", "workstation", "network_device", "other"] | None = None
     custom_device_type_secondary: (
         Literal["switch_l2", "switch_l3", "firewall", "access_point", "router_nat", "transport_controller"] | None

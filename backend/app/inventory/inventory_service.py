@@ -170,9 +170,10 @@ def apply_identity_hints(session: Session, device: Device, hints: list[IdentityH
     device identification, ...) to *this packet's sender* -- these are
     facts a device states about itself, not inferred evidence:
 
-    - vendor only fills in when still unknown, same as the MAC-OUI lookup
-      in get_or_create_device -- never overwrites a real OUI vendor with a
-      protocol-level guess (a DHCP vendor class string, an HTTP Server
+    - vendor/model/firmware_version only fill in when still unknown, same
+      as the MAC-OUI lookup in get_or_create_device -- never overwrites a
+      real OUI vendor (or an earlier hint's model/firmware) with a
+      lower-priority guess (a DHCP vendor class string, an HTTP Server
       banner, ...).
     - device_type is a direct, maximal-confidence override, same
       "bypass the generic scorer" pattern as apply_gateway_detection --
@@ -186,6 +187,10 @@ def apply_identity_hints(session: Session, device: Device, hints: list[IdentityH
     for hint in hints:
         if hint.vendor and not device.vendor:
             device.vendor = hint.vendor
+        if hint.model and not device.model:
+            device.model = hint.model
+        if hint.firmware_version and not device.firmware_version:
+            device.firmware_version = hint.firmware_version
         if hint.device_type:
             if device.device_type != hint.device_type or device.device_type_confidence < 1.0:
                 device.device_type = hint.device_type
@@ -469,6 +474,10 @@ def ingest_packet_record(
         if device is not None:
             if record.l2_hostname:
                 device.hostname = record.l2_hostname
+            if record.l2_device_reference:
+                device.model = record.l2_device_reference
+            if record.l2_firmware:
+                device.firmware_version = record.l2_firmware
             # An explicit CDP/LLDP announcement is a stronger signal than the
             # passive TCP-SYN heuristic, so it always outranks it.
             apply_os_guess(device, _CDP_LLDP_GUESS)
@@ -489,6 +498,8 @@ def ingest_packet_record(
         if device is not None:
             if record.l2_hostname:
                 device.hostname = record.l2_hostname
+            if record.l2_device_reference:
+                device.model = record.l2_device_reference
             proto_info = ProtocolInfo(record.l2_protocol or PROFINET_OTHER, OT, True)
             upsert_protocol(session, device, proto_info, None, "profinet", "server", capture_session_id=capture_session_id)
             session.flush()

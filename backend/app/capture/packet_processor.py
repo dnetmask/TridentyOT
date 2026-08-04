@@ -14,14 +14,14 @@ from app.fingerprint.identity_detect import extract_identity_hints
 from app.fingerprint.protocol_detect import PN_ALARM, PN_DCP, PNIO_PS, PROFINET_OTHER
 
 try:
-    from scapy.contrib.cdp import CDPMsgDeviceID, CDPv2_HDR
+    from scapy.contrib.cdp import CDPMsgDeviceID, CDPMsgPlatform, CDPMsgSoftwareVersion, CDPv2_HDR
 except ImportError:  # pragma: no cover - scapy always ships this contrib layer
-    CDPv2_HDR = CDPMsgDeviceID = None
+    CDPv2_HDR = CDPMsgDeviceID = CDPMsgPlatform = CDPMsgSoftwareVersion = None
 
 try:
-    from scapy.contrib.lldp import LLDPDUSystemName
+    from scapy.contrib.lldp import LLDPDUSystemDescription, LLDPDUSystemName
 except ImportError:  # pragma: no cover - scapy always ships this contrib layer
-    LLDPDUSystemName = None
+    LLDPDUSystemName = LLDPDUSystemDescription = None
 
 try:
     from scapy.contrib.pnio import ProfinetIO
@@ -67,6 +67,22 @@ def _pnio_station_name(pkt: Packet) -> str | None:
     return None
 
 
+def _pnio_device_reference(pkt: Packet) -> str | None:
+    """A DCP Identify/Hello response's Manufacturer Specific block ("Type of
+    Station" sub-option) is normally set by the vendor to the product's own
+    model/type designation, e.g. Siemens firmware reporting "S7-1200" --
+    this app's best-effort passive source for a PROFINET device's
+    manufacturer reference. Unlike the Name-of-Station block above, there is
+    no firmware/software-revision block in DCP's Identify response to read.
+    """
+    dcp = pkt[ProfinetDCP]
+    for block in getattr(dcp, "dcp_blocks", None) or []:
+        value = getattr(block, "device_vendor_value", None)
+        if value:
+            return _decode(value).strip() or None
+    return None
+
+
 MAX_PAYLOAD_BYTES = 256
 
 
@@ -92,6 +108,15 @@ class PacketRecord:
     # these are L2-only frames (no IP layer), so unlike hostname_hints this
     # identifies src_mac, not an IP.
     l2_hostname: str | None = None
+    # Manufacturer's model/reference for this device -- CDP Platform TLV or
+    # a PROFINET DCP "Type of Station" block. Never set for plain LLDP
+    # (base LLDP has no separate model TLV, only System Description below).
+    l2_device_reference: str | None = None
+    # Self-reported firmware/software version -- CDP Software Version TLV,
+    # or (best-effort, since base LLDP has no dedicated field for it)
+    # LLDP's System Description. Never set for PROFINET DCP, whose Identify
+    # response has no firmware/software-revision block to read.
+    l2_firmware: str | None = None
     # Which PROFINET sub-protocol this frame carries (see _pnio_protocol_name)
     # -- only set when transport == "profinet".
     l2_protocol: str | None = None
@@ -121,6 +146,27 @@ def _cdp_device_id(pkt: Packet) -> str | None:
     return None
 
 
+def _cdp_platform(pkt: Packet) -> str | None:
+    """The device's manufacturer model/reference (e.g. "cisco WS-C2960X-24TS-L"),
+    from a CDP Platform TLV."""
+    for msg in pkt[CDPv2_HDR].msg:
+        if isinstance(msg, CDPMsgPlatform):
+            value = _decode(msg.val).strip().rstrip("\x00")
+            return value or None
+    return None
+
+
+def _cdp_software_version(pkt: Packet) -> str | None:
+    """The device's self-reported firmware/software version, from a CDP
+    Software Version TLV (typically a full banner string, e.g. "Cisco IOS
+    Software, C2960X Software ..., Version 15.2(4)E7")."""
+    for msg in pkt[CDPv2_HDR].msg:
+        if isinstance(msg, CDPMsgSoftwareVersion):
+            value = _decode(msg.val).strip().rstrip("\x00")
+            return value or None
+    return None
+
+
 def process_packet(pkt: Packet) -> PacketRecord | None:
     timestamp = float(pkt.time) if hasattr(pkt, "time") else None
     record = PacketRecord(
@@ -136,12 +182,17 @@ def process_packet(pkt: Packet) -> PacketRecord | None:
     if CDPv2_HDR is not None and pkt.haslayer(CDPv2_HDR):
         record.transport = "cdp"
         record.l2_hostname = _cdp_device_id(pkt)
+        record.l2_device_reference = _cdp_platform(pkt)
+        record.l2_firmware = _cdp_software_version(pkt)
         return record
 
     if LLDPDUSystemName is not None and pkt.haslayer(LLDPDUSystemName):
         record.transport = "lldp"
         name = _decode(pkt[LLDPDUSystemName].system_name).strip()
         record.l2_hostname = name or None
+        if LLDPDUSystemDescription is not None and pkt.haslayer(LLDPDUSystemDescription):
+            description = _decode(pkt[LLDPDUSystemDescription].description).strip()
+            record.l2_firmware = description or None
         return record
 
     # PROFINET (IEC 61158) runs its real-time I/O traffic raw over Ethernet
@@ -156,6 +207,7 @@ def process_packet(pkt: Packet) -> PacketRecord | None:
         record.l2_protocol = _pnio_protocol_name(pkt[ProfinetIO].frameID)
         if ProfinetDCP is not None and pkt.haslayer(ProfinetDCP):
             record.l2_hostname = _pnio_station_name(pkt)
+            record.l2_device_reference = _pnio_device_reference(pkt)
         return record
 
     if pkt.haslayer(ARP):

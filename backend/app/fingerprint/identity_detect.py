@@ -80,6 +80,18 @@ class IdentityHint:
     # hostname) hint channel as DNS/DHCP/NBNS (see packet_processor.py),
     # so it gets the same "rejected once claimed by 2+ IPs" protection.
     hostname: str | None = None
+    # Manufacturer's model/reference for this device (e.g. an EtherNet/IP
+    # productName, a Modbus ModelName, a Siemens S7comm order code) --
+    # unlike hostname above, this is never routed through the
+    # multi-claimant collision check: the same model legitimately repeats
+    # across every identical unit on the network, so two devices sharing
+    # one isn't evidence of a bad read the way two devices sharing one
+    # hostname is.
+    model: str | None = None
+    # Self-reported firmware/software revision (e.g. EtherNet/IP's
+    # Major.Minor Revision, Modbus's MajorMinorRevision object). Left None
+    # for protocols that don't self-report it.
+    firmware_version: str | None = None
     # Direct, maximal-confidence device_type/_secondary override -- only
     # set for the handful of protocols/values unambiguous enough to bypass
     # classify_device_type's generic scoring entirely.
@@ -140,6 +152,7 @@ def extract_enip_identity(pkt: Packet) -> IdentityHint | None:
             return None
         device_type_name = _deviceTypeList.get(int(item.deviceType))
         product_name = _decode(item.productName).strip() if item.productName else None
+        firmware_version = f"{int(item.revisionMajor)}.{int(item.revisionMinor)}"
     except Exception:
         return None
 
@@ -149,8 +162,16 @@ def extract_enip_identity(pkt: Packet) -> IdentityHint | None:
         bits.append(bilingual(es=f'tipo declarado "{device_type_name}"', en=f'declared type "{device_type_name}"'))
     if product_name:
         bits.append(bilingual(es=f'producto "{product_name}"', en=f'product "{product_name}"'))
+    bits.append(bilingual(es=f"revisión {firmware_version}", en=f"revision {firmware_version}"))
     return IdentityHint(
         hostname=product_name or None,
+        # The CIP Identity object's productName doubles as this app's
+        # "model" field for EtherNet/IP devices -- for this protocol the
+        # two concepts are the same string (e.g. "1756-L83E" is both the
+        # vendor's model designation and the only name the device gives
+        # itself), unlike a DNS/DHCP hostname a site chose independently.
+        model=product_name or None,
+        firmware_version=firmware_version,
         device_type=mapped_type,
         device_type_secondary=mapped_secondary,
         evidence=encode_i18n(*bits),
@@ -162,6 +183,8 @@ def extract_enip_identity(pkt: Packet) -> IdentityHint | None:
 # ---------------------------------------------------------------------------
 
 _MODBUS_VENDOR_NAME = 0x00
+_MODBUS_PRODUCT_CODE = 0x01
+_MODBUS_MAJOR_MINOR_REVISION = 0x02
 _MODBUS_PRODUCT_NAME = 0x04
 _MODBUS_MODEL_NAME = 0x05
 
@@ -191,7 +214,14 @@ def extract_modbus_identity(pkt: Packet) -> IdentityHint | None:
 
     vendor = objects.get(_MODBUS_VENDOR_NAME)
     product = objects.get(_MODBUS_PRODUCT_NAME) or objects.get(_MODBUS_MODEL_NAME)
-    if not vendor and not product:
+    # ModelName (0x05) is the spec's own "model" object -- preferred over
+    # ProductCode (0x01), a vendor-internal catalog number with no bundled
+    # registry to make sense of on its own (same caveat as CIP's
+    # productCode/BACnet's vendor-id: never guessed at, only ever surfaced
+    # verbatim).
+    model = objects.get(_MODBUS_MODEL_NAME) or objects.get(_MODBUS_PRODUCT_CODE)
+    firmware_version = objects.get(_MODBUS_MAJOR_MINOR_REVISION)
+    if not vendor and not product and not model and not firmware_version:
         return None
 
     bits = [
@@ -204,7 +234,17 @@ def extract_modbus_identity(pkt: Packet) -> IdentityHint | None:
         bits.append(bilingual(es=f'fabricante "{vendor}"', en=f'vendor "{vendor}"'))
     if product:
         bits.append(bilingual(es=f'producto "{product}"', en=f'product "{product}"'))
-    return IdentityHint(vendor=vendor, hostname=product, evidence=encode_i18n(*bits))
+    if model:
+        bits.append(bilingual(es=f'modelo "{model}"', en=f'model "{model}"'))
+    if firmware_version:
+        bits.append(bilingual(es=f'revisión "{firmware_version}"', en=f'revision "{firmware_version}"'))
+    return IdentityHint(
+        vendor=vendor,
+        hostname=product,
+        model=model,
+        firmware_version=firmware_version,
+        evidence=encode_i18n(*bits),
+    )
 
 
 def extract_modbus_legacy_slave_id(pkt: Packet) -> IdentityHint | None:
@@ -377,7 +417,9 @@ def extract_mdns_txt_identity(pkt: Packet) -> IdentityHint | None:
             bits.append(bilingual(es=f'fabricante "{vendor}"', en=f'vendor "{vendor}"'))
         if model:
             bits.append(bilingual(es=f'modelo "{model}"', en=f'model "{model}"'))
-        return IdentityHint(vendor=vendor or None, hostname=model or None, evidence=encode_i18n(*bits))
+        return IdentityHint(
+            vendor=vendor or None, hostname=model or None, model=model or None, evidence=encode_i18n(*bits)
+        )
     return None
 
 
@@ -428,6 +470,10 @@ def extract_s7comm_identity(pkt: Packet) -> IdentityHint | None:
     return IdentityHint(
         vendor="Siemens AG",
         hostname=order_code,
+        # The MLFB order code is Siemens' own catalog reference for this
+        # exact product (e.g. "6ES7 315-2AH14-0AB0") -- a model designation,
+        # not a site-chosen name, so it also populates the model field.
+        model=order_code,
         device_type=PLC,
         evidence=encode_i18n(
             bilingual(

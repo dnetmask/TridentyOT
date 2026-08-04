@@ -54,6 +54,8 @@ def test_enip_list_identity_maps_hmi_device_type():
     assert hint is not None
     assert hint.device_type == "hmi"
     assert hint.hostname == "MyHMI-9000"
+    assert hint.model == "MyHMI-9000"
+    assert hint.firmware_version == "1.2"
     assert "Human-Machine Interface" in hint.evidence
 
 
@@ -125,6 +127,30 @@ def test_modbus_read_device_identification_falls_back_to_model_name():
     hint = extract_modbus_identity(pkt)
     assert hint is not None
     assert hint.hostname == "Model-X"
+    assert hint.model == "Model-X"
+
+
+def test_modbus_read_device_identification_extracts_model_and_firmware_revision():
+    payload = bytes([0x2B, 0x0E, 0x0E, 0x83, 0x00, 0x00, 2])
+    payload += _modbus_object(0x02, "1.02") + _modbus_object(0x05, "PLC-2000")
+    adu = bytes([0, 1, 0, 0, 0, len(payload) + 1, 0xFF]) + payload
+    pkt = _redissect(Ether() / IP(src="10.0.0.5", dst="10.0.0.9") / TCP(sport=502, dport=51000) / adu)
+
+    hint = extract_modbus_identity(pkt)
+    assert hint is not None
+    assert hint.model == "PLC-2000"
+    assert hint.firmware_version == "1.02"
+
+
+def test_modbus_read_device_identification_falls_back_to_product_code_for_model():
+    payload = bytes([0x2B, 0x0E, 0x0E, 0x83, 0x00, 0x00, 1])
+    payload += _modbus_object(0x01, "PC-42")  # ProductCode only, no ModelName
+    adu = bytes([0, 1, 0, 0, 0, len(payload) + 1, 0xFF]) + payload
+    pkt = _redissect(Ether() / IP(src="10.0.0.5", dst="10.0.0.9") / TCP(sport=502, dport=51000) / adu)
+
+    hint = extract_modbus_identity(pkt)
+    assert hint is not None
+    assert hint.model == "PC-42"
 
 
 def test_modbus_legacy_report_slave_id_used_only_as_hostname():
@@ -195,6 +221,7 @@ def test_mdns_txt_model_and_manufacturer():
     assert hint is not None
     assert hint.vendor == "Acme Corp"
     assert hint.hostname == "Model X9000"
+    assert hint.model == "Model X9000"
 
 
 def test_mdns_txt_without_recognized_keys_yields_nothing():
@@ -222,6 +249,7 @@ def test_s7comm_szl_order_code_sets_plc_and_vendor():
     assert hint.vendor == "Siemens AG"
     assert hint.device_type == "plc"
     assert hint.hostname == "6ES7 315-2AH14-0AB0"
+    assert hint.model == "6ES7 315-2AH14-0AB0"
 
 
 def test_s7comm_ignores_traffic_without_an_order_code():
