@@ -37,10 +37,23 @@ def _looks_like_text_banner(payload: bytes) -> str | None:
         return None
     if not text:
         return None
-    printable = sum(1 for c in text if c.isprintable() or c in "\r\n\t")
-    if printable / max(len(text), 1) < _PRINTABLE_BANNER_MIN_RATIO:
+    # The printable ratio must be judged on the candidate we actually
+    # return (the first line), not on the whole decoded payload: a binary
+    # protocol header followed by a line break and a long, genuinely
+    # printable tail can make the *whole* text mostly printable while its
+    # first line -- what gets stored -- is still mostly control bytes.
+    first_line = text.splitlines()[0][:256]
+    if not first_line:
         return None
-    return text.splitlines()[0][:256]
+    # Postgres rejects NUL bytes in text columns outright, independent of
+    # column width -- reject explicitly rather than relying on the
+    # printable-ratio check alone to always catch it.
+    if "\x00" in first_line:
+        return None
+    printable = sum(1 for c in first_line if c.isprintable() or c in "\r\n\t")
+    if printable / max(len(first_line), 1) < _PRINTABLE_BANNER_MIN_RATIO:
+        return None
+    return first_line
 
 
 def _is_real_unicast_mac(mac: str | None) -> bool:

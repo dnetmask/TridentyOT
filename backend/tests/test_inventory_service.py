@@ -17,8 +17,10 @@ from scapy.layers.inet import IP, TCP, UDP
 from scapy.layers.l2 import ARP, LLC, SNAP, Ether
 from scapy.layers.netbios import NBNSHeader, NBNSRegistrationRequest
 
+from scapy.packet import Raw
+
 from app.capture.packet_processor import process_packet
-from app.inventory.inventory_service import ingest_packet_record
+from app.inventory.inventory_service import _looks_like_text_banner, ingest_packet_record
 from app.models import Device, DeviceProtocol, Flow
 
 
@@ -76,6 +78,42 @@ def test_vendor_is_auto_populated_from_mac(db_session, org_id):
     assert device.mac == "00:1b:1b:aa:bb:cc"
     assert device.vendor == "Siemens AG"
     assert device.display_vendor == "Siemens AG"
+
+
+def test_looks_like_text_banner_rejects_binary_first_line_with_printable_tail():
+    """Regression test: the printable-ratio gate used to be computed over
+    the *whole* decoded payload, but only the first line is ever returned
+    as the banner. A binary protocol header (mostly control bytes) followed
+    by a line break and a long, genuinely printable tail made the whole
+    text's ratio pass easily while the first line -- what actually gets
+    stored -- was still mostly control bytes, including literal NULs.
+    Postgres rejects NUL bytes in any text column outright (independent of
+    column width), so this reached the database as a real DataError and
+    crashed the capture session it happened during."""
+    payload = b"\x00\x00\x01%\n" + b"Server: TotallyLegitBanner/1.0 with lots of printable text here " * 5
+    assert _looks_like_text_banner(payload) is None
+
+
+def test_looks_like_text_banner_accepts_a_genuine_printable_banner():
+    assert _looks_like_text_banner(b"SSH-2.0-OpenSSH_8.9\r\nExtra") == "SSH-2.0-OpenSSH_8.9"
+
+
+def test_ingest_never_stores_a_nul_byte_in_a_banner(db_session, org_id):
+    """End-to-end: the same payload shape as
+    test_looks_like_text_banner_rejects_binary_first_line_with_printable_tail,
+    pushed through the real ingest path, must not reach the database at
+    all -- Postgres hard-rejects NUL bytes in text columns regardless of
+    column width, so any leak here reproduces the exact crash this test
+    guards against."""
+    payload = b"\x00\x00\x01%\n" + b"Server: TotallyLegitBanner/1.0 with lots of printable text here " * 5
+    pkt = Ether() / IP(src="10.0.0.50", dst="10.0.0.5", ttl=64) / TCP(
+        sport=502, dport=51000, flags="SA", window=1024
+    ) / Raw(load=payload)
+    ingest_packet_record(db_session, process_packet(pkt), org_id)
+    db_session.commit()  # must not raise psycopg.DataError on Postgres
+
+    proto = db_session.query(DeviceProtocol).one()
+    assert proto.banner is None or "\x00" not in proto.banner
 
 
 def test_destination_mac_is_never_learned_as_device_identity(db_session, org_id):
