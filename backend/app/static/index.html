@@ -376,7 +376,7 @@
   <main>
 
   <section id="tab-capture" class="tab active">
-    <div class="card editor-only">
+    <div class="card admin-only">
       <h2 data-i18n="capture.live_title">Captura en vivo</h2>
       <div class="row">
         <div>
@@ -395,7 +395,7 @@
       </p>
     </div>
 
-    <div class="card editor-only">
+    <div class="card admin-only">
       <h2 data-i18n="capture.pcap_title">Analizar archivo .pcap / .pcapng</h2>
       <div id="pcap-dropzone" class="dropzone">
         <span data-i18n="capture.dropzone_text" data-i18n-html>Arrastra aquí un archivo <b>.pcap</b>/<b>.pcapng</b>, o</span>
@@ -430,7 +430,7 @@
       </table>
     </div>
 
-    <div class="card editor-only" style="border-color:var(--crit);">
+    <div class="card admin-only" style="border-color:var(--crit);">
       <h2 data-i18n="capture.danger_title">Zona de peligro</h2>
       <p class="muted" style="margin-top:6px;" data-i18n="capture.danger_text" data-i18n-html>
         Borra todas las sesiones de captura, dispositivos, protocolos, flujos y hallazgos de
@@ -557,7 +557,7 @@
           </select>
           <button class="action secondary" onclick="clearColumnFilters('findings-body', renderFindingsTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
           <button class="action secondary" id="export-vuln-pdf-btn" data-i18n="vulns.export_pdf">Exportar PDF</button>
-          <button class="action editor-only" id="scan-all-btn" data-i18n="vulns.scan_all">Ejecutar escaneo completo</button>
+          <button class="action admin-only" id="scan-all-btn" data-i18n="vulns.scan_all">Ejecutar escaneo completo</button>
         </div>
       </div>
       <div class="stat-row" id="vulns-stats"></div>
@@ -596,7 +596,7 @@
           <label data-i18n="users.role">Perfil</label>
           <select id="new-user-role">
             <option value="viewer" data-i18n="users.role_viewer">Visualizador</option>
-            <option value="editor" data-i18n="users.role_editor">Editor</option>
+            <option value="admin" data-i18n="users.role_admin">Administrador</option>
           </select>
         </div>
         <button class="action" id="create-user-btn" data-i18n="users.create_btn">Crear</button>
@@ -770,7 +770,7 @@ const I18N = {
   'users.password': { es: 'Contraseña', en: 'Password' },
   'users.role': { es: 'Perfil', en: 'Role' },
   'users.role_viewer': { es: 'Visualizador', en: 'Viewer' },
-  'users.role_editor': { es: 'Editor', en: 'Editor' },
+  'users.role_admin': { es: 'Administrador', en: 'Admin' },
   'users.create_btn': { es: 'Crear', en: 'Create' },
   'users.title': { es: 'Usuarios', en: 'Users' },
   'users.col_created': { es: 'Creado', en: 'Created' },
@@ -857,16 +857,18 @@ function updateCountdowns() {
   if (vulnTimer) vulnTimer.textContent = scanSecs === null ? '' : `Próximo reporte automático en ${scanSecs}s`;
 }
 
-function isEditor() {
-  return !!currentUser && currentUser.role === 'editor';
+function isAdmin() {
+  return !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin');
 }
 
 function applyRoleVisibility() {
-  const editor = isEditor();
-  $$('.editor-only').forEach(el => el.classList.toggle('hidden', !editor));
-  $$('.viewer-only').forEach(el => el.classList.toggle('hidden', editor));
-  $('#nav-users').classList.toggle('hidden', !editor);
+  const admin = isAdmin();
+  $$('.admin-only').forEach(el => el.classList.toggle('hidden', !admin));
+  $$('.viewer-only').forEach(el => el.classList.toggle('hidden', admin));
+  $('#nav-users').classList.toggle('hidden', !admin);
 }
+
+const ROLE_LABELS = { super_admin: 'Super Admin', admin: 'Administrador', viewer: 'Visualizador' };
 
 // ---------- auth ----------
 function getToken() {
@@ -913,7 +915,7 @@ async function api(path, options = {}) {
 async function bootstrapAfterLogin() {
   currentUser = await api('/api/auth/me');
   $('#current-username').textContent = currentUser.username;
-  $('#current-role').textContent = currentUser.role === 'editor' ? 'Editor' : 'Visualizador';
+  $('#current-role').textContent = ROLE_LABELS[currentUser.role] || currentUser.role;
   applyTranslations(); // the account's saved locale (currentUser.locale) now takes over from any local guess
   applyRoleVisibility();
   showAppShell();
@@ -934,7 +936,7 @@ async function refreshAllData() {
   await loadDevices();
   loadFlows();
   loadFindings();
-  if (isEditor()) loadUsers();
+  if (isAdmin()) loadUsers();
 }
 
 async function autoScanVulnerabilities() {
@@ -1040,7 +1042,7 @@ async function loadSessions() {
 function renderSessionsTable() {
   const tbody = $('#sessions-body');
   if (!allSessions.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin sesiones aún</td></tr>'; return; }
-  const editor = isEditor();
+  const admin = isAdmin();
   tbody.innerHTML = allSessions.map(s => `
     <tr>
       <td data-col="id">${s.id}</td><td data-col="nombre">${s.name}</td><td data-col="tipo">${s.source_type}</td><td data-col="origen">${s.source}</td>
@@ -1048,8 +1050,8 @@ function renderSessionsTable() {
       <td>${progressCell(s)}</td>
       <td data-col="paquetes">${s.packet_count}</td><td data-col="inicio">${fmtDate(s.started_at)}</td>
       <td>
-        ${editor && s.status === 'running' && s.source_type === 'live' ? `<button class="action danger" onclick="stopLive(${s.id})">Detener</button>` : ''}
-        ${editor ? `<button class="action secondary" onclick="deleteSession(${s.id})">Borrar</button>` : ''}
+        ${admin && s.status === 'running' && s.source_type === 'live' ? `<button class="action danger" onclick="stopLive(${s.id})">Detener</button>` : ''}
+        ${admin ? `<button class="action secondary" onclick="deleteSession(${s.id})">Borrar</button>` : ''}
       </td>
     </tr>`).join('');
   populateColumnDatalists('sessions-body');
@@ -1127,7 +1129,7 @@ $('#pcap-file').addEventListener('change', (e) => uploadPcapFile(e.target.files[
 const dropzone = $('#pcap-dropzone');
 ['dragenter', 'dragover'].forEach(evt => dropzone.addEventListener(evt, (e) => {
   e.preventDefault(); e.stopPropagation();
-  if (isEditor()) dropzone.classList.add('dragover');
+  if (isAdmin()) dropzone.classList.add('dragover');
 }));
 ['dragleave', 'dragend'].forEach(evt => dropzone.addEventListener(evt, (e) => {
   e.preventDefault(); e.stopPropagation();
@@ -1136,7 +1138,7 @@ const dropzone = $('#pcap-dropzone');
 dropzone.addEventListener('drop', (e) => {
   e.preventDefault(); e.stopPropagation();
   dropzone.classList.remove('dragover');
-  if (!isEditor()) return;
+  if (!isAdmin()) return;
   const file = e.dataTransfer.files && e.dataTransfer.files[0];
   if (!file) return;
   if (!/\.(pcap|pcapng|cap)$/i.test(file.name)) {
@@ -1396,17 +1398,17 @@ async function showDeviceDetail(id) {
     <tr><td>${sevBadge(f.severity)}</td><td>${f.title}</td><td>${f.cve_id || f.rule_id || '—'}</td></tr>`).join('') ||
     '<tr><td colspan="3" class="empty">Sin hallazgos (ejecuta un escaneo desde la pestaña Vulnerabilidades)</td></tr>';
 
-  const editor = isEditor();
+  const admin = isAdmin();
   $('#device-detail').innerHTML = `
     <h2>Detalle: ${device.ip || device.mac}</h2>
     <div class="edit-field">
       <label>Nombre</label>
-      <input id="edit-name" value="${device.custom_name || ''}" placeholder="${device.hostname || 'sin detectar — escribe uno'}" ${editor ? '' : 'disabled'} />
+      <input id="edit-name" value="${device.custom_name || ''}" placeholder="${device.hostname || 'sin detectar — escribe uno'}" ${admin ? '' : 'disabled'} />
       <span class="hint">${device.hostname ? `auto: ${device.hostname}` : 'no detectado automáticamente'}</span>
     </div>
     <div class="edit-field">
       <label>Tipo</label>
-      <select id="edit-device-type" ${editor ? '' : 'disabled'} onchange="toggleSubtypeFieldVisibility()">
+      <select id="edit-device-type" ${admin ? '' : 'disabled'} onchange="toggleSubtypeFieldVisibility()">
         <option value="" ${!device.custom_device_type ? 'selected' : ''}>${device.device_type ? 'Automático: ' + (DEVICE_TYPE_LABELS[device.device_type] || device.device_type) : 'Automático (sin clasificar aún)'}</option>
         ${Object.entries(DEVICE_TYPE_LABELS).map(([value, label]) => `
         <option value="${value}" ${device.custom_device_type === value ? 'selected' : ''}>${label}</option>`).join('')}
@@ -1415,27 +1417,27 @@ async function showDeviceDetail(id) {
     </div>
     <div class="edit-field" id="subtype-field-wrapper">
       <label>Subtipo</label>
-      <select id="edit-device-type-secondary" ${editor ? '' : 'disabled'}>
+      <select id="edit-device-type-secondary" ${admin ? '' : 'disabled'}>
         ${subtypeOptionsHtml(device.device_type)}
       </select>
       <span class="hint" id="subtype-field-hint"></span>
     </div>
     <div class="edit-field">
       <label>Fabricante</label>
-      <input id="edit-vendor" value="${device.custom_vendor || ''}" placeholder="${device.vendor || 'sin detectar — escribe uno'}" ${editor ? '' : 'disabled'} />
+      <input id="edit-vendor" value="${device.custom_vendor || ''}" placeholder="${device.vendor || 'sin detectar — escribe uno'}" ${admin ? '' : 'disabled'} />
       <span class="hint">${device.vendor ? `auto: ${device.vendor}` : 'no detectado automáticamente'}</span>
     </div>
     <div class="edit-field">
       <label>Referencia</label>
-      <input id="edit-model" value="${device.custom_model || ''}" placeholder="${device.model || 'sin detectar — escribe una'}" ${editor ? '' : 'disabled'} />
+      <input id="edit-model" value="${device.custom_model || ''}" placeholder="${device.model || 'sin detectar — escribe una'}" ${admin ? '' : 'disabled'} />
       <span class="hint">${device.model ? `auto: ${device.model}` : 'no detectado automáticamente'}</span>
     </div>
     <div class="edit-field">
       <label>Firmware</label>
-      <input id="edit-firmware" value="${device.custom_firmware_version || ''}" placeholder="${device.firmware_version || 'sin detectar — escribe uno'}" ${editor ? '' : 'disabled'} />
+      <input id="edit-firmware" value="${device.custom_firmware_version || ''}" placeholder="${device.firmware_version || 'sin detectar — escribe uno'}" ${admin ? '' : 'disabled'} />
       <span class="hint">${device.firmware_version ? `auto: ${device.firmware_version}` : 'no detectado automáticamente'}</span>
     </div>
-    ${editor ? `
+    ${admin ? `
     <div class="row" style="margin-bottom:14px;">
       <button class="action" id="save-device-btn">Guardar</button>
       <button class="action secondary" id="reset-device-btn">Restablecer a automático</button>
@@ -1448,7 +1450,7 @@ async function showDeviceDetail(id) {
     </table>
   `;
 
-  if (editor) {
+  if (admin) {
     $('#save-device-btn').addEventListener('click', () => saveDeviceOverrides(id));
     $('#reset-device-btn').addEventListener('click', () => saveDeviceOverrides(id, true));
   }
@@ -1727,11 +1729,11 @@ $('#export-vuln-pdf-btn').addEventListener('click', () => {
   window.print();
 });
 
-// ---------- Users tab (editor only) ----------
+// ---------- Users tab (admin only) ----------
 let allUsers = [];
 
 async function loadUsers() {
-  if (!isEditor()) return;
+  if (!isAdmin()) return;
   allUsers = await api('/api/users');
   renderUsersTable();
 }
@@ -1742,10 +1744,10 @@ function renderUsersTable() {
     <tr>
       <td data-col="usuario">${u.username}${u.id === currentUser.id ? ' <span class="pill">tú</span>' : ''}</td>
       <td>
-        <span data-col="perfil" style="display:none">${u.role === 'editor' ? 'Editor' : 'Visualizador'}</span>
+        <span data-col="perfil" style="display:none">${ROLE_LABELS[u.role] || u.role}</span>
         <select onchange="changeUserRole(${u.id}, this.value)" ${u.id === currentUser.id ? 'disabled' : ''}>
           <option value="viewer" ${u.role === 'viewer' ? 'selected' : ''}>Visualizador</option>
-          <option value="editor" ${u.role === 'editor' ? 'selected' : ''}>Editor</option>
+          <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Administrador</option>
         </select>
       </td>
       <td data-col="creado" class="muted">${fmtDate(u.created_at)}</td>

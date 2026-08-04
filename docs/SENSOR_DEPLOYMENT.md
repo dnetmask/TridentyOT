@@ -72,10 +72,11 @@ de la lista.
 
 ## Seguridad (crítico en un sensor real)
 
-TridentyOT incluye autenticación por usuario/contraseña con dos perfiles: **editor** (control
-total: capturas, escaneos, edición de inventario, gestión de usuarios) y **visualizador**
-(solo lectura). Al arrancar por primera vez se crea automáticamente el usuario `admin` con
-contraseña `admin` y perfil editor.
+TridentyOT incluye autenticación por usuario/contraseña con tres perfiles: **Super Admin**
+(plataforma, sin organización propia), **admin** (control total dentro de su organización:
+capturas, escaneos, edición de inventario, gestión de usuarios) y **visualizador** (solo lectura).
+Al arrancar por primera vez se crea automáticamente el usuario `admin` con contraseña `admin` y
+perfil admin.
 
 - **Cambia la contraseña del usuario `admin` inmediatamente** después del primer despliegue
   (pestaña "Usuarios" del dashboard, o `PATCH /api/users/{id}`), y crea cuentas individuales

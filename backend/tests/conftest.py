@@ -60,7 +60,7 @@ def _login(anon_client, username: str, password: str) -> str:
 
 @pytest.fixture
 def client():
-    """Pre-authenticated as the default seeded editor (admin/admin) --
+    """Pre-authenticated as the default seeded admin (admin/admin) --
     matches how almost every existing test actually uses the API. A
     separate TestClient instance from `anonymous_client` (not a mutated
     view of it), so a test can safely request both."""

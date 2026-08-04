@@ -1,4 +1,4 @@
-from app.auth import ROLE_EDITOR
+from app.auth import ROLE_ADMIN
 from app.auth.security import hash_password
 from app.config import DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USERNAME
 from app.db import session_scope
@@ -6,7 +6,7 @@ from app.models import Organization, User
 
 
 def seed_default_admin() -> None:
-    """Creates a default editor account on first run only -- if any user
+    """Creates a default admin account on first run only -- if any user
     already exists (including one created since, or renamed), this is a
     no-op. Change the default password immediately after first login.
 
@@ -31,6 +31,6 @@ def seed_default_admin() -> None:
                 username=DEFAULT_ADMIN_USERNAME,
                 password_salt=salt,
                 password_hash=password_hash,
-                role=ROLE_EDITOR,
+                role=ROLE_ADMIN,
             )
         )

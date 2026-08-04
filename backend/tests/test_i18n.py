@@ -64,7 +64,7 @@ def test_user_can_change_own_locale(client):
     assert client.get("/api/auth/me").json()["locale"] == "en"
 
 
-def test_viewer_can_change_their_own_locale_even_though_not_an_editor(client, make_client):
+def test_viewer_can_change_their_own_locale_even_though_not_an_admin(client, make_client):
     create_resp = client.post("/api/users", json={"username": "vwr", "password": "vwrpass1", "role": "viewer"})
     assert create_resp.status_code == 201
 

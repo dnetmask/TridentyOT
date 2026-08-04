@@ -1,7 +1,7 @@
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
-from app.auth import ROLE_EDITOR
+from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN
 from app.auth.security import hash_token
 from app.db import get_db
 from app.i18n import message, resolve_locale
@@ -41,7 +41,11 @@ def get_current_user(
     return user
 
 
-def require_editor(user: User = Depends(get_current_user)) -> User:
-    if user.role != ROLE_EDITOR:
-        raise HTTPException(status_code=403, detail=message("auth.editor_required", user.locale))
+def is_super_admin(user: User) -> bool:
+    return user.role == ROLE_SUPER_ADMIN
+
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    if user.role not in (ROLE_ADMIN, ROLE_SUPER_ADMIN):
+        raise HTTPException(status_code=403, detail=message("auth.admin_required", user.locale))
     return user

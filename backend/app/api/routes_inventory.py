@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
-from app.auth.deps import get_current_user, require_editor
+from app.auth.deps import get_current_user, is_super_admin, require_admin
 from app.db import get_db
 from app.fingerprint.device_classifier import ROUTER_NAT
 from app.fingerprint.ip_scope import is_lan_ip
@@ -20,11 +20,9 @@ def list_devices(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    query = (
-        db.query(Device)
-        .options(joinedload(Device.protocols))
-        .filter(Device.organization_id == user.organization_id)
-    )
+    query = db.query(Device).options(joinedload(Device.protocols))
+    if not is_super_admin(user):
+        query = query.filter(Device.organization_id == user.organization_id)
     if ot_only:
         query = query.filter(Device.is_ot_suspected.is_(True))
     if protocol:
@@ -64,12 +62,14 @@ def list_devices(
 
 
 def _get_own_device(db: Session, user: User, device_id: int) -> Device:
-    device = (
+    query = (
         db.query(Device)
         .options(joinedload(Device.protocols), joinedload(Device.findings))
-        .filter(Device.id == device_id, Device.organization_id == user.organization_id)
-        .one_or_none()
+        .filter(Device.id == device_id)
     )
+    if not is_super_admin(user):
+        query = query.filter(Device.organization_id == user.organization_id)
+    device = query.one_or_none()
     if device is None:
         raise HTTPException(status_code=404, detail=message("inventory.device_not_found", user.locale))
     return device
@@ -82,7 +82,7 @@ def get_device(device_id: int, db: Session = Depends(get_db), user: User = Depen
 
 @router.patch("/devices/{device_id}", response_model=DeviceDetailOut)
 def update_device(
-    device_id: int, payload: DeviceUpdateRequest, db: Session = Depends(get_db), user: User = Depends(require_editor)
+    device_id: int, payload: DeviceUpdateRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)
 ):
     device = _get_own_device(db, user, device_id)
 
@@ -115,9 +115,10 @@ def list_flows(
     query = (
         db.query(Flow)
         .join(Device, Flow.device_a_id == Device.id)
-        .filter(Device.organization_id == user.organization_id)
         .options(joinedload(Flow.device_a), joinedload(Flow.device_b), joinedload(Flow.server_device))
     )
+    if not is_super_admin(user):
+        query = query.filter(Device.organization_id == user.organization_id)
     if device_id:
         query = query.filter((Flow.device_a_id == device_id) | (Flow.device_b_id == device_id))
     if category:

@@ -55,9 +55,9 @@ def update_me(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Lets any authenticated user (editor or viewer alike) change their own
+    """Lets any authenticated user (any role) change their own
     display-language preference -- unlike UserUpdateRequest in routes_users.py,
-    which only an editor can use, and only to change role/password."""
+    which only an admin (or super_admin) can use, and only to change role/password."""
     updates = payload.model_dump(exclude_unset=True)
     if "locale" in updates and updates["locale"]:
         user.locale = updates["locale"]

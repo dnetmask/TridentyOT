@@ -103,17 +103,24 @@ ya capturado, y a partir de eso construye:
      límite de tasa bajo (5 solicitudes/30s sin API key) y para seguir funcionando (desde caché)
      en redes OT sin salida a internet.
    - Cada hallazgo muestra el nombre del equipo afectado (auto-detectado o manual), no solo su IP.
-6. **Usuarios y control de acceso**: login con usuario/contraseña, dos perfiles —**editor**
-   (control total) y **visualizador** (solo lectura)—. Al primer arranque se crea el usuario
-   `admin`/`admin` (perfil editor); cámbialo cuanto antes desde la pestaña **Usuarios**.
+6. **Usuarios y control de acceso**: login con usuario/contraseña, tres perfiles —**Super Admin**
+   (plataforma, sin organización propia, ve todas las organizaciones), **admin** (control total
+   dentro de su propia organización) y **visualizador** (solo lectura)—. Al primer arranque se crea
+   el usuario `admin`/`admin` (perfil admin); cámbialo cuanto antes desde la pestaña **Usuarios**.
+   El nombre de usuario es único por organización para admin/visualizador, y único de forma global
+   solo entre los Super Admin (que no tienen organización de la cual distinguirse).
 7. **Multi-organización e idioma**: el esquema de base de datos está preparado desde ya para dos
    topologías de despliegue -- un cliente grande que **auto-aloja** su propia instancia (una sola
    `Organization`, creada automáticamente en el primer arranque) o una futura **consola central**
    con varias organizaciones compartiendo una misma instancia/base de datos. Todo dato de captura
    (dispositivos, sesiones, hallazgos) queda asociado a su organización y las consultas de la API
-   nunca cruzan esa frontera (ver `tests/test_multi_tenancy.py`). Cada usuario tiene además un
-   idioma preferido (**español** o **inglés**, ver más abajo) que se aplica tanto a la interfaz
-   como al texto que generan los motores de fingerprint/vulnerabilidades.
+   nunca cruzan esa frontera para admin/visualizador -- un Super Admin, en cambio, ve todas las
+   organizaciones a la vez (ver `tests/test_multi_tenancy.py`). Cada organización, además, ya
+   puede tener varios `Site` (sedes) → `Zone` (áreas de despliegue) → `Sensor`, aunque todavía sin
+   pantalla de alta -- toda instalación existente recibe automáticamente un Sitio/Zona/Sensor
+   "Default" al migrar. Cada usuario tiene además un idioma preferido (**español** o **inglés**,
+   ver más abajo) que se aplica tanto a la interfaz como al texto que generan los motores de
+   fingerprint/vulnerabilidades.
 
 ## Estructura
 
@@ -318,7 +325,7 @@ Cuando lo que hace falta es partir de cero (no solo ver datos nuevos), la
 pestaña **Captura** tiene una sección "Zona de peligro" con un botón que borra **todas** las
 sesiones de captura, dispositivos, protocolos, flujos y hallazgos de vulnerabilidades -- las
 cuentas de usuario nunca se tocan. Pide confirmación antes de ejecutar, porque no se puede
-deshacer. Por API (requiere rol editor):
+deshacer. Por API (requiere rol admin o Super Admin):
 
 ```bash
 curl -X DELETE http://localhost:8000/api/capture/wipe \

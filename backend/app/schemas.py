@@ -167,20 +167,23 @@ class LoginResponse(BaseModel):
 class UserCreateRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=4, max_length=256)
-    role: Literal["editor", "viewer"]
+    # super_admin is deliberately not assignable here -- this endpoint
+    # always attaches the new user to the caller's own organization, and a
+    # super_admin has none (see routes_users.create_user).
+    role: Literal["admin", "viewer"]
 
 
 class UserUpdateRequest(BaseModel):
     """PATCH semantics: only fields present in the request body are applied."""
 
     password: str | None = Field(default=None, min_length=4, max_length=256)
-    role: Literal["editor", "viewer"] | None = None
+    role: Literal["admin", "viewer"] | None = None
 
 
 class UserSelfUpdateRequest(BaseModel):
-    """Fields any authenticated user (editor or viewer) can change about
+    """Fields any authenticated user (admin or viewer) can change about
     their own account, as opposed to UserUpdateRequest which is
-    editor-only and can target any user."""
+    admin-only and can target any user."""
 
     locale: Literal["es", "en"] | None = None
 

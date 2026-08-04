@@ -329,7 +329,7 @@ def test_wipe_database_clears_capture_data_but_keeps_users(client, tmp_path):
     assert {u["username"] for u in client.get("/api/users").json()} == {"admin"}
 
 
-def test_wipe_database_requires_editor_role(client, make_client):
+def test_wipe_database_requires_admin_role(client, make_client):
     client.post("/api/users", json={"username": "viewer_wipe", "password": "secret1", "role": "viewer"})
     viewer = make_client("viewer_wipe", "secret1")
     assert viewer.delete("/api/capture/wipe").status_code == 403

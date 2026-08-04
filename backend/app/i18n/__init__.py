@@ -64,9 +64,9 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "Sesión expirada, vuelve a iniciar sesión",
         "en": "Session expired, please log in again",
     },
-    "auth.editor_required": {
-        "es": "Esta acción requiere el perfil de editor",
-        "en": "This action requires the editor role",
+    "auth.admin_required": {
+        "es": "Esta acción requiere el perfil de administrador",
+        "en": "This action requires the administrator role",
     },
     "auth.invalid_credentials": {
         "es": "Usuario o contraseña incorrectos",
@@ -77,17 +77,21 @@ MESSAGES: dict[str, dict[str, str]] = {
         "en": "A user with that name already exists",
     },
     "users.not_found": {"es": "Usuario no encontrado", "en": "User not found"},
-    "users.cannot_remove_last_editor_role": {
-        "es": "No puedes quitar el rol de editor: no quedaría ningún editor en el sistema",
-        "en": "You can't remove the editor role: no editor would remain in the system",
+    "users.super_admin_has_no_organization": {
+        "es": "Un Super Admin no tiene organización propia para crear usuarios en ella",
+        "en": "A Super Admin has no organization of its own to create users in",
+    },
+    "users.cannot_remove_last_admin_role": {
+        "es": "No puedes quitar el rol de administrador: no quedaría ningún administrador en la organización",
+        "en": "You can't remove the administrator role: no administrator would remain in the organization",
     },
     "users.cannot_delete_self": {
         "es": "No puedes eliminar tu propio usuario",
         "en": "You can't delete your own user",
     },
-    "users.cannot_delete_last_editor": {
-        "es": "No puedes eliminar el último editor del sistema",
-        "en": "You can't delete the last editor in the system",
+    "users.cannot_delete_last_admin": {
+        "es": "No puedes eliminar el último administrador de la organización",
+        "en": "You can't delete the last administrator in the organization",
     },
     "capture.session_not_found": {
         "es": "Sesión de captura no encontrada",

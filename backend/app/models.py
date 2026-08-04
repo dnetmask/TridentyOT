@@ -3,10 +3,12 @@ import datetime
 from sqlalchemy import (
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,6 +42,73 @@ class Organization(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
 
 
+class Site(Base):
+    """A physical location (a plant, a branch) belonging to one Organization.
+    See docs (Parte C) for the full Organization -> Site -> Zone -> Sensor
+    hierarchy this and the two models below exist for.
+    """
+
+    __tablename__ = "sites"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    city: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
+
+
+class Zone(Base):
+    """A deployment-level area within a Site (a line, a building) -- distinct
+    from an IEC 62443 security zone, which is a logical grouping that can
+    span several physical areas. See docs (Parte C, "matiz de terminología")
+    for the full distinction.
+    """
+
+    __tablename__ = "zones"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # IEC 62443 security level (SL0-SL4). Nullable/optional on purpose, with
+    # no default forced at creation: this platform also serves pure IT
+    # inventory/topology use cases where the concept doesn't apply -- see
+    # docs (Parte C, resolved question on this field). NULL means
+    # "unclassified", never "SL0" -- a future criticality-weighting engine
+    # must treat the two differently.
+    security_level: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
+
+
+SENSOR_KIND_LIVE = "live"
+SENSOR_KIND_EXTERNAL = "external"  # pcap-only uploads, no live interface of its own
+
+
+class Sensor(Base):
+    """The identity a capture process enrolls under -- stable across
+    restarts and across however many CaptureSessions it ever runs, unlike a
+    CaptureSession itself which is created fresh per run. A Zone accepts
+    more than one Sensor (co-located isolated processes on the same
+    physical area, each on its own segment/VLAN) -- see docs (Parte C,
+    resolved question on this).
+    """
+
+    __tablename__ = "sensors"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    zone_id: Mapped[int] = mapped_column(ForeignKey("zones.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kind: Mapped[str] = mapped_column(String(16), default=SENSOR_KIND_LIVE)
+    # Set once this sensor actually runs as its own remote enrollment
+    # target (see docs, "Sensor remoto") -- NULL until that lands.
+    enrollment_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
+    last_seen_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
+
+
 class CaptureSession(Base):
     __tablename__ = "capture_sessions"
 
@@ -49,6 +118,10 @@ class CaptureSession(Base):
     # _ensure_default_organization_and_backfill) -- every row, old or new,
     # always has one in practice, same pattern as Device.capture_session_id.
     organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id"), nullable=True, index=True)
+    # Nullable for the same additive-migration reason -- see db.py's
+    # _ensure_default_site_zone_sensor_and_backfill, which points every
+    # existing (and NULL) row at a "Default" Sensor per organization.
+    sensor_id: Mapped[int | None] = mapped_column(ForeignKey("sensors.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), default="")
     source_type: Mapped[str] = mapped_column(String(16))  # "live" | "pcap"
     source: Mapped[str] = mapped_column(String(255))  # interface name or original filename
@@ -329,18 +402,36 @@ class CveCache(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        # Scoped per-organization for admin/viewer -- two different clients
+        # of a central console can each pick "admin" as a username without
+        # colliding. Never satisfied for a super_admin row (organization_id
+        # IS NULL), since NULL is never equal to NULL in either dialect --
+        # see the partial index below for that case instead.
+        UniqueConstraint("organization_id", "username", name="uq_user_org_username"),
+        # super_admin has no organization to scope by, so it needs its own
+        # globally-unique-among-org-less-rows index instead of the
+        # composite constraint above. Both SQLite (3.8+) and Postgres
+        # support a WHERE-qualified unique index identically.
+        Index(
+            "uq_user_username_super_admin",
+            "username",
+            unique=True,
+            sqlite_where=text("organization_id IS NULL"),
+            postgresql_where=text("organization_id IS NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # Nullable at the DB level for the same additive-migration reason as
-    # CaptureSession.organization_id above. Username stays globally unique
-    # (not scoped per-org) for now -- every deployment today has exactly one
-    # organization; per-org username scoping is follow-up work for when a
-    # single instance actually serves more than one (see roadmap).
+    # NULL only for a super_admin (the Netmask platform role -- administers
+    # organizations/sites/zones/sensors, no organization of its own).
+    # Nullable at the DB level for admin/viewer too, for the same
+    # additive-migration reason as CaptureSession.organization_id above.
     organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id"), nullable=True, index=True)
-    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    username: Mapped[str] = mapped_column(String(64), index=True)
     password_salt: Mapped[str] = mapped_column(String(32))
     password_hash: Mapped[str] = mapped_column(String(64))
-    role: Mapped[str] = mapped_column(String(16))  # "editor" | "viewer"
+    role: Mapped[str] = mapped_column(String(16))  # "super_admin" | "admin" | "viewer"
     # UI/evidence text language preference -- see app/i18n. Defaults to "es"
     # on creation; changeable by the user themself via PATCH /api/auth/me.
     locale: Mapped[str] = mapped_column(String(5), default="es")

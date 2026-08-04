@@ -202,6 +202,12 @@ def test_migration_backfills_a_default_organization_and_rebuilds_the_device_uniq
                 "VALUES ('legacyadmin', 'salt', 'hash', 'editor', '2024-01-01')"
             )
         )
+        conn.execute(
+            sa.text(
+                "INSERT INTO capture_sessions (name, source_type, source, status, started_at) "
+                "VALUES ('legacy capture', 'pcap', 'legacy.pcap', 'completed', '2024-01-01')"
+            )
+        )
     setup_engine.dispose()
 
     patched_engine = sa.create_engine(f"sqlite:///{db_path}")
@@ -209,7 +215,7 @@ def test_migration_backfills_a_default_organization_and_rebuilds_the_device_uniq
 
     db_module.init_db()
 
-    from app.models import Organization, User
+    from app.models import CaptureSession, Organization, Sensor, Site, User, Zone
 
     Session = sa.orm.sessionmaker(bind=patched_engine)
     with Session() as session:
@@ -223,15 +229,93 @@ def test_migration_backfills_a_default_organization_and_rebuilds_the_device_uniq
 
         user = session.query(User).filter(User.username == "legacyadmin").one()
         assert user.organization_id == org.id
+        assert user.role == "admin"  # migrated from the old 2-tier "editor"
+
+        site = session.query(Site).filter(Site.organization_id == org.id).one()
+        zone = session.query(Zone).filter(Zone.site_id == site.id).one()
+        sensor = session.query(Sensor).filter(Sensor.zone_id == zone.id).one()
+
+        capture_session = session.query(CaptureSession).filter(CaptureSession.name == "legacy capture").one()
+        assert capture_session.sensor_id == sensor.id  # pre-existing session backfilled to the default sensor
 
     index_names = {ix["name"] for ix in sa.inspect(patched_engine).get_indexes("devices")}
     assert "uq_device_org_mac_ip" in index_names
     assert "uq_device_mac_ip" not in index_names
 
+    user_indexes = {ix["name"]: ix for ix in sa.inspect(patched_engine).get_indexes("users")}
+    assert "uq_user_org_username" in user_indexes
+    assert "uq_user_username_super_admin" in user_indexes
+
     db_module.init_db()  # must be safe to run again without creating a second organization
 
     with Session() as session:
         assert session.query(Organization).count() == 1
+
+
+def test_migration_rebuilds_a_pre_existing_globally_unique_username_index(tmp_path, monkeypatch):
+    """Regression test: a database created by an older version of this app
+    (via create_all(), before the 3-role model existed) has username as a
+    single globally-unique index -- exactly what init_db() must relax to
+    per-organization, per _rebuild_user_unique_constraint's docstring.
+    """
+    db_path = tmp_path / "legacy_global_username.db"
+
+    setup_engine = sa.create_engine(f"sqlite:///{db_path}")
+    with setup_engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                "CREATE TABLE organizations (id INTEGER PRIMARY KEY, name VARCHAR(255), "
+                "slug VARCHAR(64) UNIQUE, deployment_mode VARCHAR(16), default_locale VARCHAR(5), "
+                "created_at DATETIME)"
+            )
+        )
+        conn.execute(
+            sa.text("INSERT INTO organizations (name, slug, deployment_mode, default_locale, created_at) "
+                     "VALUES ('Org A', 'org-a', 'self_hosted', 'es', '2024-01-01')")
+        )
+        conn.execute(
+            sa.text(
+                "CREATE TABLE users (id INTEGER PRIMARY KEY, organization_id INTEGER, "
+                "username VARCHAR(64), password_salt VARCHAR(32), password_hash VARCHAR(64), "
+                "role VARCHAR(16), locale VARCHAR(5), created_at DATETIME)"
+            )
+        )
+        conn.execute(sa.text("CREATE UNIQUE INDEX ix_users_username ON users (username)"))
+        conn.execute(
+            sa.text(
+                "INSERT INTO users (organization_id, username, password_salt, password_hash, role, "
+                "locale, created_at) VALUES (1, 'admin', 'salt', 'hash', 'editor', 'es', '2024-01-01')"
+            )
+        )
+    setup_engine.dispose()
+
+    patched_engine = sa.create_engine(f"sqlite:///{db_path}")
+    monkeypatch.setattr(db_module, "engine", patched_engine)
+
+    db_module.init_db()
+
+    from app.models import Organization, User
+
+    Session = sa.orm.sessionmaker(bind=patched_engine)
+    with Session() as session:
+        # A second organization picking the same username must now succeed
+        # -- impossible under the old globally-unique index this test set up.
+        other_org = Organization(name="Org B", slug="org-b")
+        session.add(other_org)
+        session.flush()
+        session.add(
+            User(
+                organization_id=other_org.id,
+                username="admin",
+                password_salt="salt",
+                password_hash="hash",
+                role="admin",
+                locale="es",
+            )
+        )
+        session.commit()  # must not raise
+
+        assert session.query(User).filter(User.username == "admin").count() == 2
 
 
 def test_firmware_and_model_columns_are_not_narrowly_length_bounded():

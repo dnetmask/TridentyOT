@@ -214,6 +214,111 @@ def _widen_device_identity_text_columns() -> None:
                 conn.execute(text(f'ALTER TABLE devices ALTER COLUMN "{column}" TYPE VARCHAR(255)'))
 
 
+def _migrate_editor_role_to_admin() -> None:
+    """User.role's 3-tier model (super_admin/admin/viewer -- see
+    app/auth/__init__.py) replaces the old 2-tier one (editor/viewer). A
+    database created under the old model has 'editor' rows that need
+    renaming to 'admin'; 'viewer' rows are untouched, and nothing here
+    creates a super_admin -- that's a deliberate manual/seed step, never an
+    automatic upgrade. Idempotent: a no-op once nothing is left to rename.
+    """
+    from app.auth import ROLE_ADMIN
+    from app.models import User
+
+    with Session(engine) as session:
+        result = session.query(User).filter(User.role == "editor").update(
+            {"role": ROLE_ADMIN}, synchronize_session=False
+        )
+        if result:
+            logger.info("Migrating schema: renamed %d user(s) from role 'editor' to '%s'", result, ROLE_ADMIN)
+        session.commit()
+
+
+def _rebuild_user_unique_constraint() -> None:
+    """User.username used to be globally unique (a single `unique=True,
+    index=True` column); the 3-role model needs it scoped per-organization
+    for admin/viewer, with a separate rule enforcing global uniqueness
+    among the org-less super_admin rows instead -- see models.py's
+    User.__table_args__. `Base.metadata.create_all()` never alters an
+    existing table's constraints, so a database that still has the old
+    globally-unique index needs it swapped explicitly, the same pattern as
+    _rebuild_device_unique_constraint above; a brand-new database already
+    gets the current definition straight from create_all() and this is a
+    same-name no-op for it.
+    """
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+
+    indexes = {ix["name"]: ix for ix in inspector.get_indexes("users")}
+    with engine.begin() as conn:
+        old_index = indexes.get("ix_users_username")
+        if old_index is not None and old_index["unique"]:
+            logger.info("Migrating schema: rebuilding users unique constraint to be organization-scoped")
+            conn.execute(text("DROP INDEX IF EXISTS ix_users_username"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_username ON users (username)"))
+
+        conn.execute(
+            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_user_org_username ON users (organization_id, username)")
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_username_super_admin "
+                "ON users (username) WHERE organization_id IS NULL"
+            )
+        )
+
+
+def _ensure_default_site_zone_sensor_and_backfill() -> None:
+    """CaptureSession.sensor_id is a column that, on a database created
+    before the Organization -> Site -> Zone -> Sensor hierarchy existed,
+    _add_missing_columns() above just added as NULL. This is the
+    hierarchy-specific follow-up: for every Organization that doesn't
+    already have one, create a "Default" Site/Zone/Sensor -- exactly like
+    _ensure_default_organization_and_backfill does for Organization itself
+    -- and point every NULL sensor_id belonging to that organization at its
+    default Sensor. Idempotent: a no-op once nothing is left to backfill.
+    """
+    from app.models import CaptureSession, Organization, Sensor, Site, Zone
+
+    with Session(engine) as session:
+        for org in session.query(Organization).all():
+            site = session.query(Site).filter(Site.organization_id == org.id).order_by(Site.id.asc()).first()
+            if site is None:
+                site = Site(organization_id=org.id, name="Default")
+                session.add(site)
+                session.flush()
+                logger.info("Migrating schema: created default site (id=%s) for org %d", site.id, org.id)
+
+            zone = session.query(Zone).filter(Zone.site_id == site.id).order_by(Zone.id.asc()).first()
+            if zone is None:
+                zone = Zone(site_id=site.id, name="Default")
+                session.add(zone)
+                session.flush()
+                logger.info("Migrating schema: created default zone (id=%s) for site %d", zone.id, site.id)
+
+            sensor = session.query(Sensor).filter(Sensor.zone_id == zone.id).order_by(Sensor.id.asc()).first()
+            if sensor is None:
+                sensor = Sensor(zone_id=zone.id, name="Default")
+                session.add(sensor)
+                session.flush()
+                logger.info("Migrating schema: created default sensor (id=%s) for zone %d", sensor.id, zone.id)
+
+            result = (
+                session.query(CaptureSession)
+                .filter(CaptureSession.organization_id == org.id, CaptureSession.sensor_id.is_(None))
+                .update({"sensor_id": sensor.id}, synchronize_session=False)
+            )
+            if result:
+                logger.info(
+                    "Migrating schema: backfilled %d capture_sessions row(s) for org %d to sensor %d",
+                    result,
+                    org.id,
+                    sensor.id,
+                )
+        session.commit()
+
+
 def init_db() -> None:
     from app import models  # noqa: F401  (ensure models are registered)
 
@@ -222,6 +327,9 @@ def init_db() -> None:
     _widen_device_identity_text_columns()
     _ensure_default_organization_and_backfill()
     _rebuild_device_unique_constraint()
+    _migrate_editor_role_to_admin()
+    _rebuild_user_unique_constraint()
+    _ensure_default_site_zone_sensor_and_backfill()
 
 
 @contextmanager

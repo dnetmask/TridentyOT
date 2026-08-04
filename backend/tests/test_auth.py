@@ -9,7 +9,7 @@ def test_login_with_default_admin_succeeds(anonymous_client):
     body = resp.json()
     assert body["token"]
     assert body["user"]["username"] == "admin"
-    assert body["user"]["role"] == "editor"
+    assert body["user"]["role"] == "admin"
 
 
 def test_login_with_wrong_password_fails(anonymous_client):

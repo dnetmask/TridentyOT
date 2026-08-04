@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
-from app.auth.deps import get_current_user, require_editor
+from app.auth.deps import get_current_user, is_super_admin, require_admin
 from app.db import get_db
 from app.i18n import message
 from app.models import Device, User, VulnerabilityFinding
@@ -21,9 +21,10 @@ def list_findings(
     query = (
         db.query(VulnerabilityFinding)
         .join(Device, VulnerabilityFinding.device_id == Device.id)
-        .filter(Device.organization_id == user.organization_id)
         .options(joinedload(VulnerabilityFinding.device))
     )
+    if not is_super_admin(user):
+        query = query.filter(Device.organization_id == user.organization_id)
     if severity:
         query = query.filter(VulnerabilityFinding.severity == severity)
     if device_id:
@@ -33,7 +34,7 @@ def list_findings(
 
 
 @router.post("/scan", response_model=list[VulnerabilityFindingOut])
-def trigger_scan(payload: ScanRequest, db: Session = Depends(get_db), user: User = Depends(require_editor)):
+def trigger_scan(payload: ScanRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     if payload.device_id is not None:
         device = (
             db.query(Device)

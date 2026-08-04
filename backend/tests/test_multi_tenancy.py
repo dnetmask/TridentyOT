@@ -11,13 +11,13 @@ from scapy.layers.l2 import Ether
 from scapy.utils import wrpcap
 from fastapi.testclient import TestClient
 
-from app.auth import ROLE_EDITOR
+from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN
 from app.auth.security import hash_password
 from app.models import Organization, User
 
 
 def _make_other_org_client(db_session, username="other-admin", password="other-pass") -> TestClient:
-    """Creates a brand-new Organization and an editor user in it, then
+    """Creates a brand-new Organization and an admin user in it, then
     returns a TestClient already authenticated as that user."""
     org = Organization(name="Other Org", slug="other-org")
     db_session.add(org)
@@ -30,7 +30,7 @@ def _make_other_org_client(db_session, username="other-admin", password="other-p
             username=username,
             password_salt=salt,
             password_hash=password_hash,
-            role=ROLE_EDITOR,
+            role=ROLE_ADMIN,
         )
     )
     db_session.commit()
@@ -117,11 +117,69 @@ def test_users_list_is_scoped_to_the_caller_s_organization(client, db_session):
     assert "admin" not in other_usernames
 
 
-def test_username_uniqueness_is_still_global_not_per_organization(client, db_session):
-    """Documented current limitation (see models.py's User.organization_id
-    comment): usernames are globally unique, not scoped per-org, until the
-    central console actually needs more than one org sharing an instance.
-    A second org creating "admin" today collides with org A's seed user."""
+def test_username_uniqueness_is_scoped_per_organization(client, db_session):
+    """A second organization picking "admin" as a username no longer
+    collides with org A's seed user -- see models.py's
+    User.__table_args__ (uq_user_org_username)."""
     other = _make_other_org_client(db_session)
     resp = other.post("/api/users", json={"username": "admin", "password": "whatever1", "role": "viewer"})
-    assert resp.status_code == 409
+    assert resp.status_code == 201
+
+
+def _make_super_admin_client(db_session, username="root", password="rootpass1") -> TestClient:
+    salt, password_hash = hash_password(password)
+    db_session.add(
+        User(
+            organization_id=None,
+            username=username,
+            password_salt=salt,
+            password_hash=password_hash,
+            role=ROLE_SUPER_ADMIN,
+        )
+    )
+    db_session.commit()
+
+    from app.main import app
+
+    super_client = TestClient(app)
+    resp = super_client.post("/api/auth/login", json={"username": username, "password": password})
+    assert resp.status_code == 200, resp.text
+    super_client.headers.update({"Authorization": f"Bearer {resp.json()['token']}"})
+    return super_client
+
+
+def test_super_admin_username_must_be_globally_unique(db_session):
+    """Two super_admin rows (organization_id IS NULL) must never share a
+    username -- the composite (organization_id, username) constraint alone
+    wouldn't catch this, since NULL != NULL. See models.py's
+    uq_user_username_super_admin partial index."""
+    _make_super_admin_client(db_session, username="root")
+
+    from sqlalchemy.exc import IntegrityError
+
+    salt, password_hash = hash_password("other-pass1")
+    db_session.add(
+        User(
+            organization_id=None,
+            username="root",
+            password_salt=salt,
+            password_hash=password_hash,
+            role=ROLE_SUPER_ADMIN,
+        )
+    )
+    try:
+        db_session.commit()
+        assert False, "expected a uniqueness violation"
+    except IntegrityError:
+        db_session.rollback()
+
+
+def test_super_admin_sees_devices_and_sessions_across_every_organization(client, db_session, tmp_path):
+    _upload_pcap_as(client, tmp_path)
+    other = _make_other_org_client(db_session)
+    _upload_pcap_as(other, tmp_path, filename="other.pcap")
+
+    super_admin = _make_super_admin_client(db_session)
+    assert len(super_admin.get("/api/inventory/devices").json()) == 4
+    assert len(super_admin.get("/api/capture/sessions").json()) == 2
+    assert len(super_admin.get("/api/users").json()) >= 3  # org A admin, org B admin, super_admin itself

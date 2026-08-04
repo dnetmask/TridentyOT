@@ -4,7 +4,7 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from app.auth.deps import get_current_user, require_editor
+from app.auth.deps import get_current_user, is_super_admin, require_admin
 from app.capture.live_capture import live_capture_manager
 from app.capture.pcap_loader import process_pcap_file
 from app.config import DATA_DIR, DEFAULT_LIVE_CAPTURE_FILTER
@@ -31,21 +31,18 @@ def list_interfaces(_user: User = Depends(get_current_user)):
 
 @router.get("/sessions", response_model=list[CaptureSessionOut])
 def list_sessions(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    sessions = (
-        db.query(CaptureSession)
-        .filter(CaptureSession.organization_id == user.organization_id)
-        .order_by(CaptureSession.started_at.desc())
-        .all()
-    )
+    query = db.query(CaptureSession)
+    if not is_super_admin(user):
+        query = query.filter(CaptureSession.organization_id == user.organization_id)
+    sessions = query.order_by(CaptureSession.started_at.desc()).all()
     return [capture_session_out(s, user.locale) for s in sessions]
 
 
 def _get_own_session(db: Session, user: User, session_id: int) -> CaptureSession:
-    session_obj = (
-        db.query(CaptureSession)
-        .filter(CaptureSession.id == session_id, CaptureSession.organization_id == user.organization_id)
-        .one_or_none()
-    )
+    query = db.query(CaptureSession).filter(CaptureSession.id == session_id)
+    if not is_super_admin(user):
+        query = query.filter(CaptureSession.organization_id == user.organization_id)
+    session_obj = query.one_or_none()
     if session_obj is None:
         raise HTTPException(status_code=404, detail=message("capture.session_not_found", user.locale))
     return session_obj
@@ -58,7 +55,7 @@ def get_session(session_id: int, db: Session = Depends(get_db), user: User = Dep
 
 @router.post("/live/start", response_model=CaptureSessionOut)
 def start_live_capture(
-    payload: StartLiveCaptureRequest, db: Session = Depends(get_db), user: User = Depends(require_editor)
+    payload: StartLiveCaptureRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)
 ):
     bpf_filter = payload.bpf_filter or DEFAULT_LIVE_CAPTURE_FILTER
     session_obj = CaptureSession(
@@ -86,7 +83,7 @@ def start_live_capture(
 
 
 @router.post("/live/stop/{session_id}", response_model=CaptureSessionOut)
-def stop_live_capture(session_id: int, db: Session = Depends(get_db), user: User = Depends(require_editor)):
+def stop_live_capture(session_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     session_obj = _get_own_session(db, user, session_id)
     if session_obj.source_type != "live":
         raise HTTPException(status_code=400, detail=message("capture.not_a_live_session", user.locale))
@@ -106,7 +103,7 @@ def stop_live_capture(session_id: int, db: Session = Depends(get_db), user: User
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
-def delete_session(session_id: int, db: Session = Depends(get_db), user: User = Depends(require_editor)):
+def delete_session(session_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     session_obj = _get_own_session(db, user, session_id)
 
     if session_obj.source_type == "live":
@@ -119,7 +116,7 @@ def delete_session(session_id: int, db: Session = Depends(get_db), user: User = 
 
 
 @router.delete("/wipe")
-def wipe_database(db: Session = Depends(get_db), user: User = Depends(require_editor)):
+def wipe_database(db: Session = Depends(get_db), user: User = Depends(require_admin)):
     """Clears every capture session, device, protocol, flow, and
     vulnerability finding belonging to the caller's organization, so a
     completely blank capture can start -- user accounts are never touched
@@ -143,7 +140,7 @@ async def upload_pcap(
     background_tasks: BackgroundTasks,
     file: UploadFile,
     db: Session = Depends(get_db),
-    user: User = Depends(require_editor),
+    user: User = Depends(require_admin),
 ):
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     dest_path = UPLOAD_DIR / f"{uuid4().hex}_{file.filename}"
