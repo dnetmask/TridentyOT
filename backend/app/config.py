@@ -40,3 +40,13 @@ SESSION_LIFETIME_SECONDS = int(os.environ.get("TRIDENTYOT_SESSION_LIFETIME_SECON
 # users exist yet. Change the password immediately after first login.
 DEFAULT_ADMIN_USERNAME = os.environ.get("TRIDENTYOT_DEFAULT_ADMIN_USERNAME", "admin")
 DEFAULT_ADMIN_PASSWORD = os.environ.get("TRIDENTYOT_DEFAULT_ADMIN_PASSWORD", "admin")
+
+# Bootstraps a Super Admin (the Netmask platform role -- no organization of
+# its own, administers every organization) on first startup. Unset by
+# default, on purpose: there is no API path that can ever create a
+# super_admin (see routes_organizations.py/routes_users.py), so a central
+# console deployment that wants one must opt in here explicitly. A
+# self-hosted single-client install has no use for this and should leave
+# it unset -- DEFAULT_ADMIN_USERNAME above already covers that case.
+SUPER_ADMIN_USERNAME = os.environ.get("TRIDENTYOT_SUPER_ADMIN_USERNAME")
+SUPER_ADMIN_PASSWORD = os.environ.get("TRIDENTYOT_SUPER_ADMIN_PASSWORD")

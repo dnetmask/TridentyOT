@@ -111,12 +111,22 @@ def _ensure_default_organization_and_backfill() -> None:
     """`organization_id` on User/CaptureSession/Device is a column that, on
     a database created before multi-tenant support existed, _add_missing_
     columns() above just added as NULL (there's no scalar default like 0/""
-    to backfill an FK with). This is the org-specific follow-up: make sure
-    at least one Organization row exists -- creating a default one on first
-    startup, exactly like seed_default_admin() does for the admin user --
-    and point every NULL organization_id at it. Idempotent: a no-op once
-    nothing is left to backfill, same as _add_missing_columns.
+    to backfill an FK with). This is the org-specific follow-up: point every
+    NULL organization_id at a default Organization, creating one on first
+    startup if there isn't one yet -- exactly like seed_default_admin() does
+    for the admin user. Idempotent: a no-op once nothing is left to
+    backfill, same as _add_missing_columns.
+
+    A completely fresh database with nothing to backfill only gets this
+    default org if no Super Admin was configured (see config.py's
+    SUPER_ADMIN_USERNAME) -- a central-console deployment that bootstraps
+    one starts with zero organizations on purpose, so its first login lands
+    on an empty "create your first organization" screen, not a
+    pre-populated "Default Organization" nobody asked for. A self-hosted
+    single-client install (no Super Admin) still gets one automatically,
+    same as before this distinction existed.
     """
+    from app.config import SUPER_ADMIN_USERNAME
     from app.models import CaptureSession, Device, Organization, User
 
     # Session(engine), not SessionLocal(): SessionLocal is a sessionmaker
@@ -127,11 +137,18 @@ def _ensure_default_organization_and_backfill() -> None:
     # same as inspect(engine)/engine.begin() elsewhere in this module.
     with Session(engine) as session:
         org = session.query(Organization).order_by(Organization.id.asc()).first()
-        if org is None:
+        needs_backfill = org is None and any(
+            session.query(model).filter(model.organization_id.is_(None)).first() is not None
+            for model in (User, CaptureSession, Device)
+        )
+        if org is None and (needs_backfill or not SUPER_ADMIN_USERNAME):
             org = Organization(name="Default Organization", slug="default")
             session.add(org)
             session.flush()
             logger.info("Migrating schema: created default organization (id=%s)", org.id)
+
+        if org is None:
+            return  # Super Admin bootstrap, nothing pre-existing to backfill -- nothing to do yet
 
         for model in (User, CaptureSession, Device):
             result = session.query(model).filter(model.organization_id.is_(None)).update(

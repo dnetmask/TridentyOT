@@ -1159,6 +1159,10 @@ async function bootstrapAfterLogin() {
   applyTranslations(); // the account's saved locale (currentUser.locale) now takes over from any local guess
   applyRoleVisibility();
   showAppShell();
+  // A Super Admin has no organization of its own -- Captura (the default
+  // tab) has nothing for it to do. Land it on Organizaciones instead,
+  // where creating the first organization is the actual first step.
+  if (isSuperAdmin()) activateTab('organizations');
   loadInterfaces();
   refreshAllData();
 

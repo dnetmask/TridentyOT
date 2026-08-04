@@ -105,10 +105,14 @@ ya capturado, y a partir de eso construye:
    - Cada hallazgo muestra el nombre del equipo afectado (auto-detectado o manual), no solo su IP.
 6. **Usuarios y control de acceso**: login con usuario/contraseña, tres perfiles —**Super Admin**
    (plataforma, sin organización propia, ve todas las organizaciones), **admin** (control total
-   dentro de su propia organización) y **visualizador** (solo lectura)—. Al primer arranque se crea
-   el usuario `admin`/`admin` (perfil admin); cámbialo cuanto antes desde la pestaña **Usuarios**.
-   El nombre de usuario es único por organización para admin/visualizador, y único de forma global
-   solo entre los Super Admin (que no tienen organización de la cual distinguirse).
+   dentro de su propia organización) y **visualizador** (solo lectura)—. Ninguna API puede crear un
+   Super Admin (ni `POST /api/users` ni `POST /api/organizations` lo permiten, a propósito, para no
+   abrir un hueco de privilegio) — se arranca por variables de entorno, ver "Consola central /
+   MSP" más abajo. Al primer arranque **sin** esas variables configuradas se crea en cambio el
+   usuario `admin`/`admin` (perfil admin, instalación de un solo cliente autoalojado); cámbialo
+   cuanto antes desde la pestaña **Usuarios**. El nombre de usuario es único por organización para
+   admin/visualizador, y único de forma global solo entre los Super Admin (que no tienen
+   organización de la cual distinguirse).
 7. **Multi-organización e idioma**: el esquema de base de datos está preparado desde ya para dos
    topologías de despliegue -- un cliente grande que **auto-aloja** su propia instancia (una sola
    `Organization`, creada automáticamente en el primer arranque) o una futura **consola central**
@@ -357,8 +361,33 @@ PDF**) ya con esa vista lista -- sin depender de ningún servicio externo de gen
 | `NVD_CACHE_TTL_SECONDS` | Tiempo de vida del caché de resultados de NVD | 86400 (24h) |
 | `TRIDENTYOT_DEFAULT_FILTER` | Filtro BPF por defecto para captura en vivo | `ip or arp` |
 | `TRIDENTYOT_SESSION_LIFETIME_SECONDS` | Duración del token de sesión antes de expirar | 604800 (7 días) |
-| `TRIDENTYOT_DEFAULT_ADMIN_USERNAME` | Usuario admin creado en el primer arranque (si no hay usuarios) | `admin` |
+| `TRIDENTYOT_DEFAULT_ADMIN_USERNAME` | Usuario admin creado en el primer arranque (si no hay usuarios **y no configuraste un Super Admin, ver abajo**) | `admin` |
 | `TRIDENTYOT_DEFAULT_ADMIN_PASSWORD` | Contraseña de ese admin inicial — **cámbiala tras el primer login** | `admin` |
+| `TRIDENTYOT_SUPER_ADMIN_USERNAME` | Si se define, arranca en modo consola central: crea un Super Admin en el primer arranque (sin organización, sin `Organization` "Default" de por medio) en vez del admin/organización por defecto de arriba | — (deshabilitado) |
+| `TRIDENTYOT_SUPER_ADMIN_PASSWORD` | Contraseña de ese Super Admin — **obligatoria** si definiste `TRIDENTYOT_SUPER_ADMIN_USERNAME` (el arranque falla con un error claro si falta) | — |
+
+### Consola central / MSP: arrancar con un Super Admin
+
+Un despliegue de un solo cliente (auto-alojado) no necesita nada de esto -- deja las dos
+variables `TRIDENTYOT_SUPER_ADMIN_*` sin definir y el primer arranque crea el usuario
+`admin`/`admin` de siempre. Pero si estás levantando la consola central de Netmask (o cualquier
+instancia pensada para servir a varios clientes desde el día uno, patrón MSP), no hay ningún
+endpoint que pueda crear un Super Admin -- ni `POST /api/users` ni `POST /api/organizations` lo
+permiten, a propósito, para que ninguna cuenta de una organización pueda auto-otorgarse ese rol.
+Definí las dos variables antes del primer arranque:
+
+```bash
+TRIDENTYOT_SUPER_ADMIN_USERNAME=root TRIDENTYOT_SUPER_ADMIN_PASSWORD=cambiame-ya \
+  docker compose up -d
+```
+
+Con eso, el primer login (`root`/`cambiame-ya`) entra directo a la pestaña **Organizaciones** —
+la instancia arranca sin ninguna organización todavía, ni una "Default" de relleno — y desde ahí
+se da de alta la primera organización real (con su propio usuario admin incluido en el mismo
+formulario). Cada organización, después, entra a **Infraestructura** para dar de alta sus propios
+`Site` (sedes) → `Zone` (áreas, con nivel de seguridad IEC&nbsp;62443 opcional) → `Sensor`.
+Cambiá la contraseña del Super Admin cuanto antes desde la pestaña **Usuarios**... salvo que
+prefieras dejarla fija por variable de entorno y rotarla ahí mismo en el próximo despliegue.
 
 ## Actualizar una instalación existente
 

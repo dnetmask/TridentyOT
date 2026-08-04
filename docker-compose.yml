@@ -42,6 +42,15 @@ services:
       # requests/30s. Leave unset to use the (slower, still functional)
       # unauthenticated limit.
       NVD_API_KEY: ${NVD_API_KEY:-}
+      # Uncomment both to boot as a central console serving multiple
+      # organizations (MSP/managed pattern) instead of a single self-hosted
+      # client -- see README.md "Consola central / MSP". No API can ever
+      # create a Super Admin, so this is the only way to get one; leave
+      # both unset for the default single-client install (TRIDENTYOT_
+      # DEFAULT_ADMIN_USERNAME/PASSWORD further up the README, admin/admin
+      # unless overridden).
+      # TRIDENTYOT_SUPER_ADMIN_USERNAME: root
+      # TRIDENTYOT_SUPER_ADMIN_PASSWORD: change-me-before-first-boot
     # Needed only for *live* packet capture (raw sockets), not for
     # uploading/analyzing .pcap files. Harmless to leave on otherwise.
     cap_add:
