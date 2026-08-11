@@ -1180,6 +1180,19 @@ function showAppShell() {
   $('#app-shell').classList.remove('hidden');
 }
 
+// FastAPI's own request-validation errors (422, e.g. a field failing a
+// regex pattern) send `detail` as a list of {msg, loc, ...} objects, not a
+// string like every hand-written HTTPException in this app uses --
+// new Error(thatArray) would otherwise stringify to "[object Object]".
+function formatErrorDetail(detail) {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(d => (d && typeof d === 'object' && d.msg) ? d.msg : JSON.stringify(d)).join('; ');
+  }
+  if (detail && typeof detail === 'object') return JSON.stringify(detail);
+  return String(detail);
+}
+
 async function api(path, options = {}) {
   const headers = Object.assign({}, options.headers || {});
   const token = getToken();
@@ -1195,8 +1208,11 @@ async function api(path, options = {}) {
   }
   if (!res.ok) {
     let detail = res.statusText;
-    try { detail = (await res.json()).detail || detail; } catch (e) {}
-    throw new Error(detail);
+    try {
+      const body = await res.json();
+      if (body && body.detail !== undefined && body.detail !== null) detail = body.detail;
+    } catch (e) {}
+    throw new Error(formatErrorDetail(detail));
   }
   if (res.status === 204) return null;
   return res.json();
@@ -2644,6 +2660,23 @@ $('#create-sensor-btn').addEventListener('click', async () => {
   } catch (e) { $('#create-sensor-error').textContent = e.message; }
 });
 
+// The backend requires the slug to be lowercase (^[a-z0-9][a-z0-9-]*$,
+// see OrganizationCreateRequest) -- auto-deriving it from the name, and
+// sanitizing whatever's typed directly into it, means a mixed-case name
+// like "Netmask-co" never trips that validation in the first place.
+let orgSlugTouched = false;
+function slugify(value) {
+  return value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+/, '');
+}
+$('#new-org-name').addEventListener('input', () => {
+  if (!orgSlugTouched) $('#new-org-slug').value = slugify($('#new-org-name').value);
+});
+$('#new-org-slug').addEventListener('input', (e) => {
+  orgSlugTouched = true;
+  const sanitized = slugify(e.target.value);
+  if (sanitized !== e.target.value) e.target.value = sanitized;
+});
+
 $('#create-org-btn').addEventListener('click', async () => {
   const name = $('#new-org-name').value.trim();
   const slug = $('#new-org-slug').value.trim();
@@ -2661,6 +2694,7 @@ $('#create-org-btn').addEventListener('click', async () => {
     $('#new-org-slug').value = '';
     $('#new-org-admin-username').value = '';
     $('#new-org-admin-password').value = '';
+    orgSlugTouched = false;
     selectedOrgId = created.organization.id; // jump the org switcher straight to the one just created
     loadOrganizations();
   } catch (e) { $('#create-org-error').textContent = e.message; }
