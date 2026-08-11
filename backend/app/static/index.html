@@ -309,15 +309,6 @@
   .stat-tile .stat-num.network { color: var(--info); }
   .stat-tile .stat-num.other { color: var(--other); }
   .stat-tile .stat-label { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
-  .home-options-grid { display: flex; flex-wrap: wrap; gap: 10px; }
-  .home-option-card {
-    flex: 1; min-width: 180px; text-align: left; font: inherit; color: var(--text);
-    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
-    padding: 12px 14px; cursor: pointer;
-  }
-  .home-option-card:hover { border-color: var(--accent); }
-  .home-option-title { font-weight: 700; font-size: 13.5px; }
-  .home-option-hint { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
   .refresh-timer { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
   .table-scroll { overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
   .table-scroll table { width: 100%; border-collapse: collapse; }
@@ -488,12 +479,18 @@
       <div class="stat-row" id="home-stats"></div>
     </div>
     <div class="card">
-      <h2 data-i18n="home.zones_title">Zonas de este sitio</h2>
-      <div class="home-options-grid" id="home-zones"></div>
-    </div>
-    <div class="card">
-      <h2 data-i18n="home.quick_links_title">Accesos rápidos</h2>
-      <div class="home-options-grid" id="home-quick-links"></div>
+      <h2 id="home-breakdown-title">Por sitio</h2>
+      <table>
+        <thead>
+          <tr>
+            <th id="home-breakdown-col-label">Sitio</th>
+            <th data-i18n="home.breakdown_col_devices">Dispositivos</th>
+            <th data-i18n="home.breakdown_col_ot">Sospechosos de OT</th>
+            <th data-i18n="home.breakdown_col_findings">Hallazgos</th>
+          </tr>
+        </thead>
+        <tbody id="home-breakdown-body"><tr><td colspan="4" class="empty">Sin datos</td></tr></tbody>
+      </table>
     </div>
   </section>
 
@@ -1064,8 +1061,9 @@ const I18N = {
   'login.password': { es: 'Contraseña', en: 'Password' },
   'login.submit': { es: 'Entrar', en: 'Sign in' },
   'common.clear_filters': { es: 'Limpiar filtros', en: 'Clear filters' },
-  'home.zones_title': { es: 'Zonas de este sitio', en: 'Zones in this site' },
-  'home.quick_links_title': { es: 'Accesos rápidos', en: 'Quick links' },
+  'home.breakdown_col_devices': { es: 'Dispositivos', en: 'Devices' },
+  'home.breakdown_col_ot': { es: 'Sospechosos de OT', en: 'Suspected OT' },
+  'home.breakdown_col_findings': { es: 'Hallazgos', en: 'Findings' },
   'nav.discovery': { es: 'Descubrimiento activo', en: 'Active discovery' },
   'discovery.intro': {
     es: 'Envía tráfico a la red para identificar equipos que la captura pasiva todavía no vio -- a diferencia de Captura, esto no es pasivo. Elegí el sensor y la interfaz sobre la que transmitir antes de escanear.',
@@ -2520,6 +2518,15 @@ let activeRailKey = null;
 let selectedZoneId = null;
 let selectedSiteId = null;
 let selectedLeafTab = null;
+// Which level the Home tab's indicator summary rolls up to -- picking an
+// Organización summarizes it by Sitio, picking a Sitio summarizes it by
+// Zona (see selectOrgContext/selectSiteContext and toggleFlyout's
+// org-switcher/site-switcher cases, and loadHomeSummary below).
+let homeScope = 'site';
+// Bumped on every loadHomeSummary() call so a slower-to-resolve fetch from
+// a scope/org/site the user has since navigated away from never overwrites
+// what's actually on screen once it finally comes back.
+let homeSummaryToken = 0;
 
 const SENSOR_KIND_LABELS = { live: 'En vivo', external: 'Externo (solo pcap)' };
 const ZONE_LEAVES = [
@@ -2690,7 +2697,11 @@ function toggleFlyout(key) {
     // Opening the Organización/Sitio switcher jumps to Home instead of
     // leaving whatever Zona-specific tab was on screen -- picking a
     // different org/site from the list that follows would invalidate it
-    // anyway (see selectOrgContext/selectSiteContext below).
+    // anyway (see selectOrgContext/selectSiteContext below). Also sets
+    // Home's own scope: opening the Organización switcher means "show me
+    // this org rolled up by Sitio", opening the Sitio one means "show me
+    // this Sitio rolled up by Zona" -- even before an actual switch.
+    homeScope = key === 'org-switcher' ? 'organization' : 'site';
     activateTab('home');
     openFlyoutKey = key;
     renderSidebarRail();
@@ -2708,11 +2719,13 @@ function closeFlyout() {
 function selectOrgContext(orgId) {
   selectedOrgId = orgId;
   currentSiteId = null; // re-derived to the new org's first site on next render
+  homeScope = 'organization';
   activateTab('home'); // switching org invalidates whatever Zona/Sitio tab was on screen
 }
 
 function selectSiteContext(siteId) {
   currentSiteId = siteId;
+  homeScope = 'site';
   activateTab('home'); // same as above, but for switching Sitio within the same org
 }
 
@@ -2843,39 +2856,67 @@ function renderHomeContent() {
   const orgName = org ? org.name : (currentUser.organization_name || currentUser.username);
   const sitesForOrg = orgId != null ? allSites.filter(s => s.organization_id === orgId) : [];
   const site = sitesForOrg.find(s => s.id === currentSiteId) || null;
-  const zonesForSite = site ? allZones.filter(z => z.site_id === site.id) : [];
-  const sensorsForSite = zonesForSite.length ? allSensors.filter(s => zonesForSite.some(z => z.id === s.zone_id)) : [];
-  const admin = isAdmin();
 
   titleEl.textContent = orgId != null ? orgName : 'Bienvenido';
-  $('#home-subtitle').textContent = site
-    ? `Sitio actual: ${site.name}`
-    : (orgId != null ? 'Sin sitios todavía' : 'Sin organización asignada');
+  $('#home-subtitle').textContent = homeScope === 'organization'
+    ? (orgId != null ? 'Resumen de todos los sitios de la organización' : 'Sin organización asignada')
+    : (site ? `Resumen de todas las zonas de ${site.name}` : (orgId != null ? 'Sin sitios todavía' : 'Sin organización asignada'));
+
+  $('#home-breakdown-title').textContent = homeScope === 'organization' ? 'Por sitio' : 'Por zona';
+  $('#home-breakdown-col-label').textContent = homeScope === 'organization' ? 'Sitio' : 'Zona';
+
+  loadHomeSummary();
+}
+
+// Builds the same kind of stat-tile + breakdown table Reportes shows, but
+// rolled up one level below whatever was just selected -- see homeScope's
+// own comment. Each row needs its own site_id/zone_id-filtered fetch (no
+// endpoint returns a ready-made group-by), so this is async; the token
+// guards against a stale response from a scope/org/site the user has
+// since navigated away from overwriting whatever's actually on screen by
+// the time it resolves.
+async function loadHomeSummary() {
+  const token = ++homeSummaryToken;
+  const orgId = currentOrgId();
+  const sitesForOrg = orgId != null ? allSites.filter(s => s.organization_id === orgId) : [];
+  const site = sitesForOrg.find(s => s.id === currentSiteId) || null;
+
+  const children = homeScope === 'organization'
+    ? sitesForOrg.map(s => ({ id: s.id, name: s.name, query: `site_id=${s.id}`, onClick: `selectSiteContext(${s.id})` }))
+    : (site ? allZones.filter(z => z.site_id === site.id).map(z => ({ id: z.id, name: z.name, query: `zone_id=${z.id}`, onClick: `selectZoneLeaf(${z.id}, 'capture')` })) : []);
+
+  $('#home-stats').innerHTML = `<div class="muted">Cargando resumen...</div>`;
+  const rows = await Promise.all(children.map(async child => {
+    const [devices, findings] = await Promise.all([
+      api(`/api/inventory/devices?${child.query}`),
+      api(`/api/vuln/findings?${child.query}`),
+    ]);
+    return { ...child, devices, findings };
+  }));
+
+  if (token !== homeSummaryToken) return; // scope/org/site changed while this was in flight -- discard
+  renderHomeSummary(rows);
+}
+
+function renderHomeSummary(rows) {
+  const totalDevices = rows.reduce((sum, r) => sum + r.devices.length, 0);
+  const otDevices = rows.reduce((sum, r) => sum + r.devices.filter(d => d.is_ot_suspected).length, 0);
+  const totalFindings = rows.reduce((sum, r) => sum + r.findings.length, 0);
 
   $('#home-stats').innerHTML = `
-    <div class="stat-tile"><div class="stat-num">${sitesForOrg.length}</div><div class="stat-label">Sitios</div></div>
-    <div class="stat-tile"><div class="stat-num">${zonesForSite.length}</div><div class="stat-label">Zonas en este sitio</div></div>
-    <div class="stat-tile"><div class="stat-num">${sensorsForSite.length}</div><div class="stat-label">Sensores en este sitio</div></div>
+    <div class="stat-tile"><div class="stat-num">${totalDevices}</div><div class="stat-label">Dispositivos</div></div>
+    <div class="stat-tile"><div class="stat-num ot">${otDevices}</div><div class="stat-label">Sospechosos de OT</div></div>
+    <div class="stat-tile"><div class="stat-num">${totalFindings}</div><div class="stat-label">Hallazgos de vulnerabilidades</div></div>
   `;
 
-  const zoneCardsHtml = zonesForSite.map(zone => `
-    <button type="button" class="home-option-card" onclick="selectZoneLeaf(${zone.id}, 'capture')">
-      <div class="home-option-title">${escapeHtml(zone.name)}</div>
-      <div class="home-option-hint">Ver Captura</div>
-    </button>`).join('');
-  const emptyZonesHtml = site
-    ? `<div class="tree-empty">${admin ? 'Sin zonas — creá una con "+ Zona"' : 'Sin zonas'}</div>`
-    : `<div class="tree-empty">${orgId != null ? 'Sin sitios' : 'Sin organización'}</div>`;
-  $('#home-zones').innerHTML = zoneCardsHtml || emptyZonesHtml;
-
-  const quickLinksHtml = [
-    site ? `<button type="button" class="home-option-card" onclick="selectSiteLeaf(${site.id}, 'reports')"><div class="home-option-title">Reportes</div><div class="home-option-hint">Resumen combinado del sitio</div></button>` : '',
-    admin && orgId != null ? `<button type="button" class="home-option-card" onclick="openCreateSite(${orgId})"><div class="home-option-title">+ Nuevo sitio</div></button>` : '',
-    admin && site ? `<button type="button" class="home-option-card" onclick="openCreateZone(${site.id})"><div class="home-option-title">+ Nueva zona</div></button>` : '',
-    admin ? `<button type="button" class="home-option-card" onclick="activateTab('users')"><div class="home-option-title">Administración</div><div class="home-option-hint">Usuarios de la organización</div></button>` : '',
-    isSuperAdmin() ? `<button type="button" class="home-option-card" onclick="openCreateOrg()"><div class="home-option-title">+ Nueva organización</div></button>` : '',
-  ].filter(Boolean).join('');
-  $('#home-quick-links').innerHTML = quickLinksHtml || `<div class="tree-empty">Sin acciones disponibles</div>`;
+  const emptyLabel = homeScope === 'organization' ? 'Sin sitios' : 'Sin zonas';
+  $('#home-breakdown-body').innerHTML = rows.map(r => `
+    <tr class="clickable" onclick="${r.onClick}">
+      <td>${escapeHtml(r.name)}</td>
+      <td>${r.devices.length}</td>
+      <td>${r.devices.filter(d => d.is_ot_suspected).length}</td>
+      <td>${r.findings.length}</td>
+    </tr>`).join('') || `<tr><td colspan="4" class="empty">${emptyLabel}</td></tr>`;
 }
 
 function buildOrgSwitcherFlyout() {
