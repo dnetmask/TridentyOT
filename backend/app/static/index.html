@@ -126,66 +126,92 @@
   }
   .sidebar .user-box button { margin-top: 10px; width: 100%; }
 
-  /* ---------- nav tree: Organización > Sitio > Zona ---------- */
-  .org-switcher { display: flex; gap: 6px; align-items: center; margin: 4px 0 8px; }
-  .org-switcher select { flex: 1; min-width: 0; font-size: 12.5px; padding: 6px 8px; }
-  .nav-tree-wrap { flex: 1; overflow-y: auto; margin: 4px -4px 8px; padding: 0 4px; }
-  .nav-tree { display: flex; flex-direction: column; gap: 1px; }
-  .tree-root-label {
-    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;
-    color: var(--muted); padding: 4px 8px 6px;
+  /* ---------- sidebar rail: Organización / Sitio switchers + Zona rail ----------
+     Meraki-dashboard-style: two "current context" switcher cards up top,
+     then a rail of rows (one per Zona, plus Reportes and Organización)
+     that each expand a flyout panel to the right on click -- see
+     .flyout-panel below. Nothing here is inline-expandable anymore; a
+     narrow sidebar column has no room to both show a full name and nest
+     children under it legibly, which is what the previous indented-tree
+     version ran into. */
+  .rail { flex: 1; overflow-y: auto; margin: 4px -4px 8px; padding: 0 4px; display: flex; flex-direction: column; }
+  .rail-card {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid var(--border); cursor: pointer; margin-bottom: 6px; background: var(--panel);
   }
-  /* Organización and Sitio are shown as bold titles on their own full-width
-     line, not tabbed/indented tree rows sharing space with action buttons
-     -- either of those squeezed their names down to a sliver of the
-     sidebar's width and truncated/mangled them illegibly. Their action
-     buttons sit on their own line right below (.tree-actions), and only
-     Zona (and its Captura/Inventario/Flujos/Vulnerabilidades leaves) keeps
-     the classic indented, collapsible tree-row styling below. */
-  .tree-org { margin-bottom: 10px; }
-  .tree-org-title {
-    font-size: 14.5px; font-weight: 700; color: var(--text);
-    padding: 4px 4px 2px; overflow-wrap: break-word;
+  .rail-card:hover { background: var(--panel-2); }
+  .rail-card.open { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent); }
+  .rail-card-text { flex: 1; min-width: 0; }
+  .rail-card-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
   }
-  .tree-org > .tree-actions { padding: 0 4px 6px; }
-  .tree-org-children { margin-top: 2px; }
-  .tree-site { margin: 8px 0 8px 2px; }
-  .tree-site-title {
-    font-size: 13px; font-weight: 600; color: var(--text);
-    padding: 4px 4px 2px; overflow-wrap: break-word;
-  }
-  .tree-site > .tree-actions { padding: 0 4px 6px; }
-  .tree-site-children { margin-top: 2px; }
-  .tree-row { display: flex; align-items: center; gap: 4px; padding: 6px 4px; border-radius: 6px; }
-  .tree-row:hover { background: var(--panel-2); }
-  .tree-toggle {
-    background: none; border: none; color: var(--muted); cursor: pointer;
-    font-size: 9px; width: 14px; flex: none; padding: 0; line-height: 1;
-  }
-  .tree-toggle.spacer-toggle { visibility: hidden; }
-  .tree-label {
-    flex: 1; font-size: 13px; color: var(--text); cursor: pointer;
+  .rail-card-value {
+    font-size: 13.5px; font-weight: 700; color: var(--text);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .tree-actions { display: flex; gap: 4px; flex: none; flex-wrap: wrap; }
-  .tree-action {
-    background: none; border: 1px solid var(--border); color: var(--muted);
-    font-size: 10px; padding: 2px 6px; border-radius: 5px; cursor: pointer; white-space: nowrap;
+  .rail-card-chevron { color: var(--muted); flex: none; font-size: 15px; }
+  .rail-list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+  .rail-item {
+    display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px;
+    background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13.5px;
+    width: 100%; text-align: left;
   }
-  .tree-action:hover { background: var(--panel-2); color: var(--text); }
-  .tree-action.rename { padding: 2px 7px; }
-  .tree-children { margin-left: 15px; border-left: 1px solid var(--border); padding-left: 8px; }
-  .tree-children.collapsed { display: none; }
-  .tree-leaf {
-    display: block; width: 100%; text-align: left; background: none; border: none;
-    color: var(--muted); padding: 6px 8px; font-size: 12.5px; border-radius: 6px; cursor: pointer;
+  .rail-item:hover { background: var(--panel-2); color: var(--text); }
+  .rail-item.open, .rail-item.active {
+    background: var(--panel-2); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); font-weight: 600;
   }
-  .tree-leaf:hover { background: var(--panel-2); color: var(--text); }
-  .tree-leaf.active {
-    background: var(--panel-2); color: var(--text);
-    box-shadow: inset 3px 0 0 var(--accent); font-weight: 600;
+  .rail-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rail-item-chevron { flex: none; color: var(--muted); font-size: 14px; }
+  .rail-add {
+    display: block; width: 100%; text-align: left; padding: 7px 10px; border-radius: 8px;
+    background: none; border: 1px dashed var(--border); color: var(--muted);
+    cursor: pointer; font-size: 12.5px; margin-top: 2px;
   }
+  .rail-add:hover { background: var(--panel-2); color: var(--text); border-color: var(--accent); }
   .tree-empty { font-size: 11px; color: var(--muted); padding: 4px 8px 8px; font-style: italic; }
+
+  /* ---------- flyout panel: opens to the right of the sidebar on a rail click ---------- */
+  .flyout-backdrop { position: fixed; inset: 0; background: rgba(4, 9, 20, 0.35); z-index: 40; }
+  .flyout-backdrop.hidden { display: none; }
+  .flyout-panel {
+    position: fixed; top: 0; left: var(--sidebar-w); width: 300px; max-width: calc(100vw - var(--sidebar-w));
+    height: 100vh; background: var(--panel); border-right: 1px solid var(--border);
+    z-index: 41; padding: 20px 18px; overflow-y: auto; box-shadow: 10px 0 30px rgba(0,0,0,0.25);
+  }
+  .flyout-panel.hidden { display: none; }
+  .flyout-header {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+    padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 6px;
+  }
+  .flyout-title { font-size: 19px; font-weight: 800; color: var(--text); overflow-wrap: break-word; }
+  .flyout-close {
+    background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer;
+    line-height: 1; padding: 2px 4px; flex: none;
+  }
+  .flyout-close:hover { color: var(--text); }
+  .flyout-section-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;
+    color: var(--muted); margin: 16px 0 6px;
+  }
+  .flyout-section-title:first-of-type { margin-top: 6px; }
+  .flyout-link {
+    display: block; width: 100%; text-align: left; background: none; border: none;
+    color: var(--text); padding: 8px 6px; font-size: 13.5px; border-radius: 6px; cursor: pointer;
+  }
+  .flyout-link:hover { background: var(--panel-2); }
+  .flyout-row { display: flex; align-items: center; gap: 6px; }
+  .flyout-row .flyout-link { flex: 1; }
+  .flyout-icon-btn {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    font-size: 11px; padding: 3px 7px; border-radius: 5px; cursor: pointer; flex: none;
+  }
+  .flyout-icon-btn:hover { background: var(--panel-2); color: var(--text); }
+  .flyout-empty { font-size: 12px; color: var(--muted); font-style: italic; padding: 8px 6px; }
+  .flyout-add {
+    display: block; width: 100%; text-align: left; background: none; border: 1px dashed var(--border);
+    color: var(--muted); padding: 8px 10px; font-size: 12.5px; border-radius: 6px; cursor: pointer; margin-top: 12px;
+  }
+  .flyout-add:hover { background: var(--panel-2); color: var(--text); border-color: var(--accent); }
 
   /* ---------- breadcrumb: which Zona is providing the current view ---------- */
   .zone-breadcrumb {
@@ -413,14 +439,7 @@
       <div class="subtitle" data-i18n="app.subtitle">Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)</div>
     </div>
 
-    <div class="org-switcher super-admin-only hidden" id="org-switcher">
-      <select id="org-switcher-select" onchange="switchOrgContext(this.value)"></select>
-      <button type="button" class="tree-action" onclick="openCreateOrg()">+ Organización</button>
-    </div>
-
-    <div class="nav-tree-wrap">
-      <div class="nav-tree" id="nav-tree"></div>
-    </div>
+    <div class="rail" id="sidebar-rail"></div>
 
     <div class="theme-toggle">
       <span id="lang-toggle-label">ES</span>
@@ -442,6 +461,9 @@
       <button class="action secondary" id="logout-btn" data-i18n="nav.logout">Cerrar sesión</button>
     </div>
   </aside>
+
+  <div class="flyout-backdrop hidden" id="flyout-backdrop" onclick="closeFlyout()"></div>
+  <div class="flyout-panel hidden" id="flyout-panel"></div>
 
   <main>
 
@@ -1155,7 +1177,7 @@ function applyRoleVisibility() {
   $$('.admin-only').forEach(el => el.classList.toggle('hidden', !admin));
   $$('.super-admin-only').forEach(el => el.classList.toggle('hidden', !superAdmin));
   $$('.viewer-only').forEach(el => el.classList.toggle('hidden', admin));
-  renderNavTree();
+  renderSidebarRail();
 }
 
 const ROLE_LABELS = { super_admin: 'Super Admin', admin: 'Administrador', viewer: 'Visualizador' };
@@ -1296,13 +1318,16 @@ $('#logout-btn').addEventListener('click', async () => {
 });
 
 function activateTab(name) {
-  // Defaults to "nothing selected" on every switch; selectZoneTab() (for a
-  // Zona's Captura/Inventario/Flujos/Vulnerabilidades) and selectSiteTab()
-  // (for a Sitio's Reportes) set the relevant one back right after calling
-  // this.
+  // Defaults to "nothing selected" on every switch; selectZoneLeaf() (for a
+  // Zona's Captura/Inventario/Flujos/Vulnerabilidades) and selectSiteLeaf()
+  // (for a Sitio's Reportes) set the relevant ones back right after calling
+  // this. Also closes whichever flyout panel was open, since its contents
+  // no longer describe what's on screen.
   selectedZoneId = null;
   selectedSiteId = null;
   selectedLeafTab = null;
+  activeRailKey = null;
+  openFlyoutKey = null;
   const breadcrumb = $('#zone-breadcrumb');
   if (breadcrumb) breadcrumb.classList.add('hidden');
 
@@ -1313,7 +1338,7 @@ function activateTab(name) {
   if (name === 'inventory') fitTableScroll('devices-scroll');
   if (name === 'flows') fitTableScroll('flows-scroll');
   if (name === 'vulns') fitTableScroll('findings-scroll');
-  renderNavTree();
+  renderSidebarRail();
 }
 
 async function jumpToDevice(deviceId) {
@@ -2268,19 +2293,34 @@ $('#create-user-btn').addEventListener('click', async () => {
   } catch (e) { $('#create-user-error').textContent = e.message; }
 });
 
-// ---------- Nav tree: Organización > Sitio > Zona ----------
+// ---------- Sidebar: Meraki-style rail + flyout ----------
+// Two switcher cards (Organización, Sitio) plus a rail of clickable rows
+// (one per Zona in the current Sitio, plus Reportes and Organización-admin)
+// -- clicking any of them opens a flyout panel to the right (#flyout-panel)
+// grouping its destinations under Monitor/Configure, exactly like Meraki's
+// dashboard nav. Selecting a destination inside the flyout closes it and
+// loads the tab; the rail row it came from stays highlighted (activeRailKey)
+// so there's still a visible "you are here" after the flyout closes.
 let allSites = [];
 let allZones = [];
 let allSensors = [];
 let allOrganizations = [];
-// Which organization's tree a Super Admin is currently looking at (picked
-// via the #org-switcher-select dropdown) -- irrelevant for admin/viewer,
-// who only ever see their own organization.
+// Which organization's rail a Super Admin is currently looking at -- picked
+// from the Organización switcher flyout. Irrelevant for admin/viewer, who
+// only ever see their own organization.
 let selectedOrgId = null;
+// Which Sitio's Zonas populate the rail -- picked from the Sitio switcher
+// flyout. Analogous to Meraki's "current network".
+let currentSiteId = null;
+// Key of the flyout currently open (null when closed): 'org-switcher',
+// 'site-switcher', 'org-admin', 'reports', or `zone-<id>`.
+let openFlyoutKey = null;
+// Key of the rail row whose destination is the content currently on
+// screen -- kept highlighted even after its flyout closes.
+let activeRailKey = null;
 let selectedZoneId = null;
 let selectedSiteId = null;
 let selectedLeafTab = null;
-const collapsedTreeNodes = new Set();
 
 const SENSOR_KIND_LABELS = { live: 'En vivo', external: 'Externo (solo pcap)' };
 const ZONE_LEAVES = [
@@ -2289,6 +2329,11 @@ const ZONE_LEAVES = [
   { tab: 'flows', label: 'Flujos' },
   { tab: 'vulns', label: 'Vulnerabilidades' },
 ];
+// Which Zona leaves are grouped under each flyout heading -- Inventario/
+// Flujos/Vulnerabilidades are read-only analysis (Monitor), Captura is
+// where you actively start/stop capture and manage sessions (Configure).
+const ZONE_MONITOR_TABS = ['inventory', 'flows', 'vulns'];
+const ZONE_CONFIGURE_TABS = ['capture'];
 // Reportes lives one level up from the Zona leaves, at the Sitio itself --
 // unlike Captura/Inventario/Flujos/Vulnerabilidades it's not pretending to
 // be zone-scoped: it's deliberately always a whole-organization summary
@@ -2304,10 +2349,17 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// The organization whose Sitio/Zona rail is on screen: the caller's own
+// for admin/viewer, or whichever one Super Admin picked in the switcher.
+function currentOrgId() {
+  if (isSuperAdmin()) return selectedOrgId;
+  return currentUser ? currentUser.organization_id : null;
+}
+
 async function loadSites() {
   allSites = await api('/api/sites');
   populateSiteSelects();
-  renderNavTree();
+  renderSidebarRail();
 }
 
 function populateSiteSelects() {
@@ -2325,7 +2377,7 @@ function populateSiteSelects() {
 async function loadZones() {
   allZones = await api('/api/zones');
   populateZoneSelects();
-  renderNavTree();
+  renderSidebarRail();
 }
 
 function populateZoneSelects() {
@@ -2339,14 +2391,14 @@ function populateZoneSelects() {
 
 async function loadSensors() {
   allSensors = await api('/api/sensors');
-  renderNavTree();
+  renderSidebarRail();
 }
 
 async function loadOrganizations() {
   allOrganizations = await api('/api/organizations');
   populateOrganizationSelect();
   populateSiteSelects(); // re-labels site options with org names now that allOrganizations is loaded
-  renderNavTree();
+  renderSidebarRail();
 }
 
 function populateOrganizationSelect() {
@@ -2357,130 +2409,225 @@ function populateOrganizationSelect() {
   if (previous && allOrganizations.some(o => String(o.id) === previous)) select.value = previous;
 }
 
-function toggleTreeNode(key) {
-  if (collapsedTreeNodes.has(key)) collapsedTreeNodes.delete(key);
-  else collapsedTreeNodes.add(key);
-  renderNavTree();
+function toggleFlyout(key) {
+  openFlyoutKey = (openFlyoutKey === key) ? null : key;
+  renderSidebarRail();
 }
 
-function treeToggleHtml(key, hasChildren) {
-  if (!hasChildren) return '<span class="tree-toggle spacer-toggle">▾</span>';
-  const collapsed = collapsedTreeNodes.has(key);
-  return `<button type="button" class="tree-toggle" onclick="toggleTreeNode('${key}')">${collapsed ? '▸' : '▾'}</button>`;
+function closeFlyout() {
+  openFlyoutKey = null;
+  renderSidebarRail();
 }
 
-function renderZoneNode(zone) {
-  const key = `zone-${zone.id}`;
+function selectOrgContext(orgId) {
+  selectedOrgId = orgId;
+  currentSiteId = null; // re-derived to the new org's first site on next render
+  activeRailKey = null;
+  openFlyoutKey = null;
+  renderSidebarRail();
+}
+
+function selectSiteContext(siteId) {
+  currentSiteId = siteId;
+  activeRailKey = null;
+  openFlyoutKey = null;
+  renderSidebarRail();
+}
+
+function renderSidebarRail() {
+  const container = $('#sidebar-rail');
+  if (!container || !currentUser) return;
+  if (!isSuperAdmin() && !currentUser.organization_id) { container.innerHTML = ''; renderFlyoutPanel(); return; }
+
+  const admin = isAdmin();
+  // Defaults to the first organization the first time (or after the
+  // previously selected one no longer exists, e.g. right after login).
+  if (isSuperAdmin() && allOrganizations.length && (selectedOrgId == null || !allOrganizations.some(o => o.id === selectedOrgId))) {
+    selectedOrgId = allOrganizations[0].id;
+  }
+  const orgId = currentOrgId();
+
+  let orgCardHtml = '';
+  if (orgId != null) {
+    const org = allOrganizations.find(o => o.id === orgId) || { id: orgId, name: currentUser.organization_name || currentUser.username };
+    orgCardHtml = `
+      <div class="rail-card${openFlyoutKey === 'org-switcher' ? ' open' : ''}" onclick="toggleFlyout('org-switcher')">
+        <div class="rail-card-text">
+          <div class="rail-card-label">Organización</div>
+          <div class="rail-card-value" title="${escapeHtml(org.name)}">${escapeHtml(org.name)}</div>
+        </div>
+        <span class="rail-card-chevron">›</span>
+      </div>`;
+  } else if (isSuperAdmin()) {
+    orgCardHtml = `
+      <div class="rail-card${openFlyoutKey === 'org-switcher' ? ' open' : ''}" onclick="toggleFlyout('org-switcher')">
+        <div class="rail-card-text">
+          <div class="rail-card-label">Organización</div>
+          <div class="rail-card-value">Sin organizaciones</div>
+        </div>
+        <span class="rail-card-chevron">›</span>
+      </div>`;
+  }
+
+  const sitesForOrg = orgId != null ? allSites.filter(s => s.organization_id === orgId) : [];
+  if (currentSiteId == null || !sitesForOrg.some(s => s.id === currentSiteId)) {
+    currentSiteId = sitesForOrg.length ? sitesForOrg[0].id : null;
+  }
+  const currentSite = sitesForOrg.find(s => s.id === currentSiteId) || null;
+
+  let siteCardHtml = '';
+  if (orgId != null) {
+    siteCardHtml = `
+      <div class="rail-card${openFlyoutKey === 'site-switcher' ? ' open' : ''}" onclick="toggleFlyout('site-switcher')">
+        <div class="rail-card-text">
+          <div class="rail-card-label">Sitio</div>
+          <div class="rail-card-value" title="${escapeHtml(currentSite ? currentSite.name : '')}">${currentSite ? escapeHtml(currentSite.name) : 'Sin sitios'}</div>
+        </div>
+        <span class="rail-card-chevron">›</span>
+      </div>`;
+  }
+
+  const zonesForSite = currentSiteId != null ? allZones.filter(z => z.site_id === currentSiteId) : [];
+  const zoneRowsHtml = zonesForSite.map(zone => {
+    const key = `zone-${zone.id}`;
+    return `
+      <button type="button" class="rail-item${openFlyoutKey === key ? ' open' : ''}${activeRailKey === key ? ' active' : ''}" onclick="toggleFlyout('${key}')">
+        <span class="rail-item-label" title="${escapeHtml(zone.name)}">${escapeHtml(zone.name)}</span>
+        <span class="rail-item-chevron">›</span>
+      </button>`;
+  }).join('');
+  const emptyZonesHtml = (currentSiteId != null && !zonesForSite.length)
+    ? `<div class="tree-empty">${admin ? 'Sin zonas — creá una con "+ Zona"' : 'Sin zonas'}</div>` : '';
+  const addZoneHtml = (admin && currentSiteId != null)
+    ? `<button type="button" class="rail-add" onclick="openCreateZone(${currentSiteId})">+ Zona</button>` : '';
+
+  const reportsHtml = currentSiteId != null ? `
+    <button type="button" class="rail-item${openFlyoutKey === 'reports' ? ' open' : ''}${activeRailKey === 'reports' ? ' active' : ''}" onclick="toggleFlyout('reports')">
+      <span class="rail-item-label">Reportes</span>
+      <span class="rail-item-chevron">›</span>
+    </button>` : '';
+
+  const orgAdminHtml = (admin && orgId != null) ? `
+    <button type="button" class="rail-item${openFlyoutKey === 'org-admin' ? ' open' : ''}${activeRailKey === 'org-admin' ? ' active' : ''}" onclick="toggleFlyout('org-admin')">
+      <span class="rail-item-label">Administración</span>
+      <span class="rail-item-chevron">›</span>
+    </button>` : '';
+
+  container.innerHTML = `
+    ${orgCardHtml}
+    ${siteCardHtml}
+    <div class="rail-list">
+      ${zoneRowsHtml}
+      ${emptyZonesHtml}
+      ${addZoneHtml}
+      ${reportsHtml}
+      ${orgAdminHtml}
+    </div>`;
+
+  renderFlyoutPanel();
+}
+
+function renderFlyoutPanel() {
+  const backdrop = $('#flyout-backdrop');
+  const panel = $('#flyout-panel');
+  if (!panel || !backdrop) return;
+  if (!openFlyoutKey) {
+    backdrop.classList.add('hidden');
+    panel.classList.add('hidden');
+    panel.innerHTML = '';
+    return;
+  }
+  backdrop.classList.remove('hidden');
+  panel.classList.remove('hidden');
+  if (openFlyoutKey === 'org-switcher') panel.innerHTML = buildOrgSwitcherFlyout();
+  else if (openFlyoutKey === 'site-switcher') panel.innerHTML = buildSiteSwitcherFlyout();
+  else if (openFlyoutKey === 'org-admin') panel.innerHTML = buildOrgAdminFlyout();
+  else if (openFlyoutKey === 'reports') panel.innerHTML = buildReportsFlyout();
+  else if (openFlyoutKey.startsWith('zone-')) panel.innerHTML = buildZoneFlyout(Number(openFlyoutKey.slice(5)));
+  else panel.innerHTML = '';
+}
+
+function buildOrgSwitcherFlyout() {
+  const rows = allOrganizations.map(o => `
+    <div class="flyout-row">
+      <button type="button" class="flyout-link" onclick="selectOrgContext(${o.id})">${escapeHtml(o.name)}</button>
+      ${isSuperAdmin() ? `<button type="button" class="flyout-icon-btn" onclick="renameOrganization(${o.id})" title="Renombrar">✎</button>` : ''}
+    </div>`).join('');
+  return `
+    <div class="flyout-header">
+      <div class="flyout-title">Organización</div>
+      <button type="button" class="flyout-close" onclick="closeFlyout()">×</button>
+    </div>
+    ${rows || '<div class="flyout-empty">Sin organizaciones</div>'}
+    ${isSuperAdmin() ? `<button type="button" class="flyout-add" onclick="openCreateOrg()">+ Nueva organización</button>` : ''}`;
+}
+
+function buildSiteSwitcherFlyout() {
+  const orgId = currentOrgId();
+  const admin = isAdmin();
+  const sites = orgId != null ? allSites.filter(s => s.organization_id === orgId) : [];
+  const rows = sites.map(s => `
+    <div class="flyout-row">
+      <button type="button" class="flyout-link" onclick="selectSiteContext(${s.id})">${escapeHtml(s.name)}</button>
+      ${admin ? `<button type="button" class="flyout-icon-btn" onclick="renameSite(${s.id})" title="Renombrar">✎</button>` : ''}
+    </div>`).join('');
+  return `
+    <div class="flyout-header">
+      <div class="flyout-title">Sitio</div>
+      <button type="button" class="flyout-close" onclick="closeFlyout()">×</button>
+    </div>
+    ${rows || `<div class="flyout-empty">Sin sitios</div>`}
+    ${admin && orgId != null ? `<button type="button" class="flyout-add" onclick="openCreateSite(${orgId})">+ Nuevo sitio</button>` : ''}`;
+}
+
+function buildZoneFlyout(zoneId) {
+  const zone = allZones.find(z => z.id === zoneId);
+  if (!zone) return '<div class="flyout-empty">Zona no encontrada</div>';
   const admin = isAdmin();
   const sensorsForZone = allSensors.filter(s => s.zone_id === zone.id);
   const sensorLine = sensorsForZone.length
     ? sensorsForZone.map(s => `${escapeHtml(s.name)} (${SENSOR_KIND_LABELS[s.kind] || s.kind})`).join(', ')
-    : (admin ? 'Sin sensores — creá uno con "+ Sensor"' : 'Sin sensores');
-  const leaves = ZONE_LEAVES.map(leaf => `
-    <button type="button" class="tree-leaf${selectedZoneId === zone.id && selectedLeafTab === leaf.tab ? ' active' : ''}"
-      onclick="selectZoneTab(${zone.id}, '${leaf.tab}')">${leaf.label}</button>`).join('');
+    : (admin ? 'Sin sensores — creá uno abajo' : 'Sin sensores');
+  const monitorLinks = ZONE_LEAVES.filter(l => ZONE_MONITOR_TABS.includes(l.tab)).map(l => `
+    <button type="button" class="flyout-link" onclick="selectZoneLeaf(${zone.id}, '${l.tab}')">${l.label}</button>`).join('');
+  const configureLinks = ZONE_LEAVES.filter(l => ZONE_CONFIGURE_TABS.includes(l.tab)).map(l => `
+    <button type="button" class="flyout-link" onclick="selectZoneLeaf(${zone.id}, '${l.tab}')">${l.label}</button>`).join('');
+
   return `
-    <div class="tree-node">
-      <div class="tree-row">
-        ${treeToggleHtml(key, true)}
-        <span class="tree-label" onclick="toggleTreeNode('${key}')" title="${escapeHtml(zone.name)}">${escapeHtml(zone.name)}</span>
-        <span class="tree-actions">
-          ${admin ? `<button type="button" class="tree-action rename" onclick="renameZone(${zone.id})" title="Renombrar">✎</button>
-          <button type="button" class="tree-action" onclick="openCreateSensor(${zone.id})">+ Sensor</button>` : ''}
-        </span>
-      </div>
-      <div class="tree-children${collapsedTreeNodes.has(key) ? ' collapsed' : ''}">
-        <div class="tree-empty">${sensorLine}${zone.security_level ? ' · ' + zone.security_level : ''}</div>
-        ${leaves}
-      </div>
-    </div>`;
+    <div class="flyout-header">
+      <div class="flyout-title" title="${escapeHtml(zone.name)}">${escapeHtml(zone.name)}</div>
+      <button type="button" class="flyout-close" onclick="closeFlyout()">×</button>
+    </div>
+    <div class="flyout-empty">${sensorLine}${zone.security_level ? ' · ' + zone.security_level : ''}</div>
+    <div class="flyout-section-title">Monitor</div>
+    ${monitorLinks}
+    <div class="flyout-section-title">Configure</div>
+    ${configureLinks}
+    ${admin ? `<button type="button" class="flyout-link" onclick="openCreateSensor(${zone.id})">+ Sensor</button>` : ''}
+    ${admin ? `<button type="button" class="flyout-link" onclick="renameZone(${zone.id})">✎ Renombrar zona</button>` : ''}`;
 }
 
-// Sitio is shown as a bold title, not a tabbed/indented tree row -- see the
-// .tree-site-title CSS comment. Its Zonas keep the classic indented,
-// collapsible tree-row styling (renderZoneNode above).
-function renderSiteNode(site) {
-  const admin = isAdmin();
-  const zones = allZones.filter(z => z.site_id === site.id);
-  const siteLeaves = SITE_LEAVES.map(leaf => `
-    <button type="button" class="tree-leaf${selectedSiteId === site.id && selectedLeafTab === leaf.tab ? ' active' : ''}"
-      onclick="selectSiteTab(${site.id}, '${leaf.tab}')">${leaf.label}</button>`).join('');
+function buildReportsFlyout() {
   return `
-    <div class="tree-site">
-      <div class="tree-site-title" title="${escapeHtml(site.name)}">${escapeHtml(site.name)}</div>
-      <div class="tree-actions">
-        ${admin ? `<button type="button" class="tree-action rename" onclick="renameSite(${site.id})" title="Renombrar">✎</button>
-        <button type="button" class="tree-action" onclick="openCreateZone(${site.id})">+ Zona</button>` : ''}
-      </div>
-      <div class="tree-site-children">
-        ${zones.length ? zones.map(renderZoneNode).join('') : `<div class="tree-empty">Sin zonas${admin ? ' — creá una con "+ Zona"' : ''}</div>`}
-        ${siteLeaves}
-      </div>
-    </div>`;
+    <div class="flyout-header">
+      <div class="flyout-title">Reportes</div>
+      <button type="button" class="flyout-close" onclick="closeFlyout()">×</button>
+    </div>
+    <div class="flyout-section-title">Monitor</div>
+    <button type="button" class="flyout-link" onclick="selectSiteLeaf(${currentSiteId}, 'reports')">Resumen combinado</button>`;
 }
 
-// Organización is shown as a bold title, not a tabbed/indented tree row --
-// see the .tree-org-title CSS comment. Only one organization is ever
-// rendered here: the caller's own (admin/viewer) or the one currently
-// picked in #org-switcher-select (Super Admin) -- see renderNavTree.
-function renderOrgNode(org) {
-  const admin = isAdmin();
-  const sites = allSites.filter(s => s.organization_id === org.id);
+function buildOrgAdminFlyout() {
+  const orgId = currentOrgId();
+  const org = allOrganizations.find(o => o.id === orgId);
+  const title = org ? org.name : (currentUser.organization_name || 'Organización');
   return `
-    <div class="tree-org">
-      <div class="tree-org-title" title="${escapeHtml(org.name)}">${escapeHtml(org.name)}</div>
-      <div class="tree-actions">
-        ${isSuperAdmin() ? `<button type="button" class="tree-action rename" onclick="renameOrganization(${org.id})" title="Renombrar">✎</button>` : ''}
-        ${admin ? `<button type="button" class="tree-action" onclick="openUsersFor(${org.id})">Usuarios</button>
-        <button type="button" class="tree-action" onclick="openCreateSite(${org.id})">+ Sitio</button>` : ''}
-      </div>
-      <div class="tree-org-children">
-        ${sites.length ? sites.map(renderSiteNode).join('') : `<div class="tree-empty">Sin sitios${admin ? ' — creá uno con "+ Sitio"' : ''}</div>`}
-      </div>
-    </div>`;
-}
-
-function renderOrgSwitcher() {
-  const select = $('#org-switcher-select');
-  if (!select) return;
-  select.innerHTML = allOrganizations.map(o => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('');
-  if (selectedOrgId != null) select.value = String(selectedOrgId);
-}
-
-function switchOrgContext(orgIdStr) {
-  selectedOrgId = Number(orgIdStr);
-  selectedZoneId = null;
-  selectedSiteId = null;
-  selectedLeafTab = null;
-  collapsedTreeNodes.clear();
-  const breadcrumb = $('#zone-breadcrumb');
-  if (breadcrumb) breadcrumb.classList.add('hidden');
-  renderNavTree();
-}
-
-function renderNavTree() {
-  const container = $('#nav-tree');
-  if (!container || !currentUser) return;
-
-  if (isSuperAdmin()) {
-    renderOrgSwitcher();
-    if (!allOrganizations.length) {
-      container.innerHTML = '<div class="tree-empty">Sin organizaciones — creá la primera con "+ Organización"</div>';
-      return;
-    }
-    // Defaults to the first organization the first time (or after the
-    // previously selected one no longer exists, e.g. right after login).
-    if (selectedOrgId == null || !allOrganizations.some(o => o.id === selectedOrgId)) {
-      selectedOrgId = allOrganizations[0].id;
-    }
-    container.innerHTML = renderOrgNode(allOrganizations.find(o => o.id === selectedOrgId));
-    return;
-  }
-
-  // admin/viewer: root is directly their own organization
-  if (!currentUser.organization_id) { container.innerHTML = ''; return; }
-  const ownOrg = { id: currentUser.organization_id, name: currentUser.organization_name || currentUser.username };
-  container.innerHTML = renderOrgNode(ownOrg);
+    <div class="flyout-header">
+      <div class="flyout-title" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
+      <button type="button" class="flyout-close" onclick="closeFlyout()">×</button>
+    </div>
+    <div class="flyout-section-title">Configure</div>
+    <button type="button" class="flyout-link" onclick="openUsersFor(${orgId})">Usuarios</button>`;
 }
 
 async function renameOrganization(id) {
@@ -2525,16 +2672,17 @@ async function renameZone(id) {
   } catch (e) { alert('No se pudo renombrar la zona: ' + e.message); }
 }
 
-function selectZoneTab(zoneId, tabName) {
+function selectZoneLeaf(zoneId, tabName) {
   const zone = allZones.find(z => z.id === zoneId);
   const site = zone ? allSites.find(s => s.id === zone.site_id) : null;
   const orgName = site
     ? (isSuperAdmin() ? (allOrganizations.find(o => o.id === site.organization_id) || {}).name : currentUser.organization_name)
     : null;
 
-  activateTab(tabName);
+  activateTab(tabName); // resets activeRailKey/openFlyoutKey/breadcrumb -- set back below
   selectedZoneId = zoneId;
   selectedLeafTab = tabName;
+  activeRailKey = `zone-${zoneId}`;
 
   const breadcrumb = $('#zone-breadcrumb');
   const path = $('#zone-breadcrumb-path');
@@ -2545,10 +2693,10 @@ function selectZoneTab(zoneId, tabName) {
     if (note) note.textContent = 'mostrando datos de toda la organización — filtrado por Zona próximamente';
     breadcrumb.classList.remove('hidden');
   }
-  renderNavTree();
+  renderSidebarRail();
 }
 
-function selectSiteTab(siteId, tabName) {
+function selectSiteLeaf(siteId, tabName) {
   const site = allSites.find(s => s.id === siteId);
   const orgName = site
     ? (isSuperAdmin() ? (allOrganizations.find(o => o.id === site.organization_id) || {}).name : currentUser.organization_name)
@@ -2557,6 +2705,7 @@ function selectSiteTab(siteId, tabName) {
   activateTab(tabName);
   selectedSiteId = siteId;
   selectedLeafTab = tabName;
+  activeRailKey = 'reports';
 
   const breadcrumb = $('#zone-breadcrumb');
   const path = $('#zone-breadcrumb-path');
@@ -2569,7 +2718,7 @@ function selectSiteTab(siteId, tabName) {
     if (note) note.textContent = 'mostrando datos de toda la organización';
     breadcrumb.classList.remove('hidden');
   }
-  renderNavTree();
+  renderSidebarRail();
 }
 
 function openCreateSite(organizationId) {
@@ -2596,8 +2745,10 @@ function openCreateOrg() {
 
 function openUsersFor(organizationId) {
   usersFilterOrgId = organizationId;
-  activateTab('users');
+  activateTab('users'); // resets activeRailKey -- set back below
+  activeRailKey = 'org-admin';
   loadUsers();
+  renderSidebarRail();
 }
 
 $('#create-site-btn').addEventListener('click', async () => {
