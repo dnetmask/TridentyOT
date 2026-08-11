@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes_auth import router as auth_router
 from app.api.routes_capture import router as capture_router
+from app.api.routes_discovery import router as discovery_router
 from app.api.routes_hierarchy import router as hierarchy_router
 from app.api.routes_inventory import router as inventory_router
 from app.api.routes_organizations import router as organizations_router
@@ -51,6 +52,7 @@ app.include_router(users_router)
 app.include_router(organizations_router)
 app.include_router(hierarchy_router)
 app.include_router(capture_router)
+app.include_router(discovery_router)
 app.include_router(inventory_router)
 app.include_router(vulns_router)
 

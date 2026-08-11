@@ -585,6 +585,63 @@
     </div>
   </section>
 
+  <section id="tab-discovery" class="tab">
+    <div class="card admin-only">
+      <div class="row">
+        <div>
+          <label data-i18n="capture.sensor">Sensor</label>
+          <select id="discovery-sensor-select"></select>
+        </div>
+        <div>
+          <label data-i18n="capture.interface">Interfaz de red</label>
+          <select id="discovery-iface-select"><option value="">(cargando...)</option></select>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:10px" data-i18n="discovery.intro">
+        Envía tráfico a la red para identificar equipos que la captura pasiva todavía no vio --
+        a diferencia de Captura, esto no es pasivo. Elegí el sensor y la interfaz sobre la que
+        transmitir antes de escanear.
+      </p>
+    </div>
+
+    <div class="card admin-only" id="discovery-dcp-card">
+      <h2 data-i18n="discovery.dcp_title">PROFINET DCP</h2>
+      <p class="muted" style="margin:0 0 10px; font-size:12.5px;" data-i18n="discovery.dcp_hint">
+        Manda un broadcast "Identify All" (el mismo mecanismo de Siemens PRONETA y TIA Portal
+        "accessible devices") y escucha las respuestas -- encuentra equipos PROFINET aunque
+        todavía no tengan IP configurada.
+      </p>
+      <div class="row">
+        <div>
+          <label data-i18n="discovery.duration">Duración (segundos)</label>
+          <input type="number" id="discovery-dcp-duration" value="5" min="1" max="30" style="width:80px" />
+        </div>
+        <button class="action" id="start-dcp-scan-btn" data-i18n="discovery.start_scan">Escanear ahora</button>
+      </div>
+      <div id="dcp-scan-status" class="muted" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="card admin-only" style="opacity:0.65;">
+      <div class="flex-between">
+        <h2 data-i18n="discovery.nmap_title">Nmap</h2>
+        <span class="pill" data-i18n="discovery.coming_soon">Próximamente</span>
+      </div>
+      <p class="muted" style="margin:0; font-size:12.5px;" data-i18n="discovery.nmap_hint">
+        Escaneo activo de puertos y servicios. Todavía no disponible.
+      </p>
+    </div>
+
+    <div class="card admin-only" style="opacity:0.65;">
+      <div class="flex-between">
+        <h2 data-i18n="discovery.snmp_title">SNMP</h2>
+        <span class="pill" data-i18n="discovery.coming_soon">Próximamente</span>
+      </div>
+      <p class="muted" style="margin:0; font-size:12.5px;" data-i18n="discovery.snmp_hint">
+        Consulta activa vía SNMP (sysDescr, tabla ARP, interfaces). Todavía no disponible.
+      </p>
+    </div>
+  </section>
+
   <section id="tab-inventory" class="tab">
     <div class="card">
       <div class="flex-between">
@@ -1009,6 +1066,29 @@ const I18N = {
   'common.clear_filters': { es: 'Limpiar filtros', en: 'Clear filters' },
   'home.zones_title': { es: 'Zonas de este sitio', en: 'Zones in this site' },
   'home.quick_links_title': { es: 'Accesos rápidos', en: 'Quick links' },
+  'nav.discovery': { es: 'Descubrimiento activo', en: 'Active discovery' },
+  'discovery.intro': {
+    es: 'Envía tráfico a la red para identificar equipos que la captura pasiva todavía no vio -- a diferencia de Captura, esto no es pasivo. Elegí el sensor y la interfaz sobre la que transmitir antes de escanear.',
+    en: 'Sends traffic on the network to identify equipment passive capture hasn\'t seen yet -- unlike Captura, this is not passive. Pick the sensor and interface to transmit on before scanning.',
+  },
+  'discovery.dcp_title': { es: 'PROFINET DCP', en: 'PROFINET DCP' },
+  'discovery.dcp_hint': {
+    es: 'Manda un broadcast "Identify All" (el mismo mecanismo de Siemens PRONETA y TIA Portal "accessible devices") y escucha las respuestas -- encuentra equipos PROFINET aunque todavía no tengan IP configurada.',
+    en: 'Sends an "Identify All" broadcast (the same mechanism Siemens PRONETA and TIA Portal\'s "accessible devices" use) and listens for responses -- finds PROFINET devices even before they have an IP configured.',
+  },
+  'discovery.duration': { es: 'Duración (segundos)', en: 'Duration (seconds)' },
+  'discovery.start_scan': { es: 'Escanear ahora', en: 'Scan now' },
+  'discovery.coming_soon': { es: 'Próximamente', en: 'Coming soon' },
+  'discovery.nmap_title': { es: 'Nmap', en: 'Nmap' },
+  'discovery.nmap_hint': {
+    es: 'Escaneo activo de puertos y servicios. Todavía no disponible.',
+    en: 'Active port and service scanning. Not available yet.',
+  },
+  'discovery.snmp_title': { es: 'SNMP', en: 'SNMP' },
+  'discovery.snmp_hint': {
+    es: 'Consulta activa vía SNMP (sysDescr, tabla ARP, interfaces). Todavía no disponible.',
+    en: 'Active SNMP querying (sysDescr, ARP table, interfaces). Not available yet.',
+  },
   'capture.live_title': { es: 'Captura en vivo', en: 'Live capture' },
   'capture.sensor': { es: 'Sensor', en: 'Sensor' },
   'capture.add_sensor': { es: '+ Sensor', en: '+ Sensor' },
@@ -1417,12 +1497,13 @@ function sevBadge(sev) {
 
 // ---------- Capture tab ----------
 async function loadInterfaces() {
-  const sel = $('#iface-select');
+  const selects = [$('#iface-select'), $('#discovery-iface-select')].filter(Boolean);
   try {
     const data = await api('/api/capture/interfaces');
-    sel.innerHTML = data.interfaces.map(i => `<option value="${i}">${i}</option>`).join('') || '<option value="">(ninguna disponible)</option>';
+    const optionsHtml = data.interfaces.map(i => `<option value="${i}">${i}</option>`).join('') || '<option value="">(ninguna disponible)</option>';
+    selects.forEach(sel => { sel.innerHTML = optionsHtml; });
   } catch (e) {
-    sel.innerHTML = '<option value="">(no se pudo listar interfaces)</option>';
+    selects.forEach(sel => { sel.innerHTML = '<option value="">(no se pudo listar interfaces)</option>'; });
   }
 }
 
@@ -1513,6 +1594,50 @@ $('#start-live-btn').addEventListener('click', async () => {
     });
     loadSessions();
   } catch (e) { alert('No se pudo iniciar la captura: ' + e.message); }
+});
+
+// The endpoint returns immediately with status "running" -- the scan
+// itself (send the broadcast, then listen for duration_seconds) runs in a
+// background task on the server, so this polls until it's actually done
+// instead of assuming the response body already reflects the final state.
+async function pollCaptureSessionUntilDone(sessionId) {
+  for (;;) {
+    const session = await api(`/api/capture/sessions/${sessionId}`);
+    if (session.status !== 'running') return session;
+    await new Promise(r => setTimeout(r, 1000));
+  }
+}
+
+$('#start-dcp-scan-btn').addEventListener('click', async () => {
+  const iface = $('#discovery-iface-select').value;
+  if (!iface) { alert('Selecciona una interfaz'); return; }
+  const sensorId = $('#discovery-sensor-select').value;
+  if (!sensorId) { alert('Selecciona un sensor en vivo'); return; }
+  const durationSeconds = Number($('#discovery-dcp-duration').value) || 5;
+
+  const btn = $('#start-dcp-scan-btn');
+  const status = $('#dcp-scan-status');
+  btn.disabled = true;
+  status.textContent = `Escaneando durante ${durationSeconds}s...`;
+  try {
+    const started = await api('/api/discovery/profinet-dcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interface: iface, sensor_id: Number(sensorId), duration_seconds: durationSeconds }),
+    });
+    const finished = await pollCaptureSessionUntilDone(started.id);
+    if (finished.status === 'error') {
+      status.textContent = `Error: ${finished.error_message || 'no se pudo completar el escaneo'}`;
+    } else {
+      status.textContent = `Listo -- ${finished.packet_count} paquete(s) recibido(s). Revisá Inventario.`;
+    }
+    loadSessions();
+    loadDevices();
+  } catch (e) {
+    status.textContent = `No se pudo iniciar el escaneo: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 async function uploadPcapFile(file) {
@@ -2399,15 +2524,18 @@ let selectedLeafTab = null;
 const SENSOR_KIND_LABELS = { live: 'En vivo', external: 'Externo (solo pcap)' };
 const ZONE_LEAVES = [
   { tab: 'capture', label: 'Captura' },
+  { tab: 'discovery', label: 'Descubrimiento activo' },
   { tab: 'inventory', label: 'Inventario' },
   { tab: 'flows', label: 'Flujos' },
   { tab: 'vulns', label: 'Vulnerabilidades' },
 ];
 // Which Zona leaves are grouped under each flyout heading -- Inventario/
-// Flujos/Vulnerabilidades are read-only analysis (Monitor), Captura is
-// where you actively start/stop capture and manage sessions (Configure).
+// Flujos/Vulnerabilidades are read-only analysis (Monitor); Captura and
+// Descubrimiento activo are where you actively act on the network (start/
+// stop a capture, or send a discovery probe), so both live in Configure --
+// Descubrimiento right below Captura, since it's the same kind of action.
 const ZONE_MONITOR_TABS = ['inventory', 'flows', 'vulns'];
-const ZONE_CONFIGURE_TABS = ['capture'];
+const ZONE_CONFIGURE_TABS = ['capture', 'discovery'];
 // Reportes lives one level up from the Zona leaves, at the Sitio itself --
 // unlike Captura/Inventario/Flujos/Vulnerabilidades it's not pretending to
 // be zone-scoped: it's deliberately always a whole-organization summary
@@ -2475,6 +2603,7 @@ function populateZoneSelects() {
 async function loadSensors() {
   allSensors = await api('/api/sensors');
   populateCaptureSensorSelect();
+  populateDiscoverySensorSelect();
   renderSidebarRail();
 }
 
@@ -2498,6 +2627,28 @@ function populateCaptureSensorSelect() {
     : '<option value="">(sin sensores)</option>';
   if (previous && sensors.some(s => String(s.id) === previous)) select.value = previous;
   updateCaptureSensorKindUI();
+}
+
+// Active discovery always needs a real interface on this server to
+// transmit/listen on, so unlike populateCaptureSensorSelect (which lists
+// every kind, since a pcap upload works fine against an external sensor)
+// this only ever offers "live" sensors -- picking an external one here
+// would just 400 (see routes_discovery._resolve_live_sensor).
+function populateDiscoverySensorSelect() {
+  const select = $('#discovery-sensor-select');
+  if (!select) return;
+  const previous = select.value;
+  const inZone = selectedZoneId != null;
+  const scoped = inZone ? allSensors.filter(s => s.zone_id === selectedZoneId) : allSensors;
+  const sensors = scoped.filter(s => s.kind === 'live');
+  const zoneName = id => (allZones.find(z => z.id === id) || {}).name || `#${id}`;
+  select.innerHTML = sensors.length
+    ? sensors.map(s => {
+        const label = inZone ? s.name : `${zoneName(s.zone_id)} — ${s.name}`;
+        return `<option value="${s.id}">${escapeHtml(label)}</option>`;
+      }).join('')
+    : '<option value="">(sin sensores en vivo)</option>';
+  if (previous && sensors.some(s => String(s.id) === previous)) select.value = previous;
 }
 
 // Toggles the "Captura en vivo" card vs. the "Sensor externo" notice based
@@ -2871,6 +3022,7 @@ function selectZoneLeaf(zoneId, tabName) {
     breadcrumb.classList.remove('hidden');
   }
   populateCaptureSensorSelect();
+  populateDiscoverySensorSelect();
   // Refetches with the new selectedZoneId already in place, via
   // zoneFilterQuery() -- otherwise the view would keep showing whatever
   // (unfiltered, or a different Zona's) data the last periodic refresh

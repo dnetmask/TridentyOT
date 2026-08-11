@@ -147,6 +147,18 @@ class StartLiveCaptureRequest(BaseModel):
     sensor_id: int | None = None
 
 
+class ProfinetDcpScanRequest(BaseModel):
+    """Kicks off one PROFINET DCP "Identify All" broadcast + a short listen
+    window on interface -- see app/capture/active_discovery.py. Unlike live
+    capture's sensor_id, this one is required: active discovery is a
+    deliberate, explicit action against one specific interface, not
+    something that should ever silently auto-pick."""
+
+    interface: str
+    sensor_id: int
+    duration_seconds: float = Field(default=5.0, ge=1, le=30)
+
+
 class ScanRequest(BaseModel):
     device_id: int | None = None
     use_nvd: bool = True

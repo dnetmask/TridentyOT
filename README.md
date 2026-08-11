@@ -288,6 +288,28 @@ una se cede la escritura brevemente antes de seguir -- lo justo para que otra pe
 (un login, un PATCH de otra pestaña) tenga una oportunidad real de tomar el lock en vez de que este
 hilo, más rápido, se lo vuelva a quedar primero.
 
+### Descubrimiento activo (PROFINET DCP)
+
+A diferencia de todo lo anterior en esta sección (100% pasivo), la pestaña **Descubrimiento
+activo** de cada Zona -- justo debajo de Captura -- sí transmite tráfico. La opción **PROFINET
+DCP** manda un único broadcast de capa 2 ("Identify All", el mismo mecanismo que usan Siemens
+PRONETA y TIA Portal en "accessible devices": MAC multicast `01:0e:cf:00:00:00`, sin capa IP) y
+escucha las respuestas durante una ventana corta y acotada (1-30 segundos) -- encuentra equipos
+PROFINET aunque todavía no tengan una IP configurada. Cada dispositivo que responde entra al
+inventario exactamente igual que uno observado pasivamente (reutiliza el mismo pipeline de
+`process_packet`/`ingest_packet_record`), asociado a una sesión de captura propia
+(`source_type=active_pnio_dcp`) para mantener el mismo scoping por Zona/Sitio. Requiere rol admin
+y un sensor **en vivo** (uno externo no tiene una interfaz real sobre la que transmitir). Por API:
+
+```bash
+curl -X POST http://localhost:8000/api/discovery/profinet-dcp \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"interface": "eth0", "sensor_id": 1, "duration_seconds": 5}'
+```
+
+Las opciones **Nmap** y **SNMP** están planeadas para el mismo bloque, pero todavía no
+implementadas (aparecen como "Próximamente" en el dashboard).
+
 ### Ejecutar el escaneo de vulnerabilidades
 
 ```bash

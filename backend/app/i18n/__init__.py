@@ -121,6 +121,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "Hay más de un sensor disponible: indicá cuál sensor usar para esta captura",
         "en": "More than one sensor is available: specify which sensor this capture belongs to",
     },
+    "discovery.sensor_must_be_live": {
+        "es": "Este sensor es externo: el descubrimiento activo necesita una interfaz en vivo en este servidor",
+        "en": "That sensor is external: active discovery needs a live interface on this server",
+    },
     "capture.sensor_kind_mismatch": {
         "es": "Ese sensor es externo y aún no admite conexión remota: solo se le pueden adjuntar archivos .pcap",
         "en": "That sensor is external and doesn't support a remote connection yet: it only accepts .pcap uploads",
