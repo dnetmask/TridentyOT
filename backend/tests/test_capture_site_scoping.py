@@ -148,3 +148,57 @@ def test_cannot_use_another_organizations_sensor_id(client, db_session):
 
     resp = client.post("/api/capture/live/start", json={"interface": "lo", "sensor_id": sensor.id})
     assert resp.status_code == 404
+
+
+def test_external_sensor_cannot_start_a_live_capture(client):
+    """SENSOR_KIND_EXTERNAL means "pcap-only uploads, no live interface of
+    its own" (see models.py) -- remote connectivity for it isn't built yet,
+    so the only way to get its data in is a pcap upload."""
+    site = client.post("/api/sites", json={"name": "Planta Externa"}).json()
+    zone = client.post("/api/zones", json={"site_id": site["id"], "name": "Zona externa"}).json()
+    sensor = client.post(
+        "/api/sensors", json={"zone_id": zone["id"], "name": "Sensor externo", "kind": "external"}
+    ).json()
+    assert sensor["kind"] == "external"
+
+    resp = client.post("/api/capture/live/start", json={"interface": "lo", "sensor_id": sensor["id"]})
+    assert resp.status_code == 400
+
+
+def test_external_sensor_accepts_a_pcap_upload(client, tmp_path):
+    site = client.post("/api/sites", json={"name": "Planta Externa"}).json()
+    zone = client.post("/api/zones", json={"site_id": site["id"], "name": "Zona externa"}).json()
+    sensor = client.post(
+        "/api/sensors", json={"zone_id": zone["id"], "name": "Sensor externo", "kind": "external"}
+    ).json()
+
+    session = _upload_pcap(client, tmp_path, "external.pcap", sensor_id=sensor["id"])
+    from app.db import SessionLocal
+    from app.models import CaptureSession
+
+    with SessionLocal() as db:
+        row = db.get(CaptureSession, session["id"])
+        assert row.sensor_id == sensor["id"]
+
+
+def test_live_capture_auto_pick_skips_an_external_sensor(client):
+    """The seeded organization already has exactly one sensor -- the
+    "Default" one db.py's startup migration creates, kind=live. Adding an
+    external sensor alongside it shouldn't make live-capture auto-pick
+    ambiguous: it doesn't count as a second live candidate."""
+    site = client.post("/api/sites", json={"name": "Planta Mixta"}).json()
+    zone = client.post("/api/zones", json={"site_id": site["id"], "name": "Zona mixta"}).json()
+    client.post("/api/sensors", json={"zone_id": zone["id"], "name": "Sensor externo", "kind": "external"})
+
+    resp = client.post("/api/capture/live/start", json={"interface": "lo"})
+    assert resp.status_code == 200, resp.text
+    try:
+        from app.db import SessionLocal
+        from app.models import CaptureSession, Sensor
+
+        with SessionLocal() as db:
+            default_sensor = db.query(Sensor).filter(Sensor.name == "Default").one()
+            row = db.get(CaptureSession, resp.json()["id"])
+            assert row.sensor_id == default_sensor.id
+    finally:
+        client.post(f"/api/capture/live/stop/{resp.json()['id']}")

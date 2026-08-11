@@ -114,12 +114,16 @@ MESSAGES: dict[str, dict[str, str]] = {
         "en": "Session is not a live capture",
     },
     "capture.sensor_id_required_none": {
-        "es": "No hay ningún sensor configurado. Creá uno en una Zona antes de capturar",
-        "en": "No sensor is configured yet. Create one in a Zone before capturing",
+        "es": "No hay ningún sensor disponible para este tipo de captura. Creá uno en una Zona antes de capturar",
+        "en": "No sensor is available for this kind of capture. Create one in a Zone before capturing",
     },
     "capture.sensor_id_required_ambiguous": {
         "es": "Hay más de un sensor disponible: indicá cuál sensor usar para esta captura",
         "en": "More than one sensor is available: specify which sensor this capture belongs to",
+    },
+    "capture.sensor_kind_mismatch": {
+        "es": "Ese sensor es externo y aún no admite conexión remota: solo se le pueden adjuntar archivos .pcap",
+        "en": "That sensor is external and doesn't support a remote connection yet: it only accepts .pcap uploads",
     },
     "inventory.device_not_found": {"es": "Dispositivo no encontrado", "en": "Device not found"},
     "organizations.duplicate_slug": {

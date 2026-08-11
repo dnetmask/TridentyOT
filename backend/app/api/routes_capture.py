@@ -11,7 +11,7 @@ from app.config import DATA_DIR, DEFAULT_LIVE_CAPTURE_FILTER
 from app.db import get_db, session_scope
 from app.i18n import message
 from app.inventory.inventory_service import purge_capture_session, wipe_all_capture_data
-from app.models import CaptureSession, Sensor, Site, User, Zone
+from app.models import SENSOR_KIND_LIVE, CaptureSession, Sensor, Site, User, Zone
 from app.schemas import CaptureSessionOut, StartLiveCaptureRequest, capture_session_out
 
 router = APIRouter(prefix="/api/capture", tags=["capture"])
@@ -36,17 +36,30 @@ def _get_owned_sensor(db: Session, user: User, sensor_id: int) -> Sensor:
     return sensor
 
 
-def _resolve_capture_sensor(db: Session, user: User, sensor_id: int | None) -> Sensor:
+def _resolve_capture_sensor(db: Session, user: User, sensor_id: int | None, kind: str | None = None) -> Sensor:
     """sensor_id is optional: a caller with exactly one Sensor available
     (the common single-Sitio deployment) shouldn't have to pick, so this
     falls back to it automatically. Required (400, not a silent guess) once
     there's more than one to choose from, or none at all -- either way
     guessing would risk attributing the capture to the wrong Sitio, which
-    is the whole point of tracking this in the first place."""
+    is the whole point of tracking this in the first place.
+
+    kind, when given (see start_live_capture), restricts an explicit
+    sensor_id to one of that kind and narrows the auto-pick fallback to
+    only that kind -- a live capture has no business running against a
+    SENSOR_KIND_EXTERNAL row (see its definition in models.py: "pcap-only
+    uploads, no live interface of its own"), and shouldn't silently pick
+    one just because it happens to be the org's only sensor.
+    """
     if sensor_id is not None:
-        return _get_owned_sensor(db, user, sensor_id)
+        sensor = _get_owned_sensor(db, user, sensor_id)
+        if kind is not None and sensor.kind != kind:
+            raise HTTPException(status_code=400, detail=message("capture.sensor_kind_mismatch", user.locale))
+        return sensor
 
     query = db.query(Sensor)
+    if kind is not None:
+        query = query.filter(Sensor.kind == kind)
     if not is_super_admin(user):
         query = (
             query.join(Zone, Sensor.zone_id == Zone.id)
@@ -123,7 +136,7 @@ def get_session(session_id: int, db: Session = Depends(get_db), user: User = Dep
 def start_live_capture(
     payload: StartLiveCaptureRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)
 ):
-    sensor = _resolve_capture_sensor(db, user, payload.sensor_id)
+    sensor = _resolve_capture_sensor(db, user, payload.sensor_id, kind=SENSOR_KIND_LIVE)
     bpf_filter = payload.bpf_filter or DEFAULT_LIVE_CAPTURE_FILTER
     session_obj = CaptureSession(
         organization_id=_sensor_organization_id(db, sensor),

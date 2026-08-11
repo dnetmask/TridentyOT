@@ -474,12 +474,18 @@
 
   <section id="tab-capture" class="tab active">
     <div class="card admin-only">
-      <h2 data-i18n="capture.live_title">Captura en vivo</h2>
       <div class="row">
         <div>
           <label data-i18n="capture.sensor">Sensor</label>
-          <select id="capture-sensor-select"></select>
+          <select id="capture-sensor-select" onchange="updateCaptureSensorKindUI()"></select>
         </div>
+        <div id="capture-sensor-kind-badge" class="muted" style="align-self:center; font-size:12.5px;"></div>
+      </div>
+    </div>
+
+    <div class="card admin-only" id="live-capture-card">
+      <h2 data-i18n="capture.live_title">Captura en vivo</h2>
+      <div class="row">
         <div>
           <label data-i18n="capture.interface">Interfaz de red</label>
           <select id="iface-select"><option value="">(cargando...)</option></select>
@@ -493,6 +499,14 @@
       <p class="muted" style="margin-top:10px" data-i18n="capture.live_hint">
         Requiere que el proceso tenga permisos de captura raw (root o CAP_NET_RAW) y que libpcap
         esté disponible en el host, además de estar conectado a un puerto SPAN/mirror o al segmento a inspeccionar.
+      </p>
+    </div>
+
+    <div class="card admin-only hidden" id="external-sensor-card">
+      <h2 data-i18n="capture.external_title">Sensor externo</h2>
+      <p class="muted" data-i18n="capture.external_hint">
+        Este sensor es externo: todavía no admite conexión remota, así que no puede iniciar una captura en vivo
+        desde este servidor. Por ahora, analizá lo que capture adjuntando el archivo .pcap/.pcapng generado por él.
       </p>
     </div>
 
@@ -970,6 +984,11 @@ const I18N = {
   'capture.live_title': { es: 'Captura en vivo', en: 'Live capture' },
   'capture.sensor': { es: 'Sensor', en: 'Sensor' },
   'capture.pcap_sensor_hint': { es: 'Se asocia al sensor seleccionado arriba.', en: 'Attributed to the sensor selected above.' },
+  'capture.external_title': { es: 'Sensor externo', en: 'External sensor' },
+  'capture.external_hint': {
+    es: 'Este sensor es externo: todavía no admite conexión remota, así que no puede iniciar una captura en vivo desde este servidor. Por ahora, analizá lo que capture adjuntando el archivo .pcap/.pcapng generado por él.',
+    en: "This sensor is external: it doesn't support a remote connection yet, so it can't start a live capture from this server. For now, analyze what it captures by uploading the .pcap/.pcapng file it generates.",
+  },
   'capture.interface': { es: 'Interfaz de red', en: 'Network interface' },
   'capture.bpf_filter': { es: 'Filtro BPF', en: 'BPF filter' },
   'capture.start': { es: 'Iniciar captura', en: 'Start capture' },
@@ -2449,6 +2468,25 @@ function populateCaptureSensorSelect() {
       }).join('')
     : '<option value="">(sin sensores)</option>';
   if (previous && sensors.some(s => String(s.id) === previous)) select.value = previous;
+  updateCaptureSensorKindUI();
+}
+
+// Toggles the "Captura en vivo" card vs. the "Sensor externo" notice based
+// on the selected sensor's kind -- an external sensor has no remote
+// connection built yet (see SENSOR_KIND_EXTERNAL in models.py), so it can
+// only ever be fed via a pcap upload, never a live capture on this server.
+function updateCaptureSensorKindUI() {
+  const select = $('#capture-sensor-select');
+  const liveCard = $('#live-capture-card');
+  const externalCard = $('#external-sensor-card');
+  const badge = $('#capture-sensor-kind-badge');
+  if (!select || !liveCard || !externalCard) return;
+
+  const sensor = allSensors.find(s => String(s.id) === select.value);
+  const isExternal = sensor ? sensor.kind === 'external' : false;
+  liveCard.classList.toggle('hidden', isExternal);
+  externalCard.classList.toggle('hidden', !isExternal);
+  if (badge) badge.textContent = sensor ? (SENSOR_KIND_LABELS[sensor.kind] || sensor.kind) : '';
 }
 
 async function loadOrganizations() {
