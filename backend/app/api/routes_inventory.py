@@ -6,10 +6,31 @@ from app.db import get_db
 from app.fingerprint.device_classifier import ROUTER_NAT
 from app.fingerprint.ip_scope import is_lan_ip
 from app.i18n import message
-from app.models import Device, DeviceProtocol, Flow, User
+from app.models import CaptureSession, Device, DeviceProtocol, Flow, Sensor, User, Zone
 from app.schemas import DeviceDetailOut, DeviceOut, DeviceUpdateRequest, FlowOut, device_detail_out, device_out
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"])
+
+
+def _filter_by_zone_or_site(query, model, zone_id: int | None, site_id: int | None):
+    """Scopes `query` (already joined/filterable on `model.capture_session_id`)
+    to whichever Sensor first discovered each row -- see Device.capture_session_id's
+    docstring. Not a perfect signal (a device could genuinely be seen from more
+    than one Zona/Sitio), but it's the only attribution the current schema
+    tracks, and matches what a user expects when they captured on a specific
+    Sensor: "this showed up in Línea 1" rather than "somewhere in the org"."""
+    if zone_id is not None:
+        return query.join(CaptureSession, model.capture_session_id == CaptureSession.id).join(
+            Sensor, CaptureSession.sensor_id == Sensor.id
+        ).filter(Sensor.zone_id == zone_id)
+    if site_id is not None:
+        return (
+            query.join(CaptureSession, model.capture_session_id == CaptureSession.id)
+            .join(Sensor, CaptureSession.sensor_id == Sensor.id)
+            .join(Zone, Sensor.zone_id == Zone.id)
+            .filter(Zone.site_id == site_id)
+        )
+    return query
 
 
 @router.get("/devices", response_model=list[DeviceOut])
@@ -17,6 +38,8 @@ def list_devices(
     ot_only: bool = False,
     protocol: str | None = None,
     hide_external: bool = False,
+    zone_id: int | None = None,
+    site_id: int | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -27,6 +50,7 @@ def list_devices(
         query = query.filter(Device.is_ot_suspected.is_(True))
     if protocol:
         query = query.join(DeviceProtocol).filter(DeviceProtocol.protocol == protocol)
+    query = _filter_by_zone_or_site(query, Device, zone_id, site_id)
     devices = query.order_by(Device.last_seen.desc()).all()
 
     # Some LANs (mis)assign public IP ranges to real local devices, so a
@@ -109,6 +133,8 @@ def update_device(
 def list_flows(
     device_id: int | None = None,
     category: str | None = None,
+    zone_id: int | None = None,
+    site_id: int | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -123,4 +149,5 @@ def list_flows(
         query = query.filter((Flow.device_a_id == device_id) | (Flow.device_b_id == device_id))
     if category:
         query = query.filter(Flow.category == category)
+    query = _filter_by_zone_or_site(query, Flow, zone_id, site_id)
     return query.order_by(Flow.packet_count.desc()).all()

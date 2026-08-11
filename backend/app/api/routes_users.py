@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.auth import ROLE_ADMIN
+from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN
 from app.auth.deps import is_super_admin, require_admin
 from app.auth.security import hash_password
 from app.db import get_db
@@ -32,9 +32,18 @@ def list_users(
 
 @router.post("", response_model=UserOut, status_code=201)
 def create_user(payload: UserCreateRequest, db: Session = Depends(get_db), current: User = Depends(require_admin)):
-    if current.organization_id is None:
+    if payload.role == ROLE_SUPER_ADMIN:
+        # Only an existing Super Admin can mint another one -- an admin
+        # hitting this with role=super_admin is treated the same as if the
+        # role didn't exist at all.
+        if not is_super_admin(current):
+            raise HTTPException(status_code=403, detail=message("auth.super_admin_required", current.locale))
+        # A super_admin has no organization, like the caller -- payload.organization_id
+        # (meant for a new admin/viewer) doesn't apply here and is ignored.
+        organization_id = None
+    elif current.organization_id is None:
         # A super_admin has no organization of its own to default to --
-        # they must say which organization the new user belongs to.
+        # they must say which organization the new admin/viewer belongs to.
         if payload.organization_id is None:
             raise HTTPException(status_code=400, detail=message("users.super_admin_has_no_organization", current.locale))
         organization_id = payload.organization_id
@@ -43,12 +52,17 @@ def create_user(payload: UserCreateRequest, db: Session = Depends(get_db), curre
         # any organization_id they pass is ignored, mirroring list_users.
         organization_id = current.organization_id
 
-    if (
-        db.query(User)
-        .filter(User.organization_id == organization_id, User.username == payload.username)
-        .one_or_none()
-        is not None
-    ):
+    # organization_id IS NULL for every super_admin, so this scopes the
+    # duplicate check to "other super_admins" when creating one -- same
+    # shape as the per-organization check for admin/viewer, matching the
+    # partial unique index on User (see models.py).
+    duplicate_query = db.query(User).filter(User.username == payload.username)
+    duplicate_query = (
+        duplicate_query.filter(User.organization_id.is_(None))
+        if organization_id is None
+        else duplicate_query.filter(User.organization_id == organization_id)
+    )
+    if duplicate_query.one_or_none() is not None:
         raise HTTPException(status_code=409, detail=message("users.duplicate_username", current.locale))
 
     salt, password_hash = hash_password(payload.password)
@@ -73,6 +87,14 @@ def _remaining_admins(db: Session, organization_id: int | None, excluding_user_i
             User.role == ROLE_ADMIN,
             User.id != excluding_user_id,
         )
+        .count()
+    )
+
+
+def _remaining_super_admins(db: Session, excluding_user_id: int) -> int:
+    return (
+        db.query(User)
+        .filter(User.organization_id.is_(None), User.role == ROLE_SUPER_ADMIN, User.id != excluding_user_id)
         .count()
     )
 
@@ -104,6 +126,17 @@ def update_user(
                 status_code=400,
                 detail=message("users.cannot_remove_last_admin_role", current.locale),
             )
+        # UserUpdateRequest.role can only be "admin"/"viewer", both of which
+        # require an organization_id -- a super_admin has none, so there's
+        # no valid organization for it to land in. Demoting one is refused
+        # outright (regardless of how many other super_admins remain);
+        # removing one is only ever done via DELETE, which is protected by
+        # _remaining_super_admins below instead.
+        if user.role == ROLE_SUPER_ADMIN:
+            raise HTTPException(
+                status_code=400,
+                detail=message("users.cannot_change_super_admin_role", current.locale),
+            )
         user.role = updates["role"]
 
     if updates.get("password"):
@@ -121,6 +154,8 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current: User = Dep
         raise HTTPException(status_code=400, detail=message("users.cannot_delete_self", current.locale))
     if user.role == ROLE_ADMIN and _remaining_admins(db, user.organization_id, user.id) == 0:
         raise HTTPException(status_code=400, detail=message("users.cannot_delete_last_admin", current.locale))
+    if user.role == ROLE_SUPER_ADMIN and _remaining_super_admins(db, user.id) == 0:
+        raise HTTPException(status_code=400, detail=message("users.cannot_delete_last_super_admin", current.locale))
 
     db.delete(user)
     db.commit()

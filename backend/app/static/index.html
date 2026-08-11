@@ -469,13 +469,17 @@
 
   <div class="zone-breadcrumb hidden" id="zone-breadcrumb">
     <span id="zone-breadcrumb-path"></span>
-    <span class="note" id="zone-breadcrumb-note">mostrando datos de toda la organización — filtrado por Zona próximamente</span>
+    <span class="note" id="zone-breadcrumb-note">filtrado por esta Zona</span>
   </div>
 
   <section id="tab-capture" class="tab active">
     <div class="card admin-only">
       <h2 data-i18n="capture.live_title">Captura en vivo</h2>
       <div class="row">
+        <div>
+          <label data-i18n="capture.sensor">Sensor</label>
+          <select id="capture-sensor-select"></select>
+        </div>
         <div>
           <label data-i18n="capture.interface">Interfaz de red</label>
           <select id="iface-select"><option value="">(cargando...)</option></select>
@@ -494,6 +498,9 @@
 
     <div class="card admin-only">
       <h2 data-i18n="capture.pcap_title">Analizar archivo .pcap / .pcapng</h2>
+      <p class="muted" style="margin:0 0 10px; font-size:12px;" data-i18n="capture.pcap_sensor_hint">
+        Se asocia al sensor seleccionado arriba.
+      </p>
       <div id="pcap-dropzone" class="dropzone">
         <span data-i18n="capture.dropzone_text" data-i18n-html>Arrastra aquí un archivo <b>.pcap</b>/<b>.pcapng</b>, o</span>
         <label for="pcap-file" style="color:var(--accent); cursor:pointer; text-decoration:underline;" data-i18n="capture.dropzone_pick">selecciónalo</label>
@@ -695,6 +702,7 @@
           <select id="new-user-role">
             <option value="viewer" data-i18n="users.role_viewer">Visualizador</option>
             <option value="admin" data-i18n="users.role_admin">Administrador</option>
+            <option value="super_admin" class="super-admin-only hidden" data-i18n="users.role_super_admin">Super Admin</option>
           </select>
         </div>
         <button class="action" id="create-user-btn" data-i18n="users.create_btn">Crear</button>
@@ -960,6 +968,8 @@ const I18N = {
   'login.submit': { es: 'Entrar', en: 'Sign in' },
   'common.clear_filters': { es: 'Limpiar filtros', en: 'Clear filters' },
   'capture.live_title': { es: 'Captura en vivo', en: 'Live capture' },
+  'capture.sensor': { es: 'Sensor', en: 'Sensor' },
+  'capture.pcap_sensor_hint': { es: 'Se asocia al sensor seleccionado arriba.', en: 'Attributed to the sensor selected above.' },
   'capture.interface': { es: 'Interfaz de red', en: 'Network interface' },
   'capture.bpf_filter': { es: 'Filtro BPF', en: 'BPF filter' },
   'capture.start': { es: 'Iniciar captura', en: 'Start capture' },
@@ -1033,6 +1043,7 @@ const I18N = {
   'users.role': { es: 'Perfil', en: 'Role' },
   'users.role_viewer': { es: 'Visualizador', en: 'Viewer' },
   'users.role_admin': { es: 'Administrador', en: 'Admin' },
+  'users.role_super_admin': { es: 'Super Admin', en: 'Super Admin' },
   'users.create_btn': { es: 'Crear', en: 'Create' },
   'users.title': { es: 'Usuarios', en: 'Users' },
   'users.col_created': { es: 'Creado', en: 'Created' },
@@ -1380,7 +1391,7 @@ function progressCell(s) {
 let allSessions = [];
 
 async function loadSessions() {
-  allSessions = await api('/api/capture/sessions');
+  allSessions = await api(`/api/capture/sessions${zoneFilterQuery()}`);
   renderSessionsTable();
   renderReportsTab();
 }
@@ -1441,11 +1452,16 @@ $('#wipe-db-btn').addEventListener('click', async () => {
 $('#start-live-btn').addEventListener('click', async () => {
   const iface = $('#iface-select').value;
   if (!iface) { alert('Selecciona una interfaz'); return; }
+  const sensorId = $('#capture-sensor-select').value;
   try {
     await api('/api/capture/live/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ interface: iface, bpf_filter: $('#bpf-filter').value }),
+      body: JSON.stringify({
+        interface: iface,
+        bpf_filter: $('#bpf-filter').value,
+        sensor_id: sensorId ? Number(sensorId) : null,
+      }),
     });
     loadSessions();
   } catch (e) { alert('No se pudo iniciar la captura: ' + e.message); }
@@ -1457,6 +1473,8 @@ async function uploadPcapFile(file) {
   nameEl.textContent = `Subiendo ${file.name}...`;
   const form = new FormData();
   form.append('file', file);
+  const sensorId = $('#capture-sensor-select').value;
+  if (sensorId) form.append('sensor_id', sensorId);
   try {
     await api('/api/capture/pcap', { method: 'POST', body: form });
     nameEl.textContent = `${file.name} — subido, procesando...`;
@@ -1631,7 +1649,10 @@ async function loadDevices() {
   // (they do have a captured mac -- the gateway's -- so is_external is
   // false for them even though they're the same kind of noise).
   const hideExternal = $('#hide-external-checkbox').checked;
-  allDevices = await api(`/api/inventory/devices${hideExternal ? '?hide_external=true' : ''}`);
+  const zq = zoneFilterQuery();
+  const hideExternalParam = hideExternal ? 'hide_external=true' : '';
+  const query = [zq.slice(1), hideExternalParam].filter(Boolean).join('&');
+  allDevices = await api(`/api/inventory/devices${query ? '?' + query : ''}`);
   renderDevicesTable();
   renderReportsTab();
 }
@@ -1920,7 +1941,7 @@ applyColumnVisibility();
 let allFlows = [];
 
 async function loadFlows() {
-  allFlows = await api('/api/inventory/flows');
+  allFlows = await api(`/api/inventory/flows${zoneFilterQuery()}`);
   renderFlowsTable();
 }
 
@@ -1983,7 +2004,7 @@ $('#hide-external-flows-checkbox').addEventListener('change', renderFlowsTable);
 let allFindings = [];
 
 async function loadFindings() {
-  allFindings = await api('/api/vuln/findings');
+  allFindings = await api(`/api/vuln/findings${zoneFilterQuery()}`);
   renderFindingsStats();
   renderFindingsTable();
   renderReportsTab();
@@ -2079,11 +2100,10 @@ $('#export-vuln-pdf-btn').addEventListener('click', () => {
 
 // ---------- Reportes tab: combined inventory + vulnerabilities + captures ----------
 // NOTE: deliberately org-wide, not scoped to the Sitio it's opened from --
-// unlike Captura/Inventario/Flujos/Vulnerabilidades (which show the whole
-// organization only because per-zone filtering isn't built yet), Reportes
-// is meant to always summarize the entire organization. That's also why it
-// lives at the Sitio level in the tree (SITE_LEAVES) instead of nested
-// under each Zona.
+// unlike Captura/Inventario/Flujos/Vulnerabilidades (which filter to the
+// active Zona via zoneFilterQuery()), Reportes is meant to always summarize
+// the entire organization. That's also why it lives at the Sitio level in
+// the tree (SITE_LEAVES) instead of nested under each Zona.
 function renderReportsTab() {
   const totalDevices = allDevices.length;
   const otDevices = allDevices.filter(d => d.is_ot_suspected).length;
@@ -2221,13 +2241,15 @@ function renderUsersTable() {
   const tbody = $('#users-body');
   tbody.innerHTML = allUsers.map(u => `
     <tr>
-      <td data-col="usuario">${u.username}${u.id === currentUser.id ? ' <span class="pill">tú</span>' : ''}</td>
+      <td data-col="usuario">${escapeHtml(u.username)}${u.id === currentUser.id ? ' <span class="pill">tú</span>' : ''}</td>
       <td>
         <span data-col="perfil" style="display:none">${ROLE_LABELS[u.role] || u.role}</span>
-        <select onchange="changeUserRole(${u.id}, this.value)" ${u.id === currentUser.id ? 'disabled' : ''}>
+        ${u.role === 'super_admin'
+          ? `<span class="pill">Super Admin</span>`
+          : `<select onchange="changeUserRole(${u.id}, this.value)" ${u.id === currentUser.id ? 'disabled' : ''}>
           <option value="viewer" ${u.role === 'viewer' ? 'selected' : ''}>Visualizador</option>
           <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Administrador</option>
-        </select>
+        </select>`}
       </td>
       <td data-col="creado" class="muted">${fmtDate(u.created_at)}</td>
       <td>
@@ -2289,6 +2311,10 @@ $('#create-user-btn').addEventListener('click', async () => {
     });
     $('#new-user-username').value = '';
     $('#new-user-password').value = '';
+    // A new super_admin has no organization, so it would never show up in
+    // whatever single org's list is currently filtered -- switch to "every
+    // organization" so it's actually visible right after creating it.
+    if (role === 'super_admin') usersFilterOrgId = null;
     loadUsers();
   } catch (e) { $('#create-user-error').textContent = e.message; }
 });
@@ -2349,6 +2375,15 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// Captura/Inventario/Flujos/Vulnerabilidades are scoped to the active Zona
+// (selectZoneLeaf sets selectedZoneId) via the backend's zone_id filter --
+// unfiltered (whole organization) when no Zona is selected, e.g. right
+// after login or while looking at Reportes (deliberately org-wide, see
+// SITE_LEAVES).
+function zoneFilterQuery() {
+  return selectedZoneId != null ? `?zone_id=${selectedZoneId}` : '';
+}
+
 // The organization whose Sitio/Zona rail is on screen: the caller's own
 // for admin/viewer, or whichever one Super Admin picked in the switcher.
 function currentOrgId() {
@@ -2391,7 +2426,29 @@ function populateZoneSelects() {
 
 async function loadSensors() {
   allSensors = await api('/api/sensors');
+  populateCaptureSensorSelect();
   renderSidebarRail();
+}
+
+// Scoped to the active Zona's own sensors when Captura was opened from one
+// (selectZoneLeaf sets selectedZoneId), so a capture started/uploaded from
+// "Línea 1" can only ever be attributed to a sensor that's actually in
+// Línea 1 -- otherwise (no Zona context yet, e.g. right after login) shows
+// every sensor in scope, labeled with its Zona so it's still unambiguous.
+function populateCaptureSensorSelect() {
+  const select = $('#capture-sensor-select');
+  if (!select) return;
+  const previous = select.value;
+  const inZone = selectedZoneId != null;
+  const sensors = inZone ? allSensors.filter(s => s.zone_id === selectedZoneId) : allSensors;
+  const zoneName = id => (allZones.find(z => z.id === id) || {}).name || `#${id}`;
+  select.innerHTML = sensors.length
+    ? sensors.map(s => {
+        const label = inZone ? s.name : `${zoneName(s.zone_id)} — ${s.name}`;
+        return `<option value="${s.id}">${escapeHtml(label)}</option>`;
+      }).join('')
+    : '<option value="">(sin sensores)</option>';
+  if (previous && sensors.some(s => String(s.id) === previous)) select.value = previous;
 }
 
 async function loadOrganizations() {
@@ -2690,9 +2747,18 @@ function selectZoneLeaf(zoneId, tabName) {
   if (zone && site && breadcrumb && path) {
     const leafLabel = (ZONE_LEAVES.find(l => l.tab === tabName) || {}).label || tabName;
     path.innerHTML = `<b>${escapeHtml(orgName || '—')}</b> › <b>${escapeHtml(site.name)}</b> › <b>${escapeHtml(zone.name)}</b> › ${escapeHtml(leafLabel)}`;
-    if (note) note.textContent = 'mostrando datos de toda la organización — filtrado por Zona próximamente';
+    if (note) note.textContent = 'filtrado por esta Zona';
     breadcrumb.classList.remove('hidden');
   }
+  populateCaptureSensorSelect();
+  // Refetches with the new selectedZoneId already in place, via
+  // zoneFilterQuery() -- otherwise the view would keep showing whatever
+  // (unfiltered, or a different Zona's) data the last periodic refresh
+  // happened to load.
+  loadSessions();
+  loadDevices();
+  loadFlows();
+  loadFindings();
   renderSidebarRail();
 }
 
@@ -2718,6 +2784,14 @@ function selectSiteLeaf(siteId, tabName) {
     if (note) note.textContent = 'mostrando datos de toda la organización';
     breadcrumb.classList.remove('hidden');
   }
+  // selectedZoneId is already null here (activateTab reset it, and Reportes
+  // never sets it) -- these refetch without a zone_id filter, back to the
+  // org-wide totals Reportes is meant to show even right after leaving a
+  // Zona's filtered view.
+  loadSessions();
+  loadDevices();
+  loadFlows();
+  loadFindings();
   renderSidebarRail();
 }
 

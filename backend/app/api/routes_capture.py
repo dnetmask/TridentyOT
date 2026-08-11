@@ -1,7 +1,7 @@
 import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user, is_super_admin, require_admin
@@ -11,12 +11,65 @@ from app.config import DATA_DIR, DEFAULT_LIVE_CAPTURE_FILTER
 from app.db import get_db, session_scope
 from app.i18n import message
 from app.inventory.inventory_service import purge_capture_session, wipe_all_capture_data
-from app.models import CaptureSession, User
+from app.models import CaptureSession, Sensor, Site, User, Zone
 from app.schemas import CaptureSessionOut, StartLiveCaptureRequest, capture_session_out
 
 router = APIRouter(prefix="/api/capture", tags=["capture"])
 
 UPLOAD_DIR = DATA_DIR / "uploads"
+
+
+def _get_owned_sensor(db: Session, user: User, sensor_id: int) -> Sensor:
+    """Mirrors routes_hierarchy._get_owned_zone -- a Sensor has no direct
+    organization_id of its own, so ownership is checked by joining up
+    through its Zone and Site."""
+    query = db.query(Sensor).filter(Sensor.id == sensor_id)
+    if not is_super_admin(user):
+        query = (
+            query.join(Zone, Sensor.zone_id == Zone.id)
+            .join(Site, Zone.site_id == Site.id)
+            .filter(Site.organization_id == user.organization_id)
+        )
+    sensor = query.one_or_none()
+    if sensor is None:
+        raise HTTPException(status_code=404, detail=message("sensors.not_found", user.locale))
+    return sensor
+
+
+def _resolve_capture_sensor(db: Session, user: User, sensor_id: int | None) -> Sensor:
+    """sensor_id is optional: a caller with exactly one Sensor available
+    (the common single-Sitio deployment) shouldn't have to pick, so this
+    falls back to it automatically. Required (400, not a silent guess) once
+    there's more than one to choose from, or none at all -- either way
+    guessing would risk attributing the capture to the wrong Sitio, which
+    is the whole point of tracking this in the first place."""
+    if sensor_id is not None:
+        return _get_owned_sensor(db, user, sensor_id)
+
+    query = db.query(Sensor)
+    if not is_super_admin(user):
+        query = (
+            query.join(Zone, Sensor.zone_id == Zone.id)
+            .join(Site, Zone.site_id == Site.id)
+            .filter(Site.organization_id == user.organization_id)
+        )
+    sensors = query.order_by(Sensor.id.asc()).limit(2).all()
+    if len(sensors) == 1:
+        return sensors[0]
+    if not sensors:
+        raise HTTPException(status_code=400, detail=message("capture.sensor_id_required_none", user.locale))
+    raise HTTPException(status_code=400, detail=message("capture.sensor_id_required_ambiguous", user.locale))
+
+
+def _sensor_organization_id(db: Session, sensor: Sensor) -> int | None:
+    """The Sensor's own organization, via Zone -> Site -- not the caller's:
+    a Super Admin capturing on a Sensor that belongs to some organization
+    has none of their own (user.organization_id is None), so the
+    CaptureSession must take its organization from the sensor it's
+    actually attached to instead."""
+    zone = db.get(Zone, sensor.zone_id)
+    site = db.get(Site, zone.site_id)
+    return site.organization_id
 
 
 @router.get("/interfaces")
@@ -30,10 +83,23 @@ def list_interfaces(_user: User = Depends(get_current_user)):
 
 
 @router.get("/sessions", response_model=list[CaptureSessionOut])
-def list_sessions(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def list_sessions(
+    zone_id: int | None = None,
+    site_id: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     query = db.query(CaptureSession)
     if not is_super_admin(user):
         query = query.filter(CaptureSession.organization_id == user.organization_id)
+    if zone_id is not None:
+        query = query.join(Sensor, CaptureSession.sensor_id == Sensor.id).filter(Sensor.zone_id == zone_id)
+    elif site_id is not None:
+        query = (
+            query.join(Sensor, CaptureSession.sensor_id == Sensor.id)
+            .join(Zone, Sensor.zone_id == Zone.id)
+            .filter(Zone.site_id == site_id)
+        )
     sessions = query.order_by(CaptureSession.started_at.desc()).all()
     return [capture_session_out(s, user.locale) for s in sessions]
 
@@ -57,9 +123,11 @@ def get_session(session_id: int, db: Session = Depends(get_db), user: User = Dep
 def start_live_capture(
     payload: StartLiveCaptureRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)
 ):
+    sensor = _resolve_capture_sensor(db, user, payload.sensor_id)
     bpf_filter = payload.bpf_filter or DEFAULT_LIVE_CAPTURE_FILTER
     session_obj = CaptureSession(
-        organization_id=user.organization_id,
+        organization_id=_sensor_organization_id(db, sensor),
+        sensor_id=sensor.id,
         name=payload.name or f"live:{payload.interface}",
         source_type="live",
         source=payload.interface,
@@ -139,16 +207,20 @@ def _process_pcap_background(filepath: str, capture_session_id: int) -> None:
 async def upload_pcap(
     background_tasks: BackgroundTasks,
     file: UploadFile,
+    sensor_id: int | None = Form(None),
     db: Session = Depends(get_db),
     user: User = Depends(require_admin),
 ):
+    sensor = _resolve_capture_sensor(db, user, sensor_id)
+
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     dest_path = UPLOAD_DIR / f"{uuid4().hex}_{file.filename}"
     content = await file.read()
     dest_path.write_bytes(content)
 
     session_obj = CaptureSession(
-        organization_id=user.organization_id,
+        organization_id=_sensor_organization_id(db, sensor),
+        sensor_id=sensor.id,
         name=file.filename or "upload.pcap",
         source_type="pcap",
         source=file.filename or "upload.pcap",

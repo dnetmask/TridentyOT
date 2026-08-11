@@ -13,15 +13,25 @@ from fastapi.testclient import TestClient
 
 from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN
 from app.auth.security import hash_password
-from app.models import Organization, User
+from app.models import Organization, Sensor, Site, User, Zone
 
 
 def _make_other_org_client(db_session, username="other-admin", password="other-pass") -> TestClient:
-    """Creates a brand-new Organization and an admin user in it, then
-    returns a TestClient already authenticated as that user."""
+    """Creates a brand-new Organization (with a default Site/Zone/Sensor,
+    same as db.py's startup migration gives the seeded org -- a pcap
+    upload needs one to attribute the capture to) and an admin user in it,
+    then returns a TestClient already authenticated as that user."""
     org = Organization(name="Other Org", slug="other-org")
     db_session.add(org)
     db_session.flush()
+
+    site = Site(organization_id=org.id, name="Other Site")
+    db_session.add(site)
+    db_session.flush()
+    zone = Zone(site_id=site.id, name="Other Zone")
+    db_session.add(zone)
+    db_session.flush()
+    db_session.add(Sensor(zone_id=zone.id, name="Other Sensor"))
 
     salt, password_hash = hash_password(password)
     db_session.add(

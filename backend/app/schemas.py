@@ -137,6 +137,14 @@ class StartLiveCaptureRequest(BaseModel):
     interface: str
     bpf_filter: str | None = None
     name: str | None = None
+    # Which Sensor (and therefore which Zona/Sitio) this capture belongs to
+    # -- lets the resulting devices/flows/findings be attributed to a
+    # specific Sitio, instead of only ever being scoped to the whole
+    # organization. Optional: a caller with exactly one Sensor available
+    # (the common single-site case) doesn't have to pick; required only
+    # when there's more than one to choose from -- see
+    # routes_capture._resolve_capture_sensor.
+    sensor_id: int | None = None
 
 
 class ScanRequest(BaseModel):
@@ -173,14 +181,16 @@ class LoginResponse(BaseModel):
 class UserCreateRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=4, max_length=256)
-    # super_admin is deliberately not assignable here -- this endpoint
-    # always attaches the new user to an organization, and a super_admin
-    # has none of its own (see routes_users.create_user).
-    role: Literal["admin", "viewer"]
-    # Only used (and required) when the caller is a super_admin, who has no
-    # organization of their own to default to -- ignored for an admin,
-    # whose new user always belongs to their own organization. Mirrors
-    # SiteCreateRequest.organization_id.
+    # "super_admin" is only accepted from a super_admin caller (checked in
+    # routes_users.create_user, since a Literal can't condition on who's
+    # asking) -- an admin trying to set it gets a 403, same as if it
+    # weren't a valid value at all.
+    role: Literal["super_admin", "admin", "viewer"]
+    # Only used (and required) when the caller is a super_admin creating an
+    # admin/viewer, who has no organization of their own to default to --
+    # ignored for an admin (whose new user always belongs to their own
+    # organization) and for a new super_admin (who has none, like the
+    # caller). Mirrors SiteCreateRequest.organization_id.
     organization_id: int | None = None
 
 

@@ -97,6 +97,14 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "No puedes eliminar el último administrador de la organización",
         "en": "You can't delete the last administrator in the organization",
     },
+    "users.cannot_change_super_admin_role": {
+        "es": "No puedes cambiar el rol de un Super Admin: no tiene una organización a la cual pasar. Elimínalo en su lugar",
+        "en": "You can't change a Super Admin's role: it has no organization to move into. Delete it instead",
+    },
+    "users.cannot_delete_last_super_admin": {
+        "es": "No puedes eliminar el último Super Admin de la plataforma",
+        "en": "You can't delete the last Super Admin on the platform",
+    },
     "capture.session_not_found": {
         "es": "Sesión de captura no encontrada",
         "en": "Capture session not found",
@@ -104,6 +112,14 @@ MESSAGES: dict[str, dict[str, str]] = {
     "capture.not_a_live_session": {
         "es": "La sesión no es una captura en vivo",
         "en": "Session is not a live capture",
+    },
+    "capture.sensor_id_required_none": {
+        "es": "No hay ningún sensor configurado. Creá uno en una Zona antes de capturar",
+        "en": "No sensor is configured yet. Create one in a Zone before capturing",
+    },
+    "capture.sensor_id_required_ambiguous": {
+        "es": "Hay más de un sensor disponible: indicá cuál sensor usar para esta captura",
+        "en": "More than one sensor is available: specify which sensor this capture belongs to",
     },
     "inventory.device_not_found": {"es": "Dispositivo no encontrado", "en": "Device not found"},
     "organizations.duplicate_slug": {

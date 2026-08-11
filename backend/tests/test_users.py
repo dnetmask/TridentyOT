@@ -164,6 +164,81 @@ def test_super_admin_can_create_a_user_within_a_specific_organization(client, db
     assert "delegado" in {u["username"] for u in listed}
 
 
+def test_super_admin_can_create_another_super_admin(db_session):
+    super_admin = _make_super_admin_client(db_session)
+    resp = super_admin.post("/api/users", json={"username": "root2", "password": "secret123", "role": "super_admin"})
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["role"] == "super_admin"
+    assert body["organization_id"] is None
+
+    # Any organization_id passed alongside role=super_admin is ignored --
+    # a super_admin never belongs to one.
+    resp2 = super_admin.post(
+        "/api/users",
+        json={"username": "root3", "password": "secret123", "role": "super_admin", "organization_id": 999},
+    )
+    assert resp2.status_code == 201, resp2.text
+    assert resp2.json()["organization_id"] is None
+
+    listed = {u["username"] for u in super_admin.get("/api/users").json()}
+    assert {"root", "root2", "root3"} <= listed
+
+
+def test_admin_cannot_create_a_super_admin(client):
+    resp = client.post("/api/users", json={"username": "wannabe-root", "password": "secret123", "role": "super_admin"})
+    assert resp.status_code == 403
+
+
+def test_viewer_cannot_create_a_super_admin(client, make_client):
+    client.post("/api/users", json={"username": "viewer1", "password": "secret1", "role": "viewer"})
+    viewer = make_client("viewer1", "secret1")
+    resp = viewer.post("/api/users", json={"username": "wannabe-root", "password": "secret123", "role": "super_admin"})
+    assert resp.status_code == 403
+
+
+def test_duplicate_super_admin_username_is_rejected(db_session):
+    super_admin = _make_super_admin_client(db_session)
+    resp = super_admin.post("/api/users", json={"username": "root", "password": "secret123", "role": "super_admin"})
+    assert resp.status_code == 409
+
+
+def test_cannot_delete_the_last_super_admin(db_session):
+    super_admin = _make_super_admin_client(db_session)
+    me = super_admin.get("/api/auth/me").json()
+    resp = super_admin.delete(f"/api/users/{me['id']}")
+    assert resp.status_code == 400
+
+
+def test_can_delete_a_super_admin_when_another_remains(db_session):
+    super_admin = _make_super_admin_client(db_session)
+    second = super_admin.post(
+        "/api/users", json={"username": "root2", "password": "secret123", "role": "super_admin"}
+    ).json()
+
+    resp = super_admin.delete(f"/api/users/{second['id']}")
+    assert resp.status_code == 204
+
+
+def test_cannot_demote_a_super_admin_via_patch(db_session):
+    """PATCH has no way to give a demoted super_admin an organization to
+    land in (UserUpdateRequest.role is admin/viewer-only, with no
+    organization_id field) -- so demoting one is rejected outright, even
+    when other super_admins remain. Removing one is only ever done via
+    DELETE (see test_can_delete_a_super_admin_when_another_remains)."""
+    super_admin = _make_super_admin_client(db_session)
+    second = super_admin.post(
+        "/api/users", json={"username": "root2", "password": "secret123", "role": "super_admin"}
+    ).json()
+
+    resp = super_admin.patch(f"/api/users/{second['id']}", json={"role": "viewer"})
+    assert resp.status_code == 400
+
+    me = super_admin.get("/api/auth/me").json()
+    resp2 = super_admin.patch(f"/api/users/{me['id']}", json={"role": "viewer"})
+    assert resp2.status_code == 400
+
+
 def test_admin_cannot_use_organization_id_to_create_a_user_in_another_org(client, db_session):
     super_admin = _make_super_admin_client(db_session)
     org_b = super_admin.post(
