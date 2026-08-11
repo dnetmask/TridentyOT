@@ -309,6 +309,15 @@
   .stat-tile .stat-num.network { color: var(--info); }
   .stat-tile .stat-num.other { color: var(--other); }
   .stat-tile .stat-label { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .home-options-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+  .home-option-card {
+    flex: 1; min-width: 180px; text-align: left; font: inherit; color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; cursor: pointer;
+  }
+  .home-option-card:hover { border-color: var(--accent); }
+  .home-option-title { font-weight: 700; font-size: 13.5px; }
+  .home-option-hint { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
   .refresh-timer { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
   .table-scroll { overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
   .table-scroll table { width: 100%; border-collapse: collapse; }
@@ -471,6 +480,22 @@
     <span id="zone-breadcrumb-path"></span>
     <span class="note" id="zone-breadcrumb-note">filtrado por esta Zona</span>
   </div>
+
+  <section id="tab-home" class="tab">
+    <div class="card">
+      <h2 id="home-title">Inicio</h2>
+      <p class="muted" id="home-subtitle" style="margin:0 0 14px; font-size:12.5px;"></p>
+      <div class="stat-row" id="home-stats"></div>
+    </div>
+    <div class="card">
+      <h2 data-i18n="home.zones_title">Zonas de este sitio</h2>
+      <div class="home-options-grid" id="home-zones"></div>
+    </div>
+    <div class="card">
+      <h2 data-i18n="home.quick_links_title">Accesos rápidos</h2>
+      <div class="home-options-grid" id="home-quick-links"></div>
+    </div>
+  </section>
 
   <section id="tab-capture" class="tab active">
     <div class="card admin-only">
@@ -982,6 +1007,8 @@ const I18N = {
   'login.password': { es: 'Contraseña', en: 'Password' },
   'login.submit': { es: 'Entrar', en: 'Sign in' },
   'common.clear_filters': { es: 'Limpiar filtros', en: 'Clear filters' },
+  'home.zones_title': { es: 'Zonas de este sitio', en: 'Zones in this site' },
+  'home.quick_links_title': { es: 'Accesos rápidos', en: 'Quick links' },
   'capture.live_title': { es: 'Captura en vivo', en: 'Live capture' },
   'capture.sensor': { es: 'Sensor', en: 'Sensor' },
   'capture.add_sensor': { es: '+ Sensor', en: '+ Sensor' },
@@ -2507,7 +2534,18 @@ function populateOrganizationSelect() {
 }
 
 function toggleFlyout(key) {
-  openFlyoutKey = (openFlyoutKey === key) ? null : key;
+  const opening = openFlyoutKey !== key;
+  if (opening && (key === 'org-switcher' || key === 'site-switcher')) {
+    // Opening the Organización/Sitio switcher jumps to Home instead of
+    // leaving whatever Zona-specific tab was on screen -- picking a
+    // different org/site from the list that follows would invalidate it
+    // anyway (see selectOrgContext/selectSiteContext below).
+    activateTab('home');
+    openFlyoutKey = key;
+    renderSidebarRail();
+    return;
+  }
+  openFlyoutKey = opening ? key : null;
   renderSidebarRail();
 }
 
@@ -2519,22 +2557,18 @@ function closeFlyout() {
 function selectOrgContext(orgId) {
   selectedOrgId = orgId;
   currentSiteId = null; // re-derived to the new org's first site on next render
-  activeRailKey = null;
-  openFlyoutKey = null;
-  renderSidebarRail();
+  activateTab('home'); // switching org invalidates whatever Zona/Sitio tab was on screen
 }
 
 function selectSiteContext(siteId) {
   currentSiteId = siteId;
-  activeRailKey = null;
-  openFlyoutKey = null;
-  renderSidebarRail();
+  activateTab('home'); // same as above, but for switching Sitio within the same org
 }
 
 function renderSidebarRail() {
   const container = $('#sidebar-rail');
   if (!container || !currentUser) return;
-  if (!isSuperAdmin() && !currentUser.organization_id) { container.innerHTML = ''; renderFlyoutPanel(); return; }
+  if (!isSuperAdmin() && !currentUser.organization_id) { container.innerHTML = ''; renderFlyoutPanel(); renderHomeContent(); return; }
 
   const admin = isAdmin();
   // Defaults to the first organization the first time (or after the
@@ -2622,6 +2656,7 @@ function renderSidebarRail() {
     </div>`;
 
   renderFlyoutPanel();
+  renderHomeContent();
 }
 
 function renderFlyoutPanel() {
@@ -2642,6 +2677,54 @@ function renderFlyoutPanel() {
   else if (openFlyoutKey === 'reports') panel.innerHTML = buildReportsFlyout();
   else if (openFlyoutKey.startsWith('zone-')) panel.innerHTML = buildZoneFlyout(Number(openFlyoutKey.slice(5)));
   else panel.innerHTML = '';
+}
+
+// Landing dashboard for the Home tab -- refreshed on every sidebar render
+// (org/site switch, or Sitios/Zonas/Sensores reloading), so it's always in
+// sync with whichever Organización/Sitio is current without needing every
+// call site that changes them to remember to refresh it separately.
+function renderHomeContent() {
+  const titleEl = $('#home-title');
+  if (!titleEl || !currentUser) return;
+
+  const orgId = currentOrgId();
+  const org = orgId != null ? allOrganizations.find(o => o.id === orgId) : null;
+  const orgName = org ? org.name : (currentUser.organization_name || currentUser.username);
+  const sitesForOrg = orgId != null ? allSites.filter(s => s.organization_id === orgId) : [];
+  const site = sitesForOrg.find(s => s.id === currentSiteId) || null;
+  const zonesForSite = site ? allZones.filter(z => z.site_id === site.id) : [];
+  const sensorsForSite = zonesForSite.length ? allSensors.filter(s => zonesForSite.some(z => z.id === s.zone_id)) : [];
+  const admin = isAdmin();
+
+  titleEl.textContent = orgId != null ? orgName : 'Bienvenido';
+  $('#home-subtitle').textContent = site
+    ? `Sitio actual: ${site.name}`
+    : (orgId != null ? 'Sin sitios todavía' : 'Sin organización asignada');
+
+  $('#home-stats').innerHTML = `
+    <div class="stat-tile"><div class="stat-num">${sitesForOrg.length}</div><div class="stat-label">Sitios</div></div>
+    <div class="stat-tile"><div class="stat-num">${zonesForSite.length}</div><div class="stat-label">Zonas en este sitio</div></div>
+    <div class="stat-tile"><div class="stat-num">${sensorsForSite.length}</div><div class="stat-label">Sensores en este sitio</div></div>
+  `;
+
+  const zoneCardsHtml = zonesForSite.map(zone => `
+    <button type="button" class="home-option-card" onclick="selectZoneLeaf(${zone.id}, 'capture')">
+      <div class="home-option-title">${escapeHtml(zone.name)}</div>
+      <div class="home-option-hint">Ver Captura</div>
+    </button>`).join('');
+  const emptyZonesHtml = site
+    ? `<div class="tree-empty">${admin ? 'Sin zonas — creá una con "+ Zona"' : 'Sin zonas'}</div>`
+    : `<div class="tree-empty">${orgId != null ? 'Sin sitios' : 'Sin organización'}</div>`;
+  $('#home-zones').innerHTML = zoneCardsHtml || emptyZonesHtml;
+
+  const quickLinksHtml = [
+    site ? `<button type="button" class="home-option-card" onclick="selectSiteLeaf(${site.id}, 'reports')"><div class="home-option-title">Reportes</div><div class="home-option-hint">Resumen combinado del sitio</div></button>` : '',
+    admin && orgId != null ? `<button type="button" class="home-option-card" onclick="openCreateSite(${orgId})"><div class="home-option-title">+ Nuevo sitio</div></button>` : '',
+    admin && site ? `<button type="button" class="home-option-card" onclick="openCreateZone(${site.id})"><div class="home-option-title">+ Nueva zona</div></button>` : '',
+    admin ? `<button type="button" class="home-option-card" onclick="activateTab('users')"><div class="home-option-title">Administración</div><div class="home-option-hint">Usuarios de la organización</div></button>` : '',
+    isSuperAdmin() ? `<button type="button" class="home-option-card" onclick="openCreateOrg()"><div class="home-option-title">+ Nueva organización</div></button>` : '',
+  ].filter(Boolean).join('');
+  $('#home-quick-links').innerHTML = quickLinksHtml || `<div class="tree-empty">Sin acciones disponibles</div>`;
 }
 
 function buildOrgSwitcherFlyout() {
