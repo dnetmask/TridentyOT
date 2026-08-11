@@ -126,13 +126,36 @@
   }
   .sidebar .user-box button { margin-top: 10px; width: 100%; }
 
-  /* ---------- nav tree: Plataforma > Organización > Sitio > Zona ---------- */
+  /* ---------- nav tree: Organización > Sitio > Zona ---------- */
+  .org-switcher { display: flex; gap: 6px; align-items: center; margin: 4px 0 8px; }
+  .org-switcher select { flex: 1; min-width: 0; font-size: 12.5px; padding: 6px 8px; }
   .nav-tree-wrap { flex: 1; overflow-y: auto; margin: 4px -4px 8px; padding: 0 4px; }
   .nav-tree { display: flex; flex-direction: column; gap: 1px; }
   .tree-root-label {
     font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;
     color: var(--muted); padding: 4px 8px 6px;
   }
+  /* Organización and Sitio are shown as bold titles on their own full-width
+     line, not tabbed/indented tree rows sharing space with action buttons
+     -- either of those squeezed their names down to a sliver of the
+     sidebar's width and truncated/mangled them illegibly. Their action
+     buttons sit on their own line right below (.tree-actions), and only
+     Zona (and its Captura/Inventario/Flujos/Vulnerabilidades leaves) keeps
+     the classic indented, collapsible tree-row styling below. */
+  .tree-org { margin-bottom: 10px; }
+  .tree-org-title {
+    font-size: 14.5px; font-weight: 700; color: var(--text);
+    padding: 4px 4px 2px; overflow-wrap: break-word;
+  }
+  .tree-org > .tree-actions { padding: 0 4px 6px; }
+  .tree-org-children { margin-top: 2px; }
+  .tree-site { margin: 8px 0 8px 2px; }
+  .tree-site-title {
+    font-size: 13px; font-weight: 600; color: var(--text);
+    padding: 4px 4px 2px; overflow-wrap: break-word;
+  }
+  .tree-site > .tree-actions { padding: 0 4px 6px; }
+  .tree-site-children { margin-top: 2px; }
   .tree-row { display: flex; align-items: center; gap: 4px; padding: 6px 4px; border-radius: 6px; }
   .tree-row:hover { background: var(--panel-2); }
   .tree-toggle {
@@ -144,12 +167,13 @@
     flex: 1; font-size: 13px; color: var(--text); cursor: pointer;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .tree-actions { display: flex; gap: 4px; flex: none; }
+  .tree-actions { display: flex; gap: 4px; flex: none; flex-wrap: wrap; }
   .tree-action {
     background: none; border: 1px solid var(--border); color: var(--muted);
     font-size: 10px; padding: 2px 6px; border-radius: 5px; cursor: pointer; white-space: nowrap;
   }
   .tree-action:hover { background: var(--panel-2); color: var(--text); }
+  .tree-action.rename { padding: 2px 7px; }
   .tree-children { margin-left: 15px; border-left: 1px solid var(--border); padding-left: 8px; }
   .tree-children.collapsed { display: none; }
   .tree-leaf {
@@ -387,6 +411,11 @@
         <img class="logo-full" id="sidebar-logo" src="/brand/lockup_light.png" alt="TridentyOT" height="35" />
       </div>
       <div class="subtitle" data-i18n="app.subtitle">Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)</div>
+    </div>
+
+    <div class="org-switcher super-admin-only hidden" id="org-switcher">
+      <select id="org-switcher-select" onchange="switchOrgContext(this.value)"></select>
+      <button type="button" class="tree-action" onclick="openCreateOrg()">+ Organización</button>
     </div>
 
     <div class="nav-tree-wrap">
@@ -2223,11 +2252,15 @@ $('#create-user-btn').addEventListener('click', async () => {
   } catch (e) { $('#create-user-error').textContent = e.message; }
 });
 
-// ---------- Nav tree: Plataforma > Organización > Sitio > Zona ----------
+// ---------- Nav tree: Organización > Sitio > Zona ----------
 let allSites = [];
 let allZones = [];
 let allSensors = [];
 let allOrganizations = [];
+// Which organization's tree a Super Admin is currently looking at (picked
+// via the #org-switcher-select dropdown) -- irrelevant for admin/viewer,
+// who only ever see their own organization.
+let selectedOrgId = null;
 let selectedZoneId = null;
 let selectedSiteId = null;
 let selectedLeafTab = null;
@@ -2335,7 +2368,10 @@ function renderZoneNode(zone) {
       <div class="tree-row">
         ${treeToggleHtml(key, true)}
         <span class="tree-label" onclick="toggleTreeNode('${key}')" title="${escapeHtml(zone.name)}">${escapeHtml(zone.name)}</span>
-        <span class="tree-actions">${admin ? `<button type="button" class="tree-action" onclick="openCreateSensor(${zone.id})">+ Sensor</button>` : ''}</span>
+        <span class="tree-actions">
+          ${admin ? `<button type="button" class="tree-action rename" onclick="renameZone(${zone.id})" title="Renombrar">✎</button>
+          <button type="button" class="tree-action" onclick="openCreateSensor(${zone.id})">+ Sensor</button>` : ''}
+        </span>
       </div>
       <div class="tree-children${collapsedTreeNodes.has(key) ? ' collapsed' : ''}">
         <div class="tree-empty">${sensorLine}${zone.security_level ? ' · ' + zone.security_level : ''}</div>
@@ -2344,45 +2380,66 @@ function renderZoneNode(zone) {
     </div>`;
 }
 
+// Sitio is shown as a bold title, not a tabbed/indented tree row -- see the
+// .tree-site-title CSS comment. Its Zonas keep the classic indented,
+// collapsible tree-row styling (renderZoneNode above).
 function renderSiteNode(site) {
-  const key = `site-${site.id}`;
   const admin = isAdmin();
   const zones = allZones.filter(z => z.site_id === site.id);
   const siteLeaves = SITE_LEAVES.map(leaf => `
     <button type="button" class="tree-leaf${selectedSiteId === site.id && selectedLeafTab === leaf.tab ? ' active' : ''}"
       onclick="selectSiteTab(${site.id}, '${leaf.tab}')">${leaf.label}</button>`).join('');
   return `
-    <div class="tree-node">
-      <div class="tree-row">
-        ${treeToggleHtml(key, true)}
-        <span class="tree-label" onclick="toggleTreeNode('${key}')" title="${escapeHtml(site.name)}">${escapeHtml(site.name)}</span>
-        <span class="tree-actions">${admin ? `<button type="button" class="tree-action" onclick="openCreateZone(${site.id})">+ Zona</button>` : ''}</span>
+    <div class="tree-site">
+      <div class="tree-site-title" title="${escapeHtml(site.name)}">${escapeHtml(site.name)}</div>
+      <div class="tree-actions">
+        ${admin ? `<button type="button" class="tree-action rename" onclick="renameSite(${site.id})" title="Renombrar">✎</button>
+        <button type="button" class="tree-action" onclick="openCreateZone(${site.id})">+ Zona</button>` : ''}
       </div>
-      <div class="tree-children${collapsedTreeNodes.has(key) ? ' collapsed' : ''}">
+      <div class="tree-site-children">
         ${zones.length ? zones.map(renderZoneNode).join('') : `<div class="tree-empty">Sin zonas${admin ? ' — creá una con "+ Zona"' : ''}</div>`}
         ${siteLeaves}
       </div>
     </div>`;
 }
 
+// Organización is shown as a bold title, not a tabbed/indented tree row --
+// see the .tree-org-title CSS comment. Only one organization is ever
+// rendered here: the caller's own (admin/viewer) or the one currently
+// picked in #org-switcher-select (Super Admin) -- see renderNavTree.
 function renderOrgNode(org) {
-  const key = `org-${org.id}`;
   const admin = isAdmin();
   const sites = allSites.filter(s => s.organization_id === org.id);
   return `
-    <div class="tree-node">
-      <div class="tree-row">
-        ${treeToggleHtml(key, true)}
-        <span class="tree-label" onclick="toggleTreeNode('${key}')" title="${escapeHtml(org.name)}">${escapeHtml(org.name)}</span>
-        <span class="tree-actions">
-          ${admin ? `<button type="button" class="tree-action" onclick="openUsersFor(${org.id})">Usuarios</button>
-          <button type="button" class="tree-action" onclick="openCreateSite(${org.id})">+ Sitio</button>` : ''}
-        </span>
+    <div class="tree-org">
+      <div class="tree-org-title" title="${escapeHtml(org.name)}">${escapeHtml(org.name)}</div>
+      <div class="tree-actions">
+        ${isSuperAdmin() ? `<button type="button" class="tree-action rename" onclick="renameOrganization(${org.id})" title="Renombrar">✎</button>` : ''}
+        ${admin ? `<button type="button" class="tree-action" onclick="openUsersFor(${org.id})">Usuarios</button>
+        <button type="button" class="tree-action" onclick="openCreateSite(${org.id})">+ Sitio</button>` : ''}
       </div>
-      <div class="tree-children${collapsedTreeNodes.has(key) ? ' collapsed' : ''}">
+      <div class="tree-org-children">
         ${sites.length ? sites.map(renderSiteNode).join('') : `<div class="tree-empty">Sin sitios${admin ? ' — creá uno con "+ Sitio"' : ''}</div>`}
       </div>
     </div>`;
+}
+
+function renderOrgSwitcher() {
+  const select = $('#org-switcher-select');
+  if (!select) return;
+  select.innerHTML = allOrganizations.map(o => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('');
+  if (selectedOrgId != null) select.value = String(selectedOrgId);
+}
+
+function switchOrgContext(orgIdStr) {
+  selectedOrgId = Number(orgIdStr);
+  selectedZoneId = null;
+  selectedSiteId = null;
+  selectedLeafTab = null;
+  collapsedTreeNodes.clear();
+  const breadcrumb = $('#zone-breadcrumb');
+  if (breadcrumb) breadcrumb.classList.add('hidden');
+  renderNavTree();
 }
 
 function renderNavTree() {
@@ -2390,26 +2447,66 @@ function renderNavTree() {
   if (!container || !currentUser) return;
 
   if (isSuperAdmin()) {
-    const key = 'platform';
-    container.innerHTML = `
-      <div class="tree-root-label">Plataforma</div>
-      <div class="tree-node">
-        <div class="tree-row">
-          ${treeToggleHtml(key, true)}
-          <span class="tree-label" onclick="toggleTreeNode('${key}')">Consola central</span>
-          <span class="tree-actions"><button type="button" class="tree-action" onclick="openCreateOrg()">+ Organización</button></span>
-        </div>
-        <div class="tree-children${collapsedTreeNodes.has(key) ? ' collapsed' : ''}">
-          ${allOrganizations.length ? allOrganizations.map(renderOrgNode).join('') : '<div class="tree-empty">Sin organizaciones — creá la primera con "+ Organización"</div>'}
-        </div>
-      </div>`;
+    renderOrgSwitcher();
+    if (!allOrganizations.length) {
+      container.innerHTML = '<div class="tree-empty">Sin organizaciones — creá la primera con "+ Organización"</div>';
+      return;
+    }
+    // Defaults to the first organization the first time (or after the
+    // previously selected one no longer exists, e.g. right after login).
+    if (selectedOrgId == null || !allOrganizations.some(o => o.id === selectedOrgId)) {
+      selectedOrgId = allOrganizations[0].id;
+    }
+    container.innerHTML = renderOrgNode(allOrganizations.find(o => o.id === selectedOrgId));
     return;
   }
 
-  // admin/viewer: root is directly their own organization, no Plataforma wrapper
+  // admin/viewer: root is directly their own organization
   if (!currentUser.organization_id) { container.innerHTML = ''; return; }
   const ownOrg = { id: currentUser.organization_id, name: currentUser.organization_name || currentUser.username };
-  container.innerHTML = `<div class="tree-root-label">Organización</div>${renderOrgNode(ownOrg)}`;
+  container.innerHTML = renderOrgNode(ownOrg);
+}
+
+async function renameOrganization(id) {
+  const org = allOrganizations.find(o => o.id === id);
+  const name = (prompt('Nuevo nombre de la organización:', org ? org.name : '') || '').trim();
+  if (!name || (org && name === org.name)) return;
+  try {
+    await api(`/api/organizations/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    loadOrganizations();
+  } catch (e) { alert('No se pudo renombrar la organización: ' + e.message); }
+}
+
+async function renameSite(id) {
+  const site = allSites.find(s => s.id === id);
+  const name = (prompt('Nuevo nombre del sitio:', site ? site.name : '') || '').trim();
+  if (!name || (site && name === site.name)) return;
+  try {
+    await api(`/api/sites/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    loadSites();
+  } catch (e) { alert('No se pudo renombrar el sitio: ' + e.message); }
+}
+
+async function renameZone(id) {
+  const zone = allZones.find(z => z.id === id);
+  const name = (prompt('Nuevo nombre de la zona:', zone ? zone.name : '') || '').trim();
+  if (!name || (zone && name === zone.name)) return;
+  try {
+    await api(`/api/zones/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    loadZones();
+  } catch (e) { alert('No se pudo renombrar la zona: ' + e.message); }
 }
 
 function selectZoneTab(zoneId, tabName) {
@@ -2555,7 +2652,7 @@ $('#create-org-btn').addEventListener('click', async () => {
   const admin_password = $('#new-org-admin-password').value;
   $('#create-org-error').textContent = '';
   try {
-    await api('/api/organizations', {
+    const created = await api('/api/organizations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, slug, deployment_mode, admin_username, admin_password }),
@@ -2564,6 +2661,7 @@ $('#create-org-btn').addEventListener('click', async () => {
     $('#new-org-slug').value = '';
     $('#new-org-admin-username').value = '';
     $('#new-org-admin-password').value = '';
+    selectedOrgId = created.organization.id; // jump the org switcher straight to the one just created
     loadOrganizations();
   } catch (e) { $('#create-org-error').textContent = e.message; }
 });

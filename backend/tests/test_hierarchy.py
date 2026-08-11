@@ -90,6 +90,45 @@ def test_super_admin_creates_organization_and_bootstraps_its_admin(db_session):
     assert "cerveceria-sa" in {o["slug"] for o in listed}
 
 
+def test_super_admin_can_rename_an_organization(db_session):
+    super_admin = _make_super_admin_client(db_session)
+    org = super_admin.post(
+        "/api/organizations",
+        json={
+            "name": "Cervecería SA",
+            "slug": "cerveceria-sa",
+            "admin_username": "cerveceria-admin",
+            "admin_password": "secret123",
+        },
+    ).json()["organization"]
+
+    resp = super_admin.patch(f"/api/organizations/{org['id']}", json={"name": "Cervecería Nacional SA"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "Cervecería Nacional SA"
+    # The default seeded org (see conftest._reset_db) is also listed alongside it.
+    assert "Cervecería Nacional SA" in {o["name"] for o in super_admin.get("/api/organizations").json()}
+
+
+def test_only_super_admin_can_rename_an_organization(client, db_session):
+    super_admin = _make_super_admin_client(db_session)
+    org = super_admin.post(
+        "/api/organizations",
+        json={
+            "name": "Cervecería SA",
+            "slug": "cerveceria-sa",
+            "admin_username": "cerveceria-admin",
+            "admin_password": "secret123",
+        },
+    ).json()["organization"]
+
+    assert client.patch(f"/api/organizations/{org['id']}", json={"name": "Otro nombre"}).status_code == 403
+
+
+def test_renaming_an_unknown_organization_404s(db_session):
+    super_admin = _make_super_admin_client(db_session)
+    assert super_admin.patch("/api/organizations/999999", json={"name": "X"}).status_code == 404
+
+
 def test_duplicate_organization_slug_is_rejected(db_session):
     super_admin = _make_super_admin_client(db_session)
     payload = {
@@ -183,6 +222,78 @@ def test_admin_cannot_create_a_zone_under_another_organizations_site(db_session)
     assert resp.status_code == 404
     assert admin_a.get(f"/api/zones?site_id={site_b['id']}").status_code == 404
     assert org_b["organization"]["id"] != org_a.id  # sanity: genuinely two different orgs
+
+
+def test_admin_can_rename_own_site_and_zone(client):
+    site = client.post("/api/sites", json={"name": "Planta Bogotá"}).json()
+    zone = client.post("/api/zones", json={"site_id": site["id"], "name": "Línea 1"}).json()
+
+    renamed_site = client.patch(f"/api/sites/{site['id']}", json={"name": "Planta Medellín"})
+    assert renamed_site.status_code == 200
+    assert renamed_site.json()["name"] == "Planta Medellín"
+
+    renamed_zone = client.patch(f"/api/zones/{zone['id']}", json={"name": "Línea crítica"})
+    assert renamed_zone.status_code == 200
+    assert renamed_zone.json()["name"] == "Línea crítica"
+
+
+def test_viewer_cannot_rename_site_or_zone(client, make_client):
+    site = client.post("/api/sites", json={"name": "Planta Bogotá"}).json()
+    zone = client.post("/api/zones", json={"site_id": site["id"], "name": "Línea 1"}).json()
+    client.post("/api/users", json={"username": "viewer1", "password": "secret1", "role": "viewer"})
+    viewer = make_client("viewer1", "secret1")
+
+    assert viewer.patch(f"/api/sites/{site['id']}", json={"name": "x"}).status_code == 403
+    assert viewer.patch(f"/api/zones/{zone['id']}", json={"name": "x"}).status_code == 403
+
+
+def test_admin_cannot_rename_another_organizations_site_or_zone(db_session):
+    super_admin = _make_super_admin_client(db_session)
+    org_b = super_admin.post(
+        "/api/organizations",
+        json={"name": "Org B", "slug": "org-b", "admin_username": "org-b-admin", "admin_password": "secret123"},
+    ).json()
+    admin_b = _login("org-b-admin", "secret123")
+    site_b = admin_b.post("/api/sites", json={"name": "Sede B"}).json()
+    zone_b = admin_b.post("/api/zones", json={"site_id": site_b["id"], "name": "Zona B"}).json()
+
+    from app.auth.security import hash_password
+    from app.models import Organization, User
+
+    org_a = Organization(name="Org A", slug="org-a")
+    db_session.add(org_a)
+    db_session.flush()
+    salt, password_hash = hash_password("secret123")
+    db_session.add(
+        User(
+            organization_id=org_a.id,
+            username="org-a-admin",
+            password_salt=salt,
+            password_hash=password_hash,
+            role="admin",
+        )
+    )
+    db_session.commit()
+    admin_a = _login("org-a-admin", "secret123")
+
+    assert admin_a.patch(f"/api/sites/{site_b['id']}", json={"name": "Intrusión"}).status_code == 404
+    assert admin_a.patch(f"/api/zones/{zone_b['id']}", json={"name": "Intrusión"}).status_code == 404
+    assert org_b["organization"]["id"] != org_a.id  # sanity: genuinely two different orgs
+
+
+def test_super_admin_can_rename_any_organizations_site_or_zone(db_session):
+    super_admin = _make_super_admin_client(db_session)
+    org_b = super_admin.post(
+        "/api/organizations",
+        json={"name": "Org B", "slug": "org-b", "admin_username": "org-b-admin", "admin_password": "secret123"},
+    ).json()
+    admin_b = _login("org-b-admin", "secret123")
+    site_b = admin_b.post("/api/sites", json={"name": "Sede B"}).json()
+    zone_b = admin_b.post("/api/zones", json={"site_id": site_b["id"], "name": "Zona B"}).json()
+
+    assert super_admin.patch(f"/api/sites/{site_b['id']}", json={"name": "Sede B renombrada"}).status_code == 200
+    assert super_admin.patch(f"/api/zones/{zone_b['id']}", json={"name": "Zona B renombrada"}).status_code == 200
+    assert org_b["organization"]["id"] is not None  # sanity
 
 
 def test_super_admin_must_specify_organization_id_to_create_a_site(db_session):

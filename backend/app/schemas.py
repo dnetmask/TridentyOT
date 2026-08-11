@@ -234,6 +234,14 @@ class OrganizationWithAdminOut(BaseModel):
     admin_user: UserOut
 
 
+class OrganizationUpdateRequest(BaseModel):
+    """Only the display name is editable here -- slug/deployment_mode/
+    default_locale are set once at creation and aren't exposed for
+    renaming (the slug in particular may be referenced elsewhere)."""
+
+    name: str = Field(min_length=1, max_length=255)
+
+
 class SiteOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -257,6 +265,10 @@ class SiteCreateRequest(BaseModel):
     organization_id: int | None = None
 
 
+class SiteUpdateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
 class ZoneOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -274,6 +286,10 @@ class ZoneCreateRequest(BaseModel):
     description: str | None = None
     # IEC 62443 security level -- deliberately optional, see docs (Parte C).
     security_level: Literal["SL0", "SL1", "SL2", "SL3", "SL4"] | None = None
+
+
+class ZoneUpdateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
 
 
 class SensorOut(BaseModel):

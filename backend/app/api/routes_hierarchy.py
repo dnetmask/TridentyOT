@@ -10,8 +10,10 @@ from app.schemas import (
     SensorOut,
     SiteCreateRequest,
     SiteOut,
+    SiteUpdateRequest,
     ZoneCreateRequest,
     ZoneOut,
+    ZoneUpdateRequest,
 )
 
 router = APIRouter(prefix="/api", tags=["hierarchy"])
@@ -69,6 +71,17 @@ def _get_owned_site(db: Session, user: User, site_id: int) -> Site:
     return site
 
 
+@router.patch("/sites/{site_id}", response_model=SiteOut)
+def update_site(
+    site_id: int, payload: SiteUpdateRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)
+):
+    site = _get_owned_site(db, user, site_id)  # 404s unless the site is the caller's (or caller is super_admin)
+    site.name = payload.name
+    db.commit()
+    db.refresh(site)
+    return site
+
+
 # ---------------------------------------------------------------------------
 # Zones
 # ---------------------------------------------------------------------------
@@ -112,6 +125,17 @@ def _get_owned_zone(db: Session, user: User, zone_id: int) -> Zone:
     zone = query.one_or_none()
     if zone is None:
         raise HTTPException(status_code=404, detail=message("zones.not_found", user.locale))
+    return zone
+
+
+@router.patch("/zones/{zone_id}", response_model=ZoneOut)
+def update_zone(
+    zone_id: int, payload: ZoneUpdateRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)
+):
+    zone = _get_owned_zone(db, user, zone_id)  # 404s unless the zone is the caller's (or caller is super_admin)
+    zone.name = payload.name
+    db.commit()
+    db.refresh(zone)
     return zone
 
 

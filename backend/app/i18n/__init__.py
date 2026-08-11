@@ -110,6 +110,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "Ya existe una organización con ese identificador",
         "en": "An organization with that slug already exists",
     },
+    "organizations.not_found": {"es": "Organización no encontrada", "en": "Organization not found"},
     "sites.not_found": {"es": "Sitio no encontrado", "en": "Site not found"},
     "sites.organization_id_required": {
         "es": "Debes indicar la organización para este sitio",

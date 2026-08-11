@@ -7,7 +7,7 @@ from app.auth.security import hash_password
 from app.db import get_db
 from app.i18n import message
 from app.models import Organization, User
-from app.schemas import OrganizationCreateRequest, OrganizationOut, OrganizationWithAdminOut
+from app.schemas import OrganizationCreateRequest, OrganizationOut, OrganizationUpdateRequest, OrganizationWithAdminOut
 
 router = APIRouter(prefix="/api/organizations", tags=["organizations"])
 
@@ -52,3 +52,20 @@ def create_organization(
     db.refresh(org)
     db.refresh(admin_user)
     return OrganizationWithAdminOut(organization=org, admin_user=admin_user)
+
+
+@router.patch("/{organization_id}", response_model=OrganizationOut)
+def update_organization(
+    organization_id: int,
+    payload: OrganizationUpdateRequest,
+    db: Session = Depends(get_db),
+    current: User = Depends(require_super_admin),
+):
+    org = db.get(Organization, organization_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail=message("organizations.not_found", current.locale))
+
+    org.name = payload.name
+    db.commit()
+    db.refresh(org)
+    return org
