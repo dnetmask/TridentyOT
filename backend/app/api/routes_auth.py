@@ -9,7 +9,7 @@ from app.config import SESSION_LIFETIME_SECONDS
 from app.db import get_db
 from app.i18n import message, resolve_locale
 from app.models import AuthToken, User, utcnow
-from app.schemas import LoginRequest, LoginResponse, UserOut, UserSelfUpdateRequest
+from app.schemas import LoginRequest, LoginResponse, UserOut, UserSelfUpdateRequest, user_out
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -32,7 +32,7 @@ def login(
     expires_at = utcnow() + datetime.timedelta(seconds=SESSION_LIFETIME_SECONDS)
     db.add(AuthToken(token_hash=hash_token(token), user_id=user.id, expires_at=expires_at))
     db.commit()
-    return LoginResponse(token=token, user=UserOut.model_validate(user))
+    return LoginResponse(token=token, user=user_out(db, user))
 
 
 @router.post("/logout", status_code=204)
@@ -45,8 +45,8 @@ def logout(authorization: str | None = Header(default=None), db: Session = Depen
 
 
 @router.get("/me", response_model=UserOut)
-def me(user: User = Depends(get_current_user)):
-    return user
+def me(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return user_out(db, user)
 
 
 @router.patch("/me", response_model=UserOut)
@@ -63,4 +63,4 @@ def update_me(
         user.locale = updates["locale"]
     db.commit()
     db.refresh(user)
-    return user
+    return user_out(db, user)

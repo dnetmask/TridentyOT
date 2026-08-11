@@ -126,6 +126,53 @@
   }
   .sidebar .user-box button { margin-top: 10px; width: 100%; }
 
+  /* ---------- nav tree: Plataforma > Organización > Sitio > Zona ---------- */
+  .nav-tree-wrap { flex: 1; overflow-y: auto; margin: 4px -4px 8px; padding: 0 4px; }
+  .nav-tree { display: flex; flex-direction: column; gap: 1px; }
+  .tree-root-label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--muted); padding: 4px 8px 6px;
+  }
+  .tree-row { display: flex; align-items: center; gap: 4px; padding: 6px 4px; border-radius: 6px; }
+  .tree-row:hover { background: var(--panel-2); }
+  .tree-toggle {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    font-size: 9px; width: 14px; flex: none; padding: 0; line-height: 1;
+  }
+  .tree-toggle.spacer-toggle { visibility: hidden; }
+  .tree-label {
+    flex: 1; font-size: 13px; color: var(--text); cursor: pointer;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tree-actions { display: flex; gap: 4px; flex: none; }
+  .tree-action {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    font-size: 10px; padding: 2px 6px; border-radius: 5px; cursor: pointer; white-space: nowrap;
+  }
+  .tree-action:hover { background: var(--panel-2); color: var(--text); }
+  .tree-children { margin-left: 15px; border-left: 1px solid var(--border); padding-left: 8px; }
+  .tree-children.collapsed { display: none; }
+  .tree-leaf {
+    display: block; width: 100%; text-align: left; background: none; border: none;
+    color: var(--muted); padding: 6px 8px; font-size: 12.5px; border-radius: 6px; cursor: pointer;
+  }
+  .tree-leaf:hover { background: var(--panel-2); color: var(--text); }
+  .tree-leaf.active {
+    background: var(--panel-2); color: var(--text);
+    box-shadow: inset 3px 0 0 var(--accent); font-weight: 600;
+  }
+  .tree-empty { font-size: 11px; color: var(--muted); padding: 4px 8px 8px; font-style: italic; }
+
+  /* ---------- breadcrumb: which Zona is providing the current view ---------- */
+  .zone-breadcrumb {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    font-size: 12.5px; color: var(--muted); margin-bottom: 18px;
+    padding: 9px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .zone-breadcrumb.hidden { display: none; }
+  .zone-breadcrumb b { color: var(--text); }
+  .zone-breadcrumb .note { margin-left: auto; font-size: 11px; opacity: 0.8; white-space: nowrap; }
+
   main { flex: 1; padding: 24px 28px; max-width: 100%; min-width: 0; }
   .tab { display: none; }
   .tab.active { display: block; }
@@ -342,17 +389,9 @@
       <div class="subtitle" data-i18n="app.subtitle">Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)</div>
     </div>
 
-    <nav>
-      <button data-tab="capture" class="active" data-i18n="nav.capture">Captura</button>
-      <button data-tab="inventory" data-i18n="nav.inventory">Inventario</button>
-      <button data-tab="flows" data-i18n="nav.flows">Flujos</button>
-      <button data-tab="vulns" data-i18n="nav.vulns">Vulnerabilidades</button>
-      <button data-tab="users" id="nav-users" data-i18n="nav.users">Usuarios</button>
-      <button data-tab="infra" data-i18n="nav.infra">Infraestructura</button>
-      <button data-tab="organizations" class="super-admin-only hidden" id="nav-organizations" data-i18n="nav.organizations">Organizaciones</button>
-    </nav>
-
-    <div class="spacer"></div>
+    <div class="nav-tree-wrap">
+      <div class="nav-tree" id="nav-tree"></div>
+    </div>
 
     <div class="theme-toggle">
       <span id="lang-toggle-label">ES</span>
@@ -376,6 +415,11 @@
   </aside>
 
   <main>
+
+  <div class="zone-breadcrumb hidden" id="zone-breadcrumb">
+    <span id="zone-breadcrumb-path"></span>
+    <span class="note" id="zone-breadcrumb-note">mostrando datos de toda la organización — filtrado por Zona próximamente</span>
+  </div>
 
   <section id="tab-capture" class="tab active">
     <div class="card admin-only">
@@ -626,8 +670,47 @@
     </div>
   </section>
 
-  <section id="tab-infra" class="tab">
-    <div class="card admin-only">
+  <section id="tab-reports" class="tab">
+    <div class="card">
+      <div class="flex-between">
+        <h2 data-i18n="reports.title">Reporte</h2>
+        <button class="action secondary" id="export-full-report-pdf-btn" data-i18n="reports.export_pdf">Exportar PDF</button>
+      </div>
+      <p class="muted" style="margin:0 0 14px; font-size:12.5px;" data-i18n="reports.intro">
+        Resumen combinado de inventario, vulnerabilidades y capturas.
+      </p>
+      <div class="stat-row" id="reports-stats"></div>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="reports.inventory_title">Inventario</h2>
+      <div class="stat-row" id="reports-inventory-stats"></div>
+      <table>
+        <thead><tr><th data-i18n="reports.col_type">Tipo</th><th data-i18n="reports.col_count">Cantidad</th></tr></thead>
+        <tbody id="reports-inventory-body"><tr><td colspan="2" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="reports.captures_title">Capturas</h2>
+      <table>
+        <thead><tr><th data-i18n="capture.col_name">Nombre</th><th data-i18n="capture.col_type">Tipo</th><th data-i18n="capture.col_status">Estado</th><th data-i18n="capture.col_packets">Paquetes</th><th data-i18n="capture.col_start">Inicio</th></tr></thead>
+        <tbody id="reports-captures-body"><tr><td colspan="5" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="reports.vulns_title">Vulnerabilidades</h2>
+      <div class="stat-row" id="reports-vulns-stats"></div>
+      <table>
+        <thead><tr><th data-i18n="vulns.col_severity">Severidad</th><th data-i18n="vulns.col_device">Dispositivo</th><th data-i18n="vulns.col_finding">Hallazgo</th></tr></thead>
+        <tbody id="reports-vulns-body"><tr><td colspan="3" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-create-site" class="tab admin-only">
+    <div class="card">
       <h2 data-i18n="infra.create_site_title">Crear sitio</h2>
       <div class="row">
         <div>
@@ -654,27 +737,10 @@
       </div>
       <div id="create-site-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
     </div>
+  </section>
 
+  <section id="tab-create-zone" class="tab admin-only">
     <div class="card">
-      <div class="flex-between">
-        <h2 data-i18n="infra.sites_title">Sitios</h2>
-        <button class="action secondary" onclick="clearColumnFilters('sites-body', renderSitesTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
-      </div>
-      <table>
-        <thead>
-        <tr><th data-i18n="infra.site_name">Nombre</th><th data-i18n="infra.site_city">Ciudad</th><th data-i18n="infra.site_country">País</th><th data-i18n="infra.site_timezone">Zona horaria</th></tr>
-        <tr class="filter-row">
-          <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSitesTable()" /></th>
-          <th data-col="ciudad"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSitesTable()" /></th>
-          <th data-col="pais"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSitesTable()" /></th>
-          <th data-col="zona"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSitesTable()" /></th>
-        </tr>
-        </thead>
-        <tbody id="sites-body"><tr><td colspan="4" class="empty">Sin datos</td></tr></tbody>
-      </table>
-    </div>
-
-    <div class="card admin-only">
       <h2 data-i18n="infra.create_zone_title">Crear zona</h2>
       <div class="row">
         <div>
@@ -704,27 +770,10 @@
       </div>
       <div id="create-zone-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
     </div>
+  </section>
 
+  <section id="tab-create-sensor" class="tab admin-only">
     <div class="card">
-      <div class="flex-between">
-        <h2 data-i18n="infra.zones_title">Zonas</h2>
-        <button class="action secondary" onclick="clearColumnFilters('zones-body', renderZonesTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
-      </div>
-      <table>
-        <thead>
-        <tr><th data-i18n="infra.zone_site">Sitio</th><th data-i18n="infra.zone_name">Nombre</th><th data-i18n="infra.zone_description">Descripción</th><th data-i18n="infra.zone_security_level">Nivel de seguridad</th></tr>
-        <tr class="filter-row">
-          <th data-col="sitio"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderZonesTable()" /></th>
-          <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderZonesTable()" /></th>
-          <th data-col="descripcion"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderZonesTable()" /></th>
-          <th data-col="nivel"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderZonesTable()" /></th>
-        </tr>
-        </thead>
-        <tbody id="zones-body"><tr><td colspan="4" class="empty">Sin datos</td></tr></tbody>
-      </table>
-    </div>
-
-    <div class="card admin-only">
       <h2 data-i18n="infra.create_sensor_title">Crear sensor</h2>
       <div class="row">
         <div>
@@ -750,28 +799,9 @@
       </div>
       <div id="create-sensor-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
     </div>
-
-    <div class="card">
-      <div class="flex-between">
-        <h2 data-i18n="infra.sensors_title">Sensores</h2>
-        <button class="action secondary" onclick="clearColumnFilters('sensors-body', renderSensorsTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
-      </div>
-      <table>
-        <thead>
-        <tr><th data-i18n="infra.sensor_zone">Zona</th><th data-i18n="infra.sensor_name">Nombre</th><th data-i18n="infra.sensor_kind">Tipo</th><th data-i18n="infra.sensor_description">Descripción</th></tr>
-        <tr class="filter-row">
-          <th data-col="zona"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSensorsTable()" /></th>
-          <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSensorsTable()" /></th>
-          <th data-col="tipo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSensorsTable()" /></th>
-          <th data-col="descripcion"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSensorsTable()" /></th>
-        </tr>
-        </thead>
-        <tbody id="sensors-body"><tr><td colspan="4" class="empty">Sin datos</td></tr></tbody>
-      </table>
-    </div>
   </section>
 
-  <section id="tab-organizations" class="tab super-admin-only hidden">
+  <section id="tab-create-org" class="tab super-admin-only hidden">
     <div class="card">
       <h2 data-i18n="orgs.create_title">Crear organización</h2>
       <div class="row">
@@ -801,25 +831,6 @@
         <button class="action" id="create-org-btn" data-i18n="orgs.create_btn">Crear</button>
       </div>
       <div id="create-org-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
-    </div>
-
-    <div class="card">
-      <div class="flex-between">
-        <h2 data-i18n="orgs.title">Organizaciones</h2>
-        <button class="action secondary" onclick="clearColumnFilters('orgs-body', renderOrganizationsTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
-      </div>
-      <table>
-        <thead>
-        <tr><th data-i18n="orgs.name">Nombre</th><th data-i18n="orgs.slug">Identificador</th><th data-i18n="orgs.deployment_mode">Modo</th><th data-i18n="users.col_created">Creado</th></tr>
-        <tr class="filter-row">
-          <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderOrganizationsTable()" /></th>
-          <th data-col="id"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderOrganizationsTable()" /></th>
-          <th data-col="modo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderOrganizationsTable()" /></th>
-          <th data-col="creado"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderOrganizationsTable()" /></th>
-        </tr>
-        </thead>
-        <tbody id="orgs-body"><tr><td colspan="4" class="empty">Sin datos</td></tr></tbody>
-      </table>
     </div>
   </section>
 
@@ -890,8 +901,6 @@ const I18N = {
   'nav.flows': { es: 'Flujos', en: 'Flows' },
   'nav.vulns': { es: 'Vulnerabilidades', en: 'Vulnerabilities' },
   'nav.users': { es: 'Usuarios', en: 'Users' },
-  'nav.infra': { es: 'Infraestructura', en: 'Infrastructure' },
-  'nav.organizations': { es: 'Organizaciones', en: 'Organizations' },
   'nav.logout': { es: 'Cerrar sesión', en: 'Log out' },
   'login.title': { es: 'Ingresa a TridentyOT', en: 'Sign in to TridentyOT' },
   'login.username': { es: 'Usuario', en: 'Username' },
@@ -1008,6 +1017,17 @@ const I18N = {
   'orgs.admin_password': { es: 'Contraseña admin', en: 'Admin password' },
   'orgs.create_btn': { es: 'Crear', en: 'Create' },
   'orgs.title': { es: 'Organizaciones', en: 'Organizations' },
+  'reports.title': { es: 'Reporte', en: 'Report' },
+  'reports.export_pdf': { es: 'Exportar PDF', en: 'Export PDF' },
+  'reports.intro': {
+    es: 'Resumen combinado de inventario, vulnerabilidades y capturas.',
+    en: 'Combined summary of inventory, vulnerabilities, and captures.',
+  },
+  'reports.inventory_title': { es: 'Inventario', en: 'Inventory' },
+  'reports.col_type': { es: 'Tipo', en: 'Type' },
+  'reports.col_count': { es: 'Cantidad', en: 'Count' },
+  'reports.captures_title': { es: 'Capturas', en: 'Captures' },
+  'reports.vulns_title': { es: 'Vulnerabilidades', en: 'Vulnerabilities' },
 };
 
 function getStoredLocale() {
@@ -1105,7 +1125,7 @@ function applyRoleVisibility() {
   $$('.admin-only').forEach(el => el.classList.toggle('hidden', !admin));
   $$('.super-admin-only').forEach(el => el.classList.toggle('hidden', !superAdmin));
   $$('.viewer-only').forEach(el => el.classList.toggle('hidden', admin));
-  $('#nav-users').classList.toggle('hidden', !admin);
+  renderNavTree();
 }
 
 const ROLE_LABELS = { super_admin: 'Super Admin', admin: 'Administrador', viewer: 'Visualizador' };
@@ -1160,9 +1180,9 @@ async function bootstrapAfterLogin() {
   applyRoleVisibility();
   showAppShell();
   // A Super Admin has no organization of its own -- Captura (the default
-  // tab) has nothing for it to do. Land it on Organizaciones instead,
+  // tab) has nothing for it to do. Land it on "crear organización" instead,
   // where creating the first organization is the actual first step.
-  if (isSuperAdmin()) activateTab('organizations');
+  if (isSuperAdmin()) activateTab('create-org');
   loadInterfaces();
   refreshAllData();
 
@@ -1230,7 +1250,14 @@ $('#logout-btn').addEventListener('click', async () => {
 });
 
 function activateTab(name) {
-  $$('.sidebar nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  // Defaults to "no Zona selected" on every switch; selectZoneTab() (the
+  // only path that reaches a Zona's Captura/Inventario/Flujos/
+  // Vulnerabilidades/Reportes) sets it back right after calling this.
+  selectedZoneId = null;
+  selectedLeafTab = null;
+  const breadcrumb = $('#zone-breadcrumb');
+  if (breadcrumb) breadcrumb.classList.add('hidden');
+
   $$('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + name));
   // Row heights can only be measured once the tab's container is actually
   // visible (display:block) -- a tab loaded in the background while hidden
@@ -1238,11 +1265,8 @@ function activateTab(name) {
   if (name === 'inventory') fitTableScroll('devices-scroll');
   if (name === 'flows') fitTableScroll('flows-scroll');
   if (name === 'vulns') fitTableScroll('findings-scroll');
+  renderNavTree();
 }
-
-$$('.sidebar nav button').forEach(btn => {
-  btn.addEventListener('click', () => activateTab(btn.dataset.tab));
-});
 
 async function jumpToDevice(deviceId) {
   activateTab('inventory');
@@ -1285,6 +1309,7 @@ let allSessions = [];
 async function loadSessions() {
   allSessions = await api('/api/capture/sessions');
   renderSessionsTable();
+  renderReportsTab();
 }
 
 function renderSessionsTable() {
@@ -1535,6 +1560,7 @@ async function loadDevices() {
   const hideExternal = $('#hide-external-checkbox').checked;
   allDevices = await api(`/api/inventory/devices${hideExternal ? '?hide_external=true' : ''}`);
   renderDevicesTable();
+  renderReportsTab();
 }
 
 const DEVICE_TYPE_LABELS = {
@@ -1887,6 +1913,7 @@ async function loadFindings() {
   allFindings = await api('/api/vuln/findings');
   renderFindingsStats();
   renderFindingsTable();
+  renderReportsTab();
 }
 
 function renderFindingsStats() {
@@ -1977,6 +2004,116 @@ $('#export-vuln-pdf-btn').addEventListener('click', () => {
   window.print();
 });
 
+// ---------- Reportes tab: combined inventory + vulnerabilities + captures ----------
+// NOTE: not yet scoped to the Zona the sidebar tree is showing when this
+// tab is opened -- same org-wide data as every other tab, see the
+// zone-breadcrumb note. Real per-zone filtering is a follow-up (there's no
+// zone_id on Device/Flow/VulnerabilityFinding yet, only a
+// capture_session -> sensor -> zone chain -- see docs).
+function renderReportsTab() {
+  const totalDevices = allDevices.length;
+  const otDevices = allDevices.filter(d => d.is_ot_suspected).length;
+  const bySeverity = {};
+  allFindings.forEach(f => { bySeverity[f.severity] = (bySeverity[f.severity] || 0) + 1; });
+  const affectedDevices = new Set(allFindings.map(f => f.device_id)).size;
+  const totalPackets = allSessions.reduce((sum, s) => sum + (s.packet_count || 0), 0);
+
+  $('#reports-stats').innerHTML = `
+    <div class="stat-tile"><div class="stat-num">${totalDevices}</div><div class="stat-label">Dispositivos</div></div>
+    <div class="stat-tile"><div class="stat-num ot">${otDevices}</div><div class="stat-label">Sospechosos de OT</div></div>
+    <div class="stat-tile"><div class="stat-num">${allFindings.length}</div><div class="stat-label">Hallazgos de vulnerabilidades</div></div>
+    <div class="stat-tile"><div class="stat-num">${allSessions.length}</div><div class="stat-label">Sesiones de captura</div></div>
+    <div class="stat-tile"><div class="stat-num">${totalPackets}</div><div class="stat-label">Paquetes capturados</div></div>
+  `;
+
+  const byType = {};
+  allDevices.forEach(d => {
+    const type = d.display_device_type;
+    const label = type ? (DEVICE_TYPE_LABELS[type] || type) : 'Sin clasificar';
+    byType[label] = (byType[label] || 0) + 1;
+  });
+  $('#reports-inventory-stats').innerHTML = `
+    <div class="stat-tile"><div class="stat-num">${totalDevices}</div><div class="stat-label">Total</div></div>
+    <div class="stat-tile"><div class="stat-num ot">${otDevices}</div><div class="stat-label">OT</div></div>
+    <div class="stat-tile"><div class="stat-num">${totalDevices - otDevices}</div><div class="stat-label">IT</div></div>
+  `;
+  $('#reports-inventory-body').innerHTML = Object.entries(byType).map(([label, count]) => `
+    <tr><td>${label}</td><td>${count}</td></tr>`).join('') || '<tr><td colspan="2" class="empty">Sin dispositivos</td></tr>';
+
+  $('#reports-captures-body').innerHTML = allSessions.map(s => `
+    <tr>
+      <td>${s.name}</td><td>${s.source_type}</td>
+      <td class="status-${s.status}">${s.status}</td>
+      <td>${s.packet_count}</td><td>${fmtDate(s.started_at)}</td>
+    </tr>`).join('') || '<tr><td colspan="5" class="empty">Sin capturas</td></tr>';
+
+  $('#reports-vulns-stats').innerHTML = `
+    <div class="stat-tile"><div class="stat-num">${affectedDevices}</div><div class="stat-label">Dispositivos afectados</div></div>
+    <div class="stat-tile"><div class="stat-num crit">${bySeverity.critical || 0}</div><div class="stat-label">Critical</div></div>
+    <div class="stat-tile"><div class="stat-num high">${bySeverity.high || 0}</div><div class="stat-label">High</div></div>
+  `;
+  $('#reports-vulns-body').innerHTML = allFindings.slice(0, 25).map(f => `
+    <tr>
+      <td>${sevBadge(f.severity)}</td>
+      <td>${f.device_ip || '#' + f.device_id}</td>
+      <td>${f.title}</td>
+    </tr>`).join('') || '<tr><td colspan="3" class="empty">Sin hallazgos</td></tr>';
+}
+
+function buildFullReportHtml() {
+  const now = new Date();
+  const byType = {};
+  allDevices.forEach(d => {
+    const type = d.display_device_type;
+    const label = type ? (DEVICE_TYPE_LABELS[type] || type) : 'Sin clasificar';
+    byType[label] = (byType[label] || 0) + 1;
+  });
+  const bySeverity = {};
+  allFindings.forEach(f => { bySeverity[f.severity] = (bySeverity[f.severity] || 0) + 1; });
+  const totalPackets = allSessions.reduce((sum, s) => sum + (s.packet_count || 0), 0);
+
+  const inventoryRows = Object.entries(byType).map(([label, count]) => `
+    <tr><td>${label}</td><td>${count}</td></tr>`).join('') || '<tr><td colspan="2">Sin dispositivos</td></tr>';
+  const captureRows = allSessions.map(s => `
+    <tr><td>${s.name}</td><td>${s.source_type}</td><td>${s.status}</td><td>${s.packet_count}</td></tr>`).join('')
+    || '<tr><td colspan="4">Sin capturas</td></tr>';
+  const vulnRows = allFindings.map(f => `
+    <tr>
+      <td>${(f.severity || 'unknown').toUpperCase()}</td>
+      <td>${f.device_ip || '#' + f.device_id}</td>
+      <td>${f.device_name || '—'}</td>
+      <td>${f.title}</td>
+      <td>${f.source}${f.cve_id ? ' · ' + f.cve_id : ''}</td>
+    </tr>`).join('') || '<tr><td colspan="5">Sin hallazgos</td></tr>';
+
+  return `
+    <div class="pr-header">
+      <img src="/brand/lockup_dark.png" alt="TridentyOT" />
+      <div class="pr-meta">Generado: ${now.toLocaleString()}</div>
+    </div>
+    <h1>Reporte combinado</h1>
+    <p class="pr-sub">Inventario, vulnerabilidades y capturas</p>
+    <div class="pr-stats">
+      <div class="pr-stat"><div class="n">${allDevices.length}</div><div class="l">Dispositivos</div></div>
+      <div class="pr-stat"><div class="n">${allFindings.length}</div><div class="l">Hallazgos</div></div>
+      <div class="pr-stat"><div class="n">${allSessions.length}</div><div class="l">Sesiones de captura</div></div>
+      <div class="pr-stat"><div class="n">${totalPackets}</div><div class="l">Paquetes</div></div>
+    </div>
+    <h2>Inventario por tipo</h2>
+    <table><thead><tr><th>Tipo</th><th>Cantidad</th></tr></thead><tbody>${inventoryRows}</tbody></table>
+    <h2>Capturas</h2>
+    <table><thead><tr><th>Nombre</th><th>Tipo</th><th>Estado</th><th>Paquetes</th></tr></thead><tbody>${captureRows}</tbody></table>
+    <h2>Vulnerabilidades (${allFindings.length}, ${bySeverity.critical || 0} critical, ${bySeverity.high || 0} high)</h2>
+    <table><thead><tr><th>Severidad</th><th>Dispositivo</th><th>Nombre</th><th>Hallazgo</th><th>Fuente</th></tr></thead><tbody>${vulnRows}</tbody></table>
+    <div class="pr-footer">TridentyOT — reporte generado automáticamente a partir de la última captura analizada.</div>
+  `;
+}
+
+$('#export-full-report-pdf-btn').addEventListener('click', () => {
+  $('#print-report').innerHTML = buildFullReportHtml();
+  window.print();
+});
+
 // ---------- Users tab (admin only) ----------
 let allUsers = [];
 
@@ -2060,59 +2197,52 @@ $('#create-user-btn').addEventListener('click', async () => {
   } catch (e) { $('#create-user-error').textContent = e.message; }
 });
 
-// ---------- Infraestructura tab (Sitios / Zonas / Sensores) ----------
+// ---------- Nav tree: Plataforma > Organización > Sitio > Zona ----------
 let allSites = [];
 let allZones = [];
 let allSensors = [];
 let allOrganizations = [];
+let selectedZoneId = null;
+let selectedLeafTab = null;
+const collapsedTreeNodes = new Set();
 
 const SENSOR_KIND_LABELS = { live: 'En vivo', external: 'Externo (solo pcap)' };
+const ZONE_LEAVES = [
+  { tab: 'capture', label: 'Captura' },
+  { tab: 'inventory', label: 'Inventario' },
+  { tab: 'flows', label: 'Flujos' },
+  { tab: 'vulns', label: 'Vulnerabilidades' },
+  { tab: 'reports', label: 'Reportes' },
+];
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text == null ? '' : String(text);
+  return div.innerHTML;
+}
 
 async function loadSites() {
   allSites = await api('/api/sites');
-  renderSitesTable();
   populateSiteSelects();
-}
-
-function renderSitesTable() {
-  const tbody = $('#sites-body');
-  tbody.innerHTML = allSites.map(s => `
-    <tr>
-      <td data-col="nombre">${s.name}</td>
-      <td data-col="ciudad">${s.city || ''}</td>
-      <td data-col="pais">${s.country || ''}</td>
-      <td data-col="zona">${s.timezone || ''}</td>
-    </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin sitios</td></tr>';
-  populateColumnDatalists('sites-body');
-  applyColumnFilters('sites-body');
+  renderNavTree();
 }
 
 function populateSiteSelects() {
   const select = $('#new-zone-site');
   if (!select) return;
   const previous = select.value;
-  select.innerHTML = allSites.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  const orgName = id => (allOrganizations.find(o => o.id === id) || {}).name;
+  select.innerHTML = allSites.map(s => {
+    const label = isSuperAdmin() && orgName(s.organization_id) ? `${orgName(s.organization_id)} — ${s.name}` : s.name;
+    return `<option value="${s.id}">${label}</option>`;
+  }).join('');
   if (previous && allSites.some(s => String(s.id) === previous)) select.value = previous;
 }
 
 async function loadZones() {
   allZones = await api('/api/zones');
-  renderZonesTable();
   populateZoneSelects();
-}
-
-function renderZonesTable() {
-  const tbody = $('#zones-body');
-  const siteName = id => (allSites.find(s => s.id === id) || {}).name || `#${id}`;
-  tbody.innerHTML = allZones.map(z => `
-    <tr>
-      <td data-col="sitio">${siteName(z.site_id)}</td>
-      <td data-col="nombre">${z.name}</td>
-      <td data-col="descripcion">${z.description || ''}</td>
-      <td data-col="nivel">${z.security_level || 'Sin clasificar'}</td>
-    </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin zonas</td></tr>';
-  populateColumnDatalists('zones-body');
-  applyColumnFilters('zones-body');
+  renderNavTree();
 }
 
 function populateZoneSelects() {
@@ -2126,21 +2256,172 @@ function populateZoneSelects() {
 
 async function loadSensors() {
   allSensors = await api('/api/sensors');
-  renderSensorsTable();
+  renderNavTree();
 }
 
-function renderSensorsTable() {
-  const tbody = $('#sensors-body');
-  const zoneName = id => (allZones.find(z => z.id === id) || {}).name || `#${id}`;
-  tbody.innerHTML = allSensors.map(s => `
-    <tr>
-      <td data-col="zona">${zoneName(s.zone_id)}</td>
-      <td data-col="nombre">${s.name}</td>
-      <td data-col="tipo">${SENSOR_KIND_LABELS[s.kind] || s.kind}</td>
-      <td data-col="descripcion">${s.description || ''}</td>
-    </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin sensores</td></tr>';
-  populateColumnDatalists('sensors-body');
-  applyColumnFilters('sensors-body');
+async function loadOrganizations() {
+  allOrganizations = await api('/api/organizations');
+  populateOrganizationSelect();
+  populateSiteSelects(); // re-labels site options with org names now that allOrganizations is loaded
+  renderNavTree();
+}
+
+function populateOrganizationSelect() {
+  const select = $('#new-site-organization');
+  if (!select) return;
+  const previous = select.value;
+  select.innerHTML = allOrganizations.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+  if (previous && allOrganizations.some(o => String(o.id) === previous)) select.value = previous;
+}
+
+function toggleTreeNode(key) {
+  if (collapsedTreeNodes.has(key)) collapsedTreeNodes.delete(key);
+  else collapsedTreeNodes.add(key);
+  renderNavTree();
+}
+
+function treeToggleHtml(key, hasChildren) {
+  if (!hasChildren) return '<span class="tree-toggle spacer-toggle">▾</span>';
+  const collapsed = collapsedTreeNodes.has(key);
+  return `<button type="button" class="tree-toggle" onclick="toggleTreeNode('${key}')">${collapsed ? '▸' : '▾'}</button>`;
+}
+
+function renderZoneNode(zone) {
+  const key = `zone-${zone.id}`;
+  const admin = isAdmin();
+  const sensorsForZone = allSensors.filter(s => s.zone_id === zone.id);
+  const sensorLine = sensorsForZone.length
+    ? sensorsForZone.map(s => `${escapeHtml(s.name)} (${SENSOR_KIND_LABELS[s.kind] || s.kind})`).join(', ')
+    : (admin ? 'Sin sensores — creá uno con "+ Sensor"' : 'Sin sensores');
+  const leaves = ZONE_LEAVES.map(leaf => `
+    <button type="button" class="tree-leaf${selectedZoneId === zone.id && selectedLeafTab === leaf.tab ? ' active' : ''}"
+      onclick="selectZoneTab(${zone.id}, '${leaf.tab}')">${leaf.label}</button>`).join('');
+  return `
+    <div class="tree-node">
+      <div class="tree-row">
+        ${treeToggleHtml(key, true)}
+        <span class="tree-label" onclick="toggleTreeNode('${key}')" title="${escapeHtml(zone.name)}">${escapeHtml(zone.name)}</span>
+        <span class="tree-actions">${admin ? `<button type="button" class="tree-action" onclick="openCreateSensor(${zone.id})">+ Sensor</button>` : ''}</span>
+      </div>
+      <div class="tree-children${collapsedTreeNodes.has(key) ? ' collapsed' : ''}">
+        <div class="tree-empty">${sensorLine}${zone.security_level ? ' · ' + zone.security_level : ''}</div>
+        ${leaves}
+      </div>
+    </div>`;
+}
+
+function renderSiteNode(site) {
+  const key = `site-${site.id}`;
+  const admin = isAdmin();
+  const zones = allZones.filter(z => z.site_id === site.id);
+  return `
+    <div class="tree-node">
+      <div class="tree-row">
+        ${treeToggleHtml(key, true)}
+        <span class="tree-label" onclick="toggleTreeNode('${key}')" title="${escapeHtml(site.name)}">${escapeHtml(site.name)}</span>
+        <span class="tree-actions">${admin ? `<button type="button" class="tree-action" onclick="openCreateZone(${site.id})">+ Zona</button>` : ''}</span>
+      </div>
+      <div class="tree-children${collapsedTreeNodes.has(key) ? ' collapsed' : ''}">
+        ${zones.length ? zones.map(renderZoneNode).join('') : `<div class="tree-empty">Sin zonas${admin ? ' — creá una con "+ Zona"' : ''}</div>`}
+      </div>
+    </div>`;
+}
+
+function renderOrgNode(org) {
+  const key = `org-${org.id}`;
+  const admin = isAdmin();
+  const sites = allSites.filter(s => s.organization_id === org.id);
+  return `
+    <div class="tree-node">
+      <div class="tree-row">
+        ${treeToggleHtml(key, true)}
+        <span class="tree-label" onclick="toggleTreeNode('${key}')" title="${escapeHtml(org.name)}">${escapeHtml(org.name)}</span>
+        <span class="tree-actions">
+          ${admin ? `<button type="button" class="tree-action" onclick="openUsersFor(${org.id})">Usuarios</button>
+          <button type="button" class="tree-action" onclick="openCreateSite(${org.id})">+ Sitio</button>` : ''}
+        </span>
+      </div>
+      <div class="tree-children${collapsedTreeNodes.has(key) ? ' collapsed' : ''}">
+        ${sites.length ? sites.map(renderSiteNode).join('') : `<div class="tree-empty">Sin sitios${admin ? ' — creá uno con "+ Sitio"' : ''}</div>`}
+      </div>
+    </div>`;
+}
+
+function renderNavTree() {
+  const container = $('#nav-tree');
+  if (!container || !currentUser) return;
+
+  if (isSuperAdmin()) {
+    const key = 'platform';
+    container.innerHTML = `
+      <div class="tree-root-label">Plataforma</div>
+      <div class="tree-node">
+        <div class="tree-row">
+          ${treeToggleHtml(key, true)}
+          <span class="tree-label" onclick="toggleTreeNode('${key}')">Consola central</span>
+          <span class="tree-actions"><button type="button" class="tree-action" onclick="openCreateOrg()">+ Organización</button></span>
+        </div>
+        <div class="tree-children${collapsedTreeNodes.has(key) ? ' collapsed' : ''}">
+          ${allOrganizations.length ? allOrganizations.map(renderOrgNode).join('') : '<div class="tree-empty">Sin organizaciones — creá la primera con "+ Organización"</div>'}
+        </div>
+      </div>`;
+    return;
+  }
+
+  // admin/viewer: root is directly their own organization, no Plataforma wrapper
+  if (!currentUser.organization_id) { container.innerHTML = ''; return; }
+  const ownOrg = { id: currentUser.organization_id, name: currentUser.organization_name || currentUser.username };
+  container.innerHTML = `<div class="tree-root-label">Organización</div>${renderOrgNode(ownOrg)}`;
+}
+
+function selectZoneTab(zoneId, tabName) {
+  const zone = allZones.find(z => z.id === zoneId);
+  const site = zone ? allSites.find(s => s.id === zone.site_id) : null;
+  const orgName = site
+    ? (isSuperAdmin() ? (allOrganizations.find(o => o.id === site.organization_id) || {}).name : currentUser.organization_name)
+    : null;
+
+  activateTab(tabName);
+  selectedZoneId = zoneId;
+  selectedLeafTab = tabName;
+
+  const breadcrumb = $('#zone-breadcrumb');
+  const path = $('#zone-breadcrumb-path');
+  if (zone && site && breadcrumb && path) {
+    const leafLabel = (ZONE_LEAVES.find(l => l.tab === tabName) || {}).label || tabName;
+    path.innerHTML = `<b>${escapeHtml(orgName || '—')}</b> › <b>${escapeHtml(site.name)}</b> › <b>${escapeHtml(zone.name)}</b> › ${escapeHtml(leafLabel)}`;
+    breadcrumb.classList.remove('hidden');
+  }
+  renderNavTree();
+}
+
+function openCreateSite(organizationId) {
+  activateTab('create-site');
+  const select = $('#new-site-organization');
+  if (select) select.value = String(organizationId);
+}
+
+function openCreateZone(siteId) {
+  activateTab('create-zone');
+  const select = $('#new-zone-site');
+  if (select) select.value = String(siteId);
+}
+
+function openCreateSensor(zoneId) {
+  activateTab('create-sensor');
+  const select = $('#new-sensor-zone');
+  if (select) select.value = String(zoneId);
+}
+
+function openCreateOrg() {
+  activateTab('create-org');
+}
+
+function openUsersFor(_organizationId) {
+  // Not yet scoped to a single organization -- GET /api/users returns every
+  // organization's users to a Super Admin (see routes_users.py). Clicking
+  // "Usuarios" from any org node lands on the same shared list for now.
+  activateTab('users');
 }
 
 $('#create-site-btn').addEventListener('click', async () => {
@@ -2202,35 +2483,6 @@ $('#create-sensor-btn').addEventListener('click', async () => {
     loadSensors();
   } catch (e) { $('#create-sensor-error').textContent = e.message; }
 });
-
-// ---------- Organizaciones tab (Super Admin only) ----------
-async function loadOrganizations() {
-  allOrganizations = await api('/api/organizations');
-  renderOrganizationsTable();
-  populateOrganizationSelect();
-}
-
-function renderOrganizationsTable() {
-  const tbody = $('#orgs-body');
-  const DEPLOYMENT_LABELS = { managed: 'Consola central', self_hosted: 'Auto-alojado' };
-  tbody.innerHTML = allOrganizations.map(o => `
-    <tr>
-      <td data-col="nombre">${o.name}</td>
-      <td data-col="id">${o.slug}</td>
-      <td data-col="modo">${DEPLOYMENT_LABELS[o.deployment_mode] || o.deployment_mode}</td>
-      <td data-col="creado" class="muted">${fmtDate(o.created_at)}</td>
-    </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin organizaciones</td></tr>';
-  populateColumnDatalists('orgs-body');
-  applyColumnFilters('orgs-body');
-}
-
-function populateOrganizationSelect() {
-  const select = $('#new-site-organization');
-  if (!select) return;
-  const previous = select.value;
-  select.innerHTML = allOrganizations.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
-  if (previous && allOrganizations.some(o => String(o.id) === previous)) select.value = previous;
-}
 
 $('#create-org-btn').addEventListener('click', async () => {
   const name = $('#new-org-name').value.trim();

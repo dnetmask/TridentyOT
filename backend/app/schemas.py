@@ -152,6 +152,12 @@ class UserOut(BaseModel):
     role: str
     locale: str
     created_at: datetime.datetime
+    # organization_id is a real column on User, so it's always populated
+    # automatically. organization_name has no equivalent attribute on the
+    # ORM object (User has no `organization` relationship) -- it stays
+    # None unless a caller explicitly fills it in, see user_out() below.
+    organization_id: int | None = None
+    organization_name: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -321,3 +327,19 @@ def capture_session_out(session_obj, locale: str) -> CaptureSessionOut:
     data = CaptureSessionOut.model_validate(session_obj).model_dump()
     data["error_message"] = render_i18n(session_obj.error_message, locale)
     return CaptureSessionOut(**data)
+
+
+def user_out(db, user) -> UserOut:
+    """Like UserOut.model_validate(user), but also fills in
+    organization_name -- there's no `organization` relationship on the User
+    model to pull that from automatically. Used for a user's own account
+    (GET/PATCH /api/auth/me) so the frontend can label its nav tree root
+    without a super_admin-only call to GET /api/organizations."""
+    from app.models import Organization
+
+    data = UserOut.model_validate(user).model_dump()
+    if user.organization_id is not None:
+        org = db.get(Organization, user.organization_id)
+        if org is not None:
+            data["organization_name"] = org.name
+    return UserOut(**data)
