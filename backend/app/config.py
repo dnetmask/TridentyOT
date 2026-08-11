@@ -5,7 +5,21 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("TRIDENTYOT_DATA_DIR", BASE_DIR / "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-DATABASE_URL = os.environ.get("TRIDENTYOT_DATABASE_URL", f"sqlite:///{DATA_DIR / 'tridentyot.db'}")
+# Postgres is the primary target (multi-tenant central console and
+# self-hosted deployments alike -- see docker-compose.yml's `db` service).
+# TRIDENTYOT_DATABASE_URL can still point at sqlite:/// for local
+# development or a lightweight single-sensor install without a separate DB
+# server; every migration in db.py is written to work against both dialects.
+_POSTGRES_HOST = os.environ.get("TRIDENTYOT_POSTGRES_HOST", "db")
+_POSTGRES_PORT = os.environ.get("TRIDENTYOT_POSTGRES_PORT", "5432")
+_POSTGRES_DB = os.environ.get("TRIDENTYOT_POSTGRES_DB", "tridentyot")
+_POSTGRES_USER = os.environ.get("TRIDENTYOT_POSTGRES_USER", "tridentyot")
+_POSTGRES_PASSWORD = os.environ.get("TRIDENTYOT_POSTGRES_PASSWORD", "tridentyot")
+_DEFAULT_DATABASE_URL = (
+    f"postgresql+psycopg://{_POSTGRES_USER}:{_POSTGRES_PASSWORD}@{_POSTGRES_HOST}:{_POSTGRES_PORT}/{_POSTGRES_DB}"
+)
+
+DATABASE_URL = os.environ.get("TRIDENTYOT_DATABASE_URL", _DEFAULT_DATABASE_URL)
 
 # NVD REST API (CVE search by keyword). Public rate limit without an API key
 # is ~5 requests / 30s, so results are cached aggressively (see vuln/nvd_client.py).
@@ -26,3 +40,13 @@ SESSION_LIFETIME_SECONDS = int(os.environ.get("TRIDENTYOT_SESSION_LIFETIME_SECON
 # users exist yet. Change the password immediately after first login.
 DEFAULT_ADMIN_USERNAME = os.environ.get("TRIDENTYOT_DEFAULT_ADMIN_USERNAME", "admin")
 DEFAULT_ADMIN_PASSWORD = os.environ.get("TRIDENTYOT_DEFAULT_ADMIN_PASSWORD", "admin")
+
+# Bootstraps a Super Admin (the Netmask platform role -- no organization of
+# its own, administers every organization) on first startup. Unset by
+# default, on purpose: there is no API path that can ever create a
+# super_admin (see routes_organizations.py/routes_users.py), so a central
+# console deployment that wants one must opt in here explicitly. A
+# self-hosted single-client install has no use for this and should leave
+# it unset -- DEFAULT_ADMIN_USERNAME above already covers that case.
+SUPER_ADMIN_USERNAME = os.environ.get("TRIDENTYOT_SUPER_ADMIN_USERNAME")
+SUPER_ADMIN_PASSWORD = os.environ.get("TRIDENTYOT_SUPER_ADMIN_PASSWORD")

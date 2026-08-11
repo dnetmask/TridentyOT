@@ -9,7 +9,7 @@ def test_login_with_default_admin_succeeds(anonymous_client):
     body = resp.json()
     assert body["token"]
     assert body["user"]["username"] == "admin"
-    assert body["user"]["role"] == "editor"
+    assert body["user"]["role"] == "admin"
 
 
 def test_login_with_wrong_password_fails(anonymous_client):
@@ -35,6 +35,45 @@ def test_me_returns_current_user_with_valid_token(client):
     resp = client.get("/api/auth/me")
     assert resp.status_code == 200
     assert resp.json()["username"] == "admin"
+
+
+def test_me_includes_organization_name_for_an_org_scoped_user(client):
+    """The frontend nav tree needs this to label its root for an admin/
+    viewer, who can't call GET /api/organizations (super_admin only)."""
+    body = client.get("/api/auth/me").json()
+    assert body["organization_id"] is not None
+    assert body["organization_name"] == "Default Organization"
+
+
+def test_me_has_no_organization_for_a_super_admin(db_session):
+    from fastapi.testclient import TestClient
+
+    from app.auth import ROLE_SUPER_ADMIN
+    from app.auth.security import hash_password
+    from app.main import app
+    from app.models import User
+
+    salt, password_hash = hash_password("rootpass1")
+    db_session.add(
+        User(
+            organization_id=None,
+            username="root",
+            password_salt=salt,
+            password_hash=password_hash,
+            role=ROLE_SUPER_ADMIN,
+        )
+    )
+    db_session.commit()
+
+    super_client = TestClient(app)
+    login = super_client.post("/api/auth/login", json={"username": "root", "password": "rootpass1"})
+    assert login.json()["user"]["organization_id"] is None
+    assert login.json()["user"]["organization_name"] is None
+
+    super_client.headers.update({"Authorization": f"Bearer {login.json()['token']}"})
+    me = super_client.get("/api/auth/me").json()
+    assert me["organization_id"] is None
+    assert me["organization_name"] is None
 
 
 def test_logout_invalidates_the_token(client):

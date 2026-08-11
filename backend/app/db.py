@@ -1,8 +1,8 @@
 import logging
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import DATABASE_URL
 
@@ -10,6 +10,37 @@ logger = logging.getLogger(__name__)
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
+
+if DATABASE_URL.startswith("sqlite"):
+    # Default SQLite (rollback-journal + synchronous=FULL) fsyncs on every
+    # commit and blocks all readers while a write transaction is open --
+    # fine for occasional writes, but live capture now batches many
+    # ingest_packet_record() calls per commit (see live_capture.py) and the
+    # API still needs to serve Inventory/Flows reads concurrently while
+    # that's happening. WAL lets readers proceed against the last
+    # checkpointed state during a writer's transaction; NORMAL still
+    # fsyncs at WAL checkpoints, just not on every single commit -- an
+    # acceptable durability trade for a monitoring tool (a hard crash could
+    # lose the last few ms of buffered writes, never a corrupt DB).
+    #
+    # WAL only buys concurrent *readers*; SQLite still allows only one
+    # writer at a time. A long pcap upload now commits every few hundred
+    # packets (see pcap_loader.py's progress tracking) instead of once at
+    # the very end, so some other request's write -- e.g. POST /auth/login
+    # inserting an auth_tokens row -- has a much bigger window to land
+    # while that writer briefly holds the lock. Without busy_timeout,
+    # SQLite raises "database is locked" the instant it can't grab the
+    # lock immediately instead of just waiting the few milliseconds it
+    # actually takes to free up.
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=10000")
+        cursor.close()
+
+
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
@@ -20,16 +51,31 @@ class Base(DeclarativeBase):
 def _add_missing_columns() -> None:
     """`Base.metadata.create_all()` only creates missing *tables* -- it never
     alters an existing table, so a database created by an older version of
-    the app (before a new nullable column was added to a model) is left
-    without that column, and every query against it fails with something
-    like "no such column: devices.custom_name".
+    the app (before a new column was added to a model) is left without that
+    column, and every query against it fails with something like "no such
+    column: devices.custom_name".
 
     This adds any column present in the current models but missing from the
     actual database, via plain `ALTER TABLE ... ADD COLUMN`, which is enough
     for how this app evolves its schema so far -- every change has been a
-    new nullable column or a brand-new table (handled by create_all itself),
-    never a rename, a drop, or a new NOT NULL column. Existing rows and data
-    are left untouched; the new column is simply NULL for them.
+    new column or a brand-new table (handled by create_all itself), never a
+    rename or a drop.
+
+    A plain `ADD COLUMN` never applies the *ORM-level* default
+    (`mapped_column(..., default=0)`) to rows that already existed before
+    the column did -- SQLite just leaves it NULL for them. That's fine for
+    an `Optional` field (custom_name, hostname, ...), but a column the API
+    schema declares as a plain non-optional `int`/`float`/`bool`
+    (packet_count, dropped_count, os_confidence, device_type_confidence,
+    is_ot_suspected, ...) then fails response validation the moment one of
+    those pre-existing rows is read back -- e.g. GET /api/capture/sessions
+    500ing with "Input should be a valid integer" for dropped_count after
+    upgrading to the version that added it. So every column with a plain
+    scalar default gets its lingering NULLs backfilled to that default on
+    every startup, not just the ones added in *this* run -- a database that
+    already picked up the column with NULLs in an earlier startup needs
+    the same repair, and this is idempotent (a no-op once there's nothing
+    left to fix).
     """
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -40,11 +86,254 @@ def _add_missing_columns() -> None:
                 continue  # brand-new table: create_all() already made it, in full
             existing_columns = {col["name"] for col in inspector.get_columns(table.name)}
             for column in table.columns:
-                if column.name in existing_columns:
-                    continue
-                col_type = column.type.compile(dialect=engine.dialect)
-                logger.info("Migrating schema: adding %s.%s (%s)", table.name, column.name, col_type)
-                conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN "{column.name}" {col_type}'))
+                if column.name not in existing_columns:
+                    col_type = column.type.compile(dialect=engine.dialect)
+                    logger.info("Migrating schema: adding %s.%s (%s)", table.name, column.name, col_type)
+                    conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN "{column.name}" {col_type}'))
+
+                default = column.default
+                if default is not None and getattr(default, "is_scalar", False):
+                    result = conn.execute(
+                        text(f'UPDATE {table.name} SET "{column.name}" = :default WHERE "{column.name}" IS NULL'),
+                        {"default": default.arg},
+                    )
+                    if result.rowcount:
+                        logger.info(
+                            "Migrating schema: backfilled %d NULL row(s) in %s.%s to %r",
+                            result.rowcount,
+                            table.name,
+                            column.name,
+                            default.arg,
+                        )
+
+
+def _ensure_default_organization_and_backfill() -> None:
+    """`organization_id` on User/CaptureSession/Device is a column that, on
+    a database created before multi-tenant support existed, _add_missing_
+    columns() above just added as NULL (there's no scalar default like 0/""
+    to backfill an FK with). This is the org-specific follow-up: point every
+    NULL organization_id at a default Organization, creating one on first
+    startup if there isn't one yet -- exactly like seed_default_admin() does
+    for the admin user. Idempotent: a no-op once nothing is left to
+    backfill, same as _add_missing_columns.
+
+    A completely fresh database with nothing to backfill only gets this
+    default org if no Super Admin was configured (see config.py's
+    SUPER_ADMIN_USERNAME) -- a central-console deployment that bootstraps
+    one starts with zero organizations on purpose, so its first login lands
+    on an empty "create your first organization" screen, not a
+    pre-populated "Default Organization" nobody asked for. A self-hosted
+    single-client install (no Super Admin) still gets one automatically,
+    same as before this distinction existed.
+    """
+    from app.config import SUPER_ADMIN_USERNAME
+    from app.models import CaptureSession, Device, Organization, User
+
+    # Session(engine), not SessionLocal(): SessionLocal is a sessionmaker
+    # bound once at import time to whatever engine object existed *then* --
+    # rebinding the module-level `engine` name afterward (as tests that
+    # monkeypatch db_module.engine do) doesn't change what it's bound to.
+    # Session(engine) resolves the current `engine` global at call time,
+    # same as inspect(engine)/engine.begin() elsewhere in this module.
+    with Session(engine) as session:
+        org = session.query(Organization).order_by(Organization.id.asc()).first()
+        needs_backfill = org is None and any(
+            session.query(model).filter(model.organization_id.is_(None)).first() is not None
+            for model in (User, CaptureSession, Device)
+        )
+        if org is None and (needs_backfill or not SUPER_ADMIN_USERNAME):
+            org = Organization(name="Default Organization", slug="default")
+            session.add(org)
+            session.flush()
+            logger.info("Migrating schema: created default organization (id=%s)", org.id)
+
+        if org is None:
+            return  # Super Admin bootstrap, nothing pre-existing to backfill -- nothing to do yet
+
+        for model in (User, CaptureSession, Device):
+            result = session.query(model).filter(model.organization_id.is_(None)).update(
+                {"organization_id": org.id}, synchronize_session=False
+            )
+            if result:
+                logger.info(
+                    "Migrating schema: backfilled %d row(s) in %s.organization_id to org %d",
+                    result,
+                    model.__tablename__,
+                    org.id,
+                )
+        session.commit()
+
+
+def _rebuild_device_unique_constraint() -> None:
+    """devices used to be unique on (mac, ip) alone; multi-tenancy needs
+    (organization_id, mac, ip) instead, since two different organizations'
+    networks can see the same MAC/IP pair without being the same asset.
+    `Base.metadata.create_all()` never alters an existing table's
+    constraints, so a database that still has the old index needs it
+    swapped explicitly -- a brand-new database already gets the new
+    definition straight from create_all() and this is a same-name no-op
+    for it.
+    """
+    inspector = inspect(engine)
+    if "devices" not in inspector.get_table_names():
+        return
+
+    names = {uc["name"] for uc in inspector.get_unique_constraints("devices")}
+    names |= {ix["name"] for ix in inspector.get_indexes("devices")}
+    if "uq_device_org_mac_ip" in names:
+        return
+
+    with engine.begin() as conn:
+        if "uq_device_mac_ip" in names:
+            logger.info("Migrating schema: rebuilding devices unique constraint to include organization_id")
+            # engine.dialect.name, not DATABASE_URL.startswith(...): this
+            # function operates on whatever `engine` currently is (see
+            # inspect(engine)/engine.begin() above), which a test can point
+            # at a different database than the one DATABASE_URL --
+            # resolved once, at module import time -- still describes.
+            if engine.dialect.name == "sqlite":
+                conn.execute(text("DROP INDEX IF EXISTS uq_device_mac_ip"))
+            else:
+                conn.execute(text("ALTER TABLE devices DROP CONSTRAINT IF EXISTS uq_device_mac_ip"))
+        conn.execute(
+            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_device_org_mac_ip ON devices (organization_id, mac, ip)")
+        )
+
+
+def _widen_device_identity_text_columns() -> None:
+    """firmware_version/custom_firmware_version/model/custom_model briefly
+    shipped as VARCHAR(128) (see models.py). Postgres enforces that limit
+    strictly, and real-world values routinely exceed it -- a CDP Software
+    Version TLV is often a full multi-line IOS banner (version, copyright,
+    compile date -- easily 200-400+ characters). Unlike a missing column,
+    _add_missing_columns() above never revisits a column that already
+    exists with the wrong type, so a database that picked up the narrow
+    version needs this explicit widen -- without it, every packet from a
+    device with an over-limit value fails to commit, which on a live
+    capture (see live_capture.py's _ingest_batch, which has no per-record
+    error handling) silently kills the consumer thread and freezes the
+    capture. SQLite never enforces VARCHAR length at all, so this is a
+    Postgres-only fixup; safe to re-run every startup, since widening an
+    already-correctly-sized column is a no-op.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    inspector = inspect(engine)
+    if "devices" not in inspector.get_table_names():
+        return
+    existing_columns = {col["name"] for col in inspector.get_columns("devices")}
+    with engine.begin() as conn:
+        for column in ("firmware_version", "custom_firmware_version"):
+            if column in existing_columns:
+                conn.execute(text(f'ALTER TABLE devices ALTER COLUMN "{column}" TYPE TEXT'))
+        for column in ("model", "custom_model"):
+            if column in existing_columns:
+                conn.execute(text(f'ALTER TABLE devices ALTER COLUMN "{column}" TYPE VARCHAR(255)'))
+
+
+def _migrate_editor_role_to_admin() -> None:
+    """User.role's 3-tier model (super_admin/admin/viewer -- see
+    app/auth/__init__.py) replaces the old 2-tier one (editor/viewer). A
+    database created under the old model has 'editor' rows that need
+    renaming to 'admin'; 'viewer' rows are untouched, and nothing here
+    creates a super_admin -- that's a deliberate manual/seed step, never an
+    automatic upgrade. Idempotent: a no-op once nothing is left to rename.
+    """
+    from app.auth import ROLE_ADMIN
+    from app.models import User
+
+    with Session(engine) as session:
+        result = session.query(User).filter(User.role == "editor").update(
+            {"role": ROLE_ADMIN}, synchronize_session=False
+        )
+        if result:
+            logger.info("Migrating schema: renamed %d user(s) from role 'editor' to '%s'", result, ROLE_ADMIN)
+        session.commit()
+
+
+def _rebuild_user_unique_constraint() -> None:
+    """User.username used to be globally unique (a single `unique=True,
+    index=True` column); the 3-role model needs it scoped per-organization
+    for admin/viewer, with a separate rule enforcing global uniqueness
+    among the org-less super_admin rows instead -- see models.py's
+    User.__table_args__. `Base.metadata.create_all()` never alters an
+    existing table's constraints, so a database that still has the old
+    globally-unique index needs it swapped explicitly, the same pattern as
+    _rebuild_device_unique_constraint above; a brand-new database already
+    gets the current definition straight from create_all() and this is a
+    same-name no-op for it.
+    """
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+
+    indexes = {ix["name"]: ix for ix in inspector.get_indexes("users")}
+    with engine.begin() as conn:
+        old_index = indexes.get("ix_users_username")
+        if old_index is not None and old_index["unique"]:
+            logger.info("Migrating schema: rebuilding users unique constraint to be organization-scoped")
+            conn.execute(text("DROP INDEX IF EXISTS ix_users_username"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_username ON users (username)"))
+
+        conn.execute(
+            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_user_org_username ON users (organization_id, username)")
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_username_super_admin "
+                "ON users (username) WHERE organization_id IS NULL"
+            )
+        )
+
+
+def _ensure_default_site_zone_sensor_and_backfill() -> None:
+    """CaptureSession.sensor_id is a column that, on a database created
+    before the Organization -> Site -> Zone -> Sensor hierarchy existed,
+    _add_missing_columns() above just added as NULL. This is the
+    hierarchy-specific follow-up: for every Organization that doesn't
+    already have one, create a "Default" Site/Zone/Sensor -- exactly like
+    _ensure_default_organization_and_backfill does for Organization itself
+    -- and point every NULL sensor_id belonging to that organization at its
+    default Sensor. Idempotent: a no-op once nothing is left to backfill.
+    """
+    from app.models import CaptureSession, Organization, Sensor, Site, Zone
+
+    with Session(engine) as session:
+        for org in session.query(Organization).all():
+            site = session.query(Site).filter(Site.organization_id == org.id).order_by(Site.id.asc()).first()
+            if site is None:
+                site = Site(organization_id=org.id, name="Default")
+                session.add(site)
+                session.flush()
+                logger.info("Migrating schema: created default site (id=%s) for org %d", site.id, org.id)
+
+            zone = session.query(Zone).filter(Zone.site_id == site.id).order_by(Zone.id.asc()).first()
+            if zone is None:
+                zone = Zone(site_id=site.id, name="Default")
+                session.add(zone)
+                session.flush()
+                logger.info("Migrating schema: created default zone (id=%s) for site %d", zone.id, site.id)
+
+            sensor = session.query(Sensor).filter(Sensor.zone_id == zone.id).order_by(Sensor.id.asc()).first()
+            if sensor is None:
+                sensor = Sensor(zone_id=zone.id, name="Default")
+                session.add(sensor)
+                session.flush()
+                logger.info("Migrating schema: created default sensor (id=%s) for zone %d", sensor.id, zone.id)
+
+            result = (
+                session.query(CaptureSession)
+                .filter(CaptureSession.organization_id == org.id, CaptureSession.sensor_id.is_(None))
+                .update({"sensor_id": sensor.id}, synchronize_session=False)
+            )
+            if result:
+                logger.info(
+                    "Migrating schema: backfilled %d capture_sessions row(s) for org %d to sensor %d",
+                    result,
+                    org.id,
+                    sensor.id,
+                )
+        session.commit()
 
 
 def init_db() -> None:
@@ -52,6 +341,12 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _add_missing_columns()
+    _widen_device_identity_text_columns()
+    _ensure_default_organization_and_backfill()
+    _rebuild_device_unique_constraint()
+    _migrate_editor_role_to_admin()
+    _rebuild_user_unique_constraint()
+    _ensure_default_site_zone_sensor_and_backfill()
 
 
 @contextmanager

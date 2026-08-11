@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 
+from app.i18n import bilingual, encode_i18n
 from app.models import Device, VulnerabilityFinding
 from app.vuln.nvd_client import search_nvd
 from app.vuln.rules import extract_banner_product_version, run_local_rules
@@ -76,17 +77,38 @@ def scan_device(db_session: Session, device: Device, use_nvd: bool = True) -> li
 
         for keyword in keywords:
             for cve in search_nvd(db_session, keyword):
+                # cve["description"] is NVD's own English CVE text, passed
+                # through as plain (non-i18n-encoded) text -- see
+                # app.i18n.render_i18n's legacy/third-party fallback --
+                # since translating arbitrary third-party vulnerability
+                # descriptions is out of scope.
+                description = cve["description"] or encode_i18n(
+                    bilingual(
+                        es=f"Ver detalles en NVD para {cve['cve_id']}.",
+                        en=f"See NVD for details on {cve['cve_id']}.",
+                    )
+                )
                 findings.append(
                     _persist_finding(
                         db_session,
                         device,
                         source="nvd",
                         cve_id=cve["cve_id"],
-                        title=f"{cve['cve_id']} podría afectar a {keyword}",
-                        description=cve["description"] or f"Ver detalles en NVD para {cve['cve_id']}.",
+                        title=encode_i18n(
+                            bilingual(
+                                es=f"{cve['cve_id']} podría afectar a {keyword}",
+                                en=f"{cve['cve_id']} may affect {keyword}",
+                            )
+                        ),
+                        description=description,
                         severity=cve["severity"],
                         cvss_score=cve["cvss_score"],
-                        evidence=f"Coincidencia por palabra clave de banner de servicio: '{keyword}'",
+                        evidence=encode_i18n(
+                            bilingual(
+                                es=f"Coincidencia por palabra clave de banner de servicio: '{keyword}'",
+                                en=f"Match by service banner keyword: '{keyword}'",
+                            )
+                        ),
                     )
                 )
 
@@ -94,8 +116,8 @@ def scan_device(db_session: Session, device: Device, use_nvd: bool = True) -> li
     return findings
 
 
-def scan_all_devices(db_session: Session, use_nvd: bool = True) -> list[VulnerabilityFinding]:
+def scan_all_devices(db_session: Session, organization_id: int, use_nvd: bool = True) -> list[VulnerabilityFinding]:
     findings: list[VulnerabilityFinding] = []
-    for device in db_session.query(Device).all():
+    for device in db_session.query(Device).filter(Device.organization_id == organization_id).all():
         findings.extend(scan_device(db_session, device, use_nvd=use_nvd))
     return findings

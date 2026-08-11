@@ -19,7 +19,43 @@
     --med: #d97706;
     --low: #16a34a;
     --info: #64748b;
+    --other: #a855f7;
+    --zebra: rgba(255, 255, 255, 0.055);
     --sidebar-w: 220px;
+  }
+  /* Default to the OS preference when the user hasn't chosen explicitly
+     (no data-theme attribute yet) -- overridden below by the explicit
+     [data-theme] rules, which always win regardless of OS preference. */
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #eef1f7;
+      --panel: #ffffff;
+      --panel-2: #f3f5fa;
+      --border: #d7deea;
+      --text: #101828;
+      --muted: #5b6b85;
+      --accent: #1768b0;
+      --ok: #15803d;
+      --crit: #dc2626;
+      --high: #c2410c;
+      --med: #b45309;
+      --low: #15803d;
+      --info: #475569;
+      --other: #9333ea;
+      --zebra: rgba(16, 23, 40, 0.035);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b1220; --panel: #121c2e; --panel-2: #17233a; --border: #23324d;
+    --text: #e6edf7; --muted: #8ea0c0; --accent: #3ba9ff;
+    --ok: #16a34a; --crit: #dc2626; --high: #ea580c; --med: #d97706; --low: #16a34a;
+    --info: #64748b; --other: #a855f7; --zebra: rgba(255, 255, 255, 0.055);
+  }
+  :root[data-theme="light"] {
+    --bg: #eef1f7; --panel: #ffffff; --panel-2: #f3f5fa; --border: #d7deea;
+    --text: #101828; --muted: #5b6b85; --accent: #1768b0;
+    --ok: #15803d; --crit: #dc2626; --high: #c2410c; --med: #b45309; --low: #15803d;
+    --info: #475569; --other: #9333ea; --zebra: rgba(16, 23, 40, 0.035);
   }
   * { box-sizing: border-box; }
   body {
@@ -27,6 +63,7 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
+    zoom: 95%;
   }
 
   /* ---------- logo ---------- */
@@ -62,6 +99,20 @@
   .sidebar nav button:hover { background: var(--panel-2); color: var(--text); }
   .sidebar nav button.active { background: var(--panel-2); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
   .sidebar .spacer { flex: 1; }
+  .theme-toggle {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+    margin-bottom: 10px; font-size: 12px; color: var(--muted);
+  }
+  .theme-switch {
+    position: relative; width: 36px; height: 20px; border-radius: 999px;
+    background: var(--border); cursor: pointer; flex: none; border: none; padding: 0;
+  }
+  .theme-switch .knob {
+    position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--accent); transition: transform .2s ease;
+  }
+  .theme-switch.is-light .knob { transform: translateX(16px); }
   .sidebar .user-box {
     border-top: 1px solid var(--border);
     padding-top: 12px;
@@ -75,7 +126,104 @@
   }
   .sidebar .user-box button { margin-top: 10px; width: 100%; }
 
-  main { flex: 1; padding: 24px 28px; max-width: 1200px; }
+  /* ---------- sidebar rail: Organización / Sitio switchers + Zona rail ----------
+     Meraki-dashboard-style: two "current context" switcher cards up top,
+     then a rail of rows (one per Zona, plus Reportes and Organización)
+     that each expand a flyout panel to the right on click -- see
+     .flyout-panel below. Nothing here is inline-expandable anymore; a
+     narrow sidebar column has no room to both show a full name and nest
+     children under it legibly, which is what the previous indented-tree
+     version ran into. */
+  .rail { flex: 1; overflow-y: auto; margin: 4px -4px 8px; padding: 0 4px; display: flex; flex-direction: column; }
+  .rail-card {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid var(--border); cursor: pointer; margin-bottom: 6px; background: var(--panel);
+  }
+  .rail-card:hover { background: var(--panel-2); }
+  .rail-card.open { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent); }
+  .rail-card-text { flex: 1; min-width: 0; }
+  .rail-card-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
+  }
+  .rail-card-value {
+    font-size: 13.5px; font-weight: 700; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .rail-card-chevron { color: var(--muted); flex: none; font-size: 15px; }
+  .rail-list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+  .rail-item {
+    display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px;
+    background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13.5px;
+    width: 100%; text-align: left;
+  }
+  .rail-item:hover { background: var(--panel-2); color: var(--text); }
+  .rail-item.open, .rail-item.active {
+    background: var(--panel-2); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); font-weight: 600;
+  }
+  .rail-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rail-item-chevron { flex: none; color: var(--muted); font-size: 14px; }
+  .rail-add {
+    display: block; width: 100%; text-align: left; padding: 7px 10px; border-radius: 8px;
+    background: none; border: 1px dashed var(--border); color: var(--muted);
+    cursor: pointer; font-size: 12.5px; margin-top: 2px;
+  }
+  .rail-add:hover { background: var(--panel-2); color: var(--text); border-color: var(--accent); }
+  .tree-empty { font-size: 11px; color: var(--muted); padding: 4px 8px 8px; font-style: italic; }
+
+  /* ---------- flyout panel: opens to the right of the sidebar on a rail click ---------- */
+  .flyout-backdrop { position: fixed; inset: 0; background: rgba(4, 9, 20, 0.35); z-index: 40; }
+  .flyout-backdrop.hidden { display: none; }
+  .flyout-panel {
+    position: fixed; top: 0; left: var(--sidebar-w); width: 300px; max-width: calc(100vw - var(--sidebar-w));
+    height: 100vh; background: var(--panel); border-right: 1px solid var(--border);
+    z-index: 41; padding: 20px 18px; overflow-y: auto; box-shadow: 10px 0 30px rgba(0,0,0,0.25);
+  }
+  .flyout-panel.hidden { display: none; }
+  .flyout-header {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+    padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 6px;
+  }
+  .flyout-title { font-size: 19px; font-weight: 800; color: var(--text); overflow-wrap: break-word; }
+  .flyout-close {
+    background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer;
+    line-height: 1; padding: 2px 4px; flex: none;
+  }
+  .flyout-close:hover { color: var(--text); }
+  .flyout-section-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;
+    color: var(--muted); margin: 16px 0 6px;
+  }
+  .flyout-section-title:first-of-type { margin-top: 6px; }
+  .flyout-link {
+    display: block; width: 100%; text-align: left; background: none; border: none;
+    color: var(--text); padding: 8px 6px; font-size: 13.5px; border-radius: 6px; cursor: pointer;
+  }
+  .flyout-link:hover { background: var(--panel-2); }
+  .flyout-row { display: flex; align-items: center; gap: 6px; }
+  .flyout-row .flyout-link { flex: 1; }
+  .flyout-icon-btn {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    font-size: 11px; padding: 3px 7px; border-radius: 5px; cursor: pointer; flex: none;
+  }
+  .flyout-icon-btn:hover { background: var(--panel-2); color: var(--text); }
+  .flyout-empty { font-size: 12px; color: var(--muted); font-style: italic; padding: 8px 6px; }
+  .flyout-add {
+    display: block; width: 100%; text-align: left; background: none; border: 1px dashed var(--border);
+    color: var(--muted); padding: 8px 10px; font-size: 12.5px; border-radius: 6px; cursor: pointer; margin-top: 12px;
+  }
+  .flyout-add:hover { background: var(--panel-2); color: var(--text); border-color: var(--accent); }
+
+  /* ---------- breadcrumb: which Zona is providing the current view ---------- */
+  .zone-breadcrumb {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    font-size: 12.5px; color: var(--muted); margin-bottom: 18px;
+    padding: 9px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .zone-breadcrumb.hidden { display: none; }
+  .zone-breadcrumb b { color: var(--text); }
+  .zone-breadcrumb .note { margin-left: auto; font-size: 11px; opacity: 0.8; white-space: nowrap; }
+
+  main { flex: 1; padding: 24px 28px; max-width: 100%; min-width: 0; }
   .tab { display: none; }
   .tab.active { display: block; }
   .card {
@@ -109,10 +257,16 @@
   button.action.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
   button.action.danger { background: var(--crit); color: white; }
   button.action:disabled { opacity: 0.5; cursor: not-allowed; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px; border-bottom: 1px solid var(--border); }
-  td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: auto; }
+  th { text-align: left; color: var(--muted); font-weight: 600; padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
   tr:hover td { background: rgba(59, 169, 255, 0.05); }
+  tr.filter-row th { padding: 3px 6px 6px; background: var(--panel); }
+  tr.filter-row input.col-filter {
+    width: 100%; box-sizing: border-box; font-size: 11.5px; font-weight: 400;
+    padding: 3px 6px; border-radius: 5px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--text);
+  }
   .badge {
     display: inline-block;
     padding: 2px 8px;
@@ -129,6 +283,13 @@
   .sev-info, .sev-unknown { background: var(--info); }
   .pill { background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 11px; margin: 2px; display: inline-block; }
   .pill.ot { border-color: var(--high); color: var(--high); }
+  .pill.plc { border-color: var(--med); color: var(--med); }
+  .pill.hmi { border-color: var(--high); color: var(--high); }
+  .pill.server { border-color: var(--accent); color: var(--accent); }
+  .pill.network { border-color: var(--info); color: var(--info); }
+  .pill.workstation { border-color: var(--ok); color: var(--ok); }
+  .pill.other { border-color: var(--other); color: var(--other); }
+  .pill.external { border-color: var(--info); color: var(--info); }
   .muted { color: var(--muted); }
   .empty { color: var(--muted); padding: 20px; text-align: center; }
   .stat-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 14px; }
@@ -141,17 +302,40 @@
   .stat-tile .stat-num.crit { color: var(--crit); }
   .stat-tile .stat-num.high { color: var(--high); }
   .stat-tile .stat-num.ot { color: var(--high); }
+  .stat-tile .stat-num.plc { color: var(--med); }
+  .stat-tile .stat-num.hmi { color: var(--high); }
+  .stat-tile .stat-num.server { color: var(--accent); }
+  .stat-tile .stat-num.workstation { color: var(--ok); }
+  .stat-tile .stat-num.network { color: var(--info); }
+  .stat-tile .stat-num.other { color: var(--other); }
   .stat-tile .stat-label { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
-  .table-scroll { overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+  .refresh-timer { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+  .table-scroll { overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
   .table-scroll table { width: 100%; border-collapse: collapse; }
-  .table-scroll thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  .table-scroll thead th { position: sticky; top: 0; background: var(--panel); z-index: 2; }
+  .table-scroll thead tr.filter-row th { top: 24px; z-index: 1; }
+  .table-scroll tbody tr:nth-child(even) td { background: var(--zebra); }
+  .table-scroll tbody tr:hover td { background: rgba(59, 169, 255, 0.08); }
   .protocol-list { font-size: 12px; color: var(--muted); }
+  .columns-panel {
+    position: absolute; top: 100%; right: 0; margin-top: 6px; z-index: 5;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; display: flex; flex-direction: column; gap: 6px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.35); min-width: 160px;
+  }
+  .columns-panel-title { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 2px; }
+  .columns-panel label { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 0; }
+  .columns-panel input { width: auto; }
   .clickable { cursor: pointer; }
   .device-detail { margin-top: 12px; }
   .flex-between { display: flex; justify-content: space-between; align-items: center; }
   .status-running { color: var(--accent); }
   .status-completed, .status-stopped { color: var(--muted); }
   .status-error { color: var(--crit); }
+  .progress-cell { display: flex; align-items: center; gap: 8px; min-width: 110px; }
+  .progress-track { flex: 1; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.4s ease; }
+  .progress-pct { font-size: 11.5px; color: var(--muted); white-space: nowrap; min-width: 32px; text-align: right; }
   .manual-tag { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
   .edit-field { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
   .edit-field label { min-width: 90px; margin: 0; }
@@ -168,7 +352,6 @@
   }
   .dropzone.dragover { border-color: var(--accent); background: rgba(59,169,255,0.08); color: var(--text); }
   .dropzone b { color: var(--text); }
-  .flow-arrow { color: var(--muted); margin: 0 6px; }
   .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
   .viewer-note {
     border: 1px solid var(--border);
@@ -180,6 +363,28 @@
     margin-bottom: 14px;
   }
   .hidden { display: none !important; }
+
+  /* ---------- printable vulnerability report (screen: hidden; print: only this) ---------- */
+  #print-report { display: none; }
+  @media print {
+    body { background: #fff !important; }
+    body > *:not(#print-report) { display: none !important; }
+    #print-report { display: block !important; }
+  }
+  #print-report { background: #fff; color: #14171f; padding: 28px 36px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  #print-report .pr-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #14171f; padding-bottom: 14px; margin-bottom: 18px; }
+  #print-report .pr-header img { height: 30px; }
+  #print-report .pr-meta { font-size: 11.5px; color: #55607a; text-align: right; }
+  #print-report h1 { font-size: 19px; margin: 0 0 2px; }
+  #print-report .pr-sub { font-size: 12px; color: #55607a; margin: 0 0 18px; }
+  #print-report .pr-stats { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+  #print-report .pr-stat { border: 1px solid #d6dbe6; border-radius: 8px; padding: 8px 14px; min-width: 110px; }
+  #print-report .pr-stat .n { font-size: 19px; font-weight: 800; }
+  #print-report .pr-stat .l { font-size: 10.5px; color: #55607a; margin-top: 2px; }
+  #print-report table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+  #print-report th, #print-report td { border: 1px solid #d6dbe6; padding: 6px 8px; text-align: left; vertical-align: top; }
+  #print-report th { background: #f2f4f8; }
+  #print-report .pr-footer { margin-top: 16px; font-size: 10px; color: #8a93a8; }
 
   /* ---------- login screen ---------- */
   #login-screen {
@@ -210,16 +415,16 @@
 <div id="login-screen">
   <div class="login-card">
     <div class="login-logo">
-      <img class="logo-mark" src="/brand/mark_light.png" alt="TridentyOT" height="68" />
+      <img class="logo-mark" id="login-logo" src="/brand/mark_light.png" alt="TridentyOT" height="68" />
     </div>
-    <h1>Ingresa a TridentyOT</h1>
+    <h1 data-i18n="login.title">Ingresa a TridentyOT</h1>
     <form id="login-form">
-      <label>Usuario</label>
+      <label data-i18n="login.username">Usuario</label>
       <input id="login-username" autocomplete="username" required />
-      <label>Contraseña</label>
+      <label data-i18n="login.password">Contraseña</label>
       <input id="login-password" type="password" autocomplete="current-password" required />
       <div id="login-error"></div>
-      <button type="submit" class="action">Entrar</button>
+      <button type="submit" class="action" data-i18n="login.submit">Entrar</button>
     </form>
   </div>
 </div>
@@ -229,55 +434,90 @@
   <aside class="sidebar">
     <div class="brand">
       <div class="logo-lockup">
-        <img class="logo-full" src="/brand/lockup_light.png" alt="TridentyOT" height="35" />
+        <img class="logo-full" id="sidebar-logo" src="/brand/lockup_light.png" alt="TridentyOT" height="35" />
       </div>
-      <div class="subtitle">Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)</div>
+      <div class="subtitle" data-i18n="app.subtitle">Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)</div>
     </div>
 
-    <nav>
-      <button data-tab="capture" class="active">Captura</button>
-      <button data-tab="inventory">Inventario</button>
-      <button data-tab="flows">Flujos</button>
-      <button data-tab="vulns">Vulnerabilidades</button>
-      <button data-tab="users" id="nav-users">Usuarios</button>
-    </nav>
+    <div class="rail" id="sidebar-rail"></div>
 
-    <div class="spacer"></div>
+    <div class="theme-toggle">
+      <span id="lang-toggle-label">ES</span>
+      <button class="theme-switch" id="lang-switch" aria-label="Switch language / cambiar idioma" type="button">
+        <span class="knob"></span>
+      </button>
+    </div>
+
+    <div class="theme-toggle">
+      <span id="theme-toggle-label">Oscuro</span>
+      <button class="theme-switch" id="theme-switch" aria-label="Cambiar entre tema claro y oscuro" type="button">
+        <span class="knob"></span>
+      </button>
+    </div>
 
     <div class="user-box">
       <div class="uname" id="current-username">—</div>
       <div class="urole" id="current-role">—</div>
-      <button class="action secondary" id="logout-btn">Cerrar sesión</button>
+      <button class="action secondary" id="logout-btn" data-i18n="nav.logout">Cerrar sesión</button>
     </div>
   </aside>
 
+  <div class="flyout-backdrop hidden" id="flyout-backdrop" onclick="closeFlyout()"></div>
+  <div class="flyout-panel hidden" id="flyout-panel"></div>
+
   <main>
 
+  <div class="zone-breadcrumb hidden" id="zone-breadcrumb">
+    <span id="zone-breadcrumb-path"></span>
+    <span class="note" id="zone-breadcrumb-note">filtrado por esta Zona</span>
+  </div>
+
   <section id="tab-capture" class="tab active">
-    <div class="card editor-only">
-      <h2>Captura en vivo</h2>
+    <div class="card admin-only">
       <div class="row">
         <div>
-          <label>Interfaz de red</label>
+          <label data-i18n="capture.sensor">Sensor</label>
+          <select id="capture-sensor-select" onchange="updateCaptureSensorKindUI()"></select>
+        </div>
+        <div id="capture-sensor-kind-badge" class="muted" style="align-self:center; font-size:12.5px;"></div>
+      </div>
+    </div>
+
+    <div class="card admin-only" id="live-capture-card">
+      <h2 data-i18n="capture.live_title">Captura en vivo</h2>
+      <div class="row">
+        <div>
+          <label data-i18n="capture.interface">Interfaz de red</label>
           <select id="iface-select"><option value="">(cargando...)</option></select>
         </div>
         <div>
-          <label>Filtro BPF</label>
+          <label data-i18n="capture.bpf_filter">Filtro BPF</label>
           <input id="bpf-filter" value="ip or arp" size="24" />
         </div>
-        <button class="action" id="start-live-btn">Iniciar captura</button>
+        <button class="action" id="start-live-btn" data-i18n="capture.start">Iniciar captura</button>
       </div>
-      <p class="muted" style="margin-top:10px">
+      <p class="muted" style="margin-top:10px" data-i18n="capture.live_hint">
         Requiere que el proceso tenga permisos de captura raw (root o CAP_NET_RAW) y que libpcap
         esté disponible en el host, además de estar conectado a un puerto SPAN/mirror o al segmento a inspeccionar.
       </p>
     </div>
 
-    <div class="card editor-only">
-      <h2>Analizar archivo .pcap / .pcapng</h2>
+    <div class="card admin-only hidden" id="external-sensor-card">
+      <h2 data-i18n="capture.external_title">Sensor externo</h2>
+      <p class="muted" data-i18n="capture.external_hint">
+        Este sensor es externo: todavía no admite conexión remota, así que no puede iniciar una captura en vivo
+        desde este servidor. Por ahora, analizá lo que capture adjuntando el archivo .pcap/.pcapng generado por él.
+      </p>
+    </div>
+
+    <div class="card admin-only">
+      <h2 data-i18n="capture.pcap_title">Analizar archivo .pcap / .pcapng</h2>
+      <p class="muted" style="margin:0 0 10px; font-size:12px;" data-i18n="capture.pcap_sensor_hint">
+        Se asocia al sensor seleccionado arriba.
+      </p>
       <div id="pcap-dropzone" class="dropzone">
-        Arrastra aquí un archivo <b>.pcap</b>/<b>.pcapng</b>, o
-        <label for="pcap-file" style="color:var(--accent); cursor:pointer; text-decoration:underline;">selecciónalo</label>
+        <span data-i18n="capture.dropzone_text" data-i18n-html>Arrastra aquí un archivo <b>.pcap</b>/<b>.pcapng</b>, o</span>
+        <label for="pcap-file" style="color:var(--accent); cursor:pointer; text-decoration:underline;" data-i18n="capture.dropzone_pick">selecciónalo</label>
         <input type="file" id="pcap-file" accept=".pcap,.pcapng,.cap" style="display:none" />
         <div id="pcap-file-name" class="muted" style="margin-top:8px;"></div>
       </div>
@@ -285,33 +525,95 @@
 
     <div class="card">
       <div class="flex-between">
-        <h2>Sesiones de captura</h2>
-        <button class="action secondary" id="refresh-sessions-btn">Actualizar</button>
+        <h2 data-i18n="capture.sessions_title">Sesiones de captura</h2>
+        <button class="action secondary" onclick="clearColumnFilters('sessions-body', renderSessionsTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
       </div>
-      <div class="viewer-note viewer-only hidden">Perfil visualizador: solo lectura, no puedes iniciar/detener capturas ni subir archivos.</div>
+      <div class="viewer-note viewer-only hidden" data-i18n="capture.viewer_note">Perfil visualizador: solo lectura, no puedes iniciar/detener capturas ni subir archivos.</div>
       <table>
-        <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>Origen</th><th>Estado</th><th>Paquetes</th><th>Inicio</th><th></th></tr></thead>
-        <tbody id="sessions-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
+        <thead>
+        <tr><th data-i18n="capture.col_id">ID</th><th data-i18n="capture.col_name">Nombre</th><th data-i18n="capture.col_type">Tipo</th><th data-i18n="capture.col_source">Origen</th><th data-i18n="capture.col_status">Estado</th><th data-i18n="capture.col_progress">Avance</th><th data-i18n="capture.col_packets">Paquetes</th><th data-i18n="capture.col_start">Inicio</th><th></th></tr>
+        <tr class="filter-row">
+          <th data-col="id"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="tipo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="origen"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="estado"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th></th>
+          <th data-col="paquetes"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th data-col="inicio"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderSessionsTable()" /></th>
+          <th></th>
+        </tr>
+        </thead>
+        <tbody id="sessions-body"><tr><td colspan="9" class="empty">Sin datos</td></tr></tbody>
       </table>
+    </div>
+
+    <div class="card admin-only" style="border-color:var(--crit);">
+      <h2 data-i18n="capture.danger_title">Zona de peligro</h2>
+      <p class="muted" style="margin-top:6px;" data-i18n="capture.danger_text" data-i18n-html>
+        Borra todas las sesiones de captura, dispositivos, protocolos, flujos y hallazgos de
+        vulnerabilidades -- para arrancar una captura completamente en blanco. Los usuarios no se
+        ven afectados. <b>Esta acción no se puede deshacer.</b>
+      </p>
+      <button class="action danger" id="wipe-db-btn" style="margin-top:10px;" data-i18n="capture.wipe_btn">Borrar toda la base de datos</button>
     </div>
   </section>
 
   <section id="tab-inventory" class="tab">
     <div class="card">
       <div class="flex-between">
-        <h2>Dispositivos detectados</h2>
-        <div class="row">
+        <h2 data-i18n="inventory.title">Dispositivos detectados</h2>
+        <div class="row" style="position:relative;">
+          <span id="inventory-refresh-timer" class="refresh-timer"></span>
           <label style="display:inline-flex;align-items:center;gap:6px;margin:0;">
-            <input type="checkbox" id="ot-only-checkbox" style="width:auto" /> Solo sospechosos de OT
+            <input type="checkbox" id="ot-only-checkbox" style="width:auto" /> <span data-i18n="inventory.ot_only">Solo dispositivos OT</span>
           </label>
-          <button class="action secondary" id="refresh-devices-btn">Actualizar</button>
+          <label style="display:inline-flex;align-items:center;gap:6px;margin:0;" title="Un equipo se marca Externo cuando nunca se le capturó transmitiendo (sin MAC) y su IP parece pública -- es decir, fuera de esta red, alcanzado solo a través de un router.">
+            <input type="checkbox" id="hide-external-checkbox" style="width:auto" /> <span data-i18n="inventory.hide_external">Ocultar equipos externos</span>
+          </label>
+          <button class="action secondary" onclick="clearColumnFilters('devices-body', renderDevicesTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
+          <button class="action secondary" id="columns-btn" data-i18n="inventory.columns_btn">Columnas</button>
+          <div id="columns-panel" class="columns-panel hidden">
+            <div class="columns-panel-title" data-i18n="inventory.columns_title">Columnas visibles</div>
+            <label><input type="checkbox" data-col-toggle="ip" checked /> <span data-i18n="inventory.col_ip">IP</span></label>
+            <label><input type="checkbox" data-col-toggle="nombre" checked /> <span data-i18n="inventory.col_name">Nombre</span></label>
+            <label><input type="checkbox" data-col-toggle="tipo" checked /> <span data-i18n="inventory.col_type">Tipo</span></label>
+            <label><input type="checkbox" data-col-toggle="subtipo" checked /> <span data-i18n="inventory.col_subtype">Subtipo</span></label>
+            <label><input type="checkbox" data-col-toggle="fabricante" checked /> <span data-i18n="inventory.col_vendor">Fabricante</span></label>
+            <label><input type="checkbox" data-col-toggle="referencia" checked /> <span data-i18n="inventory.col_reference">Referencia</span></label>
+            <label><input type="checkbox" data-col-toggle="mac" checked /> MAC</label>
+            <label><input type="checkbox" data-col-toggle="so" checked /> <span data-i18n="inventory.col_os">SO estimado</span></label>
+            <label><input type="checkbox" data-col-toggle="confianza" checked /> <span data-i18n="inventory.col_confidence">Confianza</span></label>
+            <label><input type="checkbox" data-col-toggle="protocolos" checked /> <span data-i18n="inventory.col_protocols">Protocolos</span></label>
+            <label><input type="checkbox" data-col-toggle="visto" checked /> <span data-i18n="inventory.col_last_seen">Últ. visto</span></label>
+          </div>
         </div>
       </div>
       <div class="stat-row" id="inventory-stats"></div>
       <div class="table-scroll" id="devices-scroll">
         <table>
-          <thead><tr><th>IP</th><th>Nombre</th><th>Fabricante</th><th>MAC</th><th>SO estimado</th><th>Confianza</th><th>Protocolos</th><th>Últ. visto</th></tr></thead>
-          <tbody id="devices-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
+          <thead>
+          <tr>
+            <th data-col="ip" data-i18n="inventory.col_ip">IP</th><th data-col="nombre" data-i18n="inventory.col_name">Nombre</th><th data-col="tipo" data-i18n="inventory.col_type">Tipo</th><th data-col="subtipo" data-i18n="inventory.col_subtype">Subtipo</th><th data-col="fabricante" data-i18n="inventory.col_vendor">Fabricante</th>
+            <th data-col="referencia" data-i18n="inventory.col_reference">Referencia</th>
+            <th data-col="mac">MAC</th><th data-col="so" data-i18n="inventory.col_os">SO estimado</th><th data-col="confianza" data-i18n="inventory.col_confidence">Confianza</th>
+            <th data-col="protocolos" data-i18n="inventory.col_protocols">Protocolos</th><th data-col="visto" data-i18n="inventory.col_last_seen">Últ. visto</th>
+          </tr>
+          <tr class="filter-row">
+            <th data-col="ip"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="tipo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="subtipo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="fabricante"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="referencia"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="mac"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="so"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="confianza"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="protocolos"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+            <th data-col="visto"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderDevicesTable()" /></th>
+          </tr>
+          </thead>
+          <tbody id="devices-body"><tr><td colspan="11" class="empty">Sin datos</td></tr></tbody>
         </table>
       </div>
       <div id="device-detail" class="device-detail"></div>
@@ -321,104 +623,594 @@
   <section id="tab-flows" class="tab">
     <div class="card">
       <div class="flex-between">
-        <h2>Flujos (sesiones TCP/UDP) — quién conversa con quién</h2>
+        <h2 data-i18n="flows.title">Flujos (sesiones TCP/UDP) — quién conversa con quién</h2>
         <div class="row">
+          <span id="flows-refresh-timer" class="refresh-timer"></span>
+          <label style="display:inline-flex;align-items:center;gap:6px;margin:0;" title="Un equipo se marca Externo cuando nunca se le capturó transmitiendo (sin MAC) y su IP parece pública -- es decir, fuera de esta red, alcanzado solo a través de un router.">
+            <input type="checkbox" id="hide-external-flows-checkbox" style="width:auto" /> <span data-i18n="flows.hide_external">Ocultar flujos externos</span>
+          </label>
           <select id="flow-category-filter">
-            <option value="">Todas las categorías</option>
-            <option value="OT">Solo OT</option>
-            <option value="IT">Solo IT</option>
+            <option value="" data-i18n="flows.all_categories">Todas las categorías</option>
+            <option value="OT" data-i18n="flows.ot_only">Solo OT</option>
+            <option value="IT" data-i18n="flows.it_only">Solo IT</option>
           </select>
-          <button class="action secondary" id="refresh-flows-btn">Actualizar</button>
+          <button class="action secondary" onclick="clearColumnFilters('flows-body', renderFlowsTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
         </div>
       </div>
       <div class="stat-row" id="flows-stats"></div>
-      <table>
-        <thead><tr><th>Origen</th><th></th><th>Destino</th><th>Protocolo</th><th>Puerto</th><th>Transporte</th><th>Paquetes</th><th>Primero</th><th>Último</th></tr></thead>
-        <tbody id="flows-body"><tr><td colspan="9" class="empty">Sin datos</td></tr></tbody>
-      </table>
+      <div class="table-scroll" id="flows-scroll">
+        <table>
+          <thead>
+          <tr><th data-i18n="flows.col_source">Origen</th><th data-i18n="flows.col_dest">Destino</th><th data-i18n="flows.col_protocol">Protocolo</th><th data-i18n="flows.col_port">Puerto</th><th data-i18n="flows.col_transport">Transporte</th><th data-i18n="flows.col_packets">Paquetes</th><th data-i18n="flows.col_first">Primero</th><th data-i18n="flows.col_last">Último</th></tr>
+          <tr class="filter-row">
+            <th data-col="origen"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="destino"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="protocolo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="puerto"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="transporte"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="paquetes"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="primero"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+            <th data-col="ultimo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFlowsTable()" /></th>
+          </tr>
+          </thead>
+          <tbody id="flows-body"><tr><td colspan="8" class="empty">Sin datos</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
   <section id="tab-vulns" class="tab">
     <div class="card">
       <div class="flex-between">
-        <h2>Hallazgos de vulnerabilidades</h2>
+        <h2 data-i18n="vulns.title">Hallazgos de vulnerabilidades</h2>
         <div class="row">
+          <span id="vuln-scan-timer" class="refresh-timer"></span>
           <select id="severity-filter">
-            <option value="">Todas las severidades</option>
+            <option value="" data-i18n="vulns.all_severities">Todas las severidades</option>
             <option value="critical">Critical</option>
             <option value="high">High</option>
             <option value="medium">Medium</option>
             <option value="low">Low</option>
             <option value="info">Info</option>
           </select>
-          <button class="action secondary" id="refresh-findings-btn">Actualizar</button>
-          <button class="action editor-only" id="scan-all-btn">Ejecutar escaneo completo</button>
+          <button class="action secondary" onclick="clearColumnFilters('findings-body', renderFindingsTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
+          <button class="action secondary" id="export-vuln-pdf-btn" data-i18n="vulns.export_pdf">Exportar PDF</button>
+          <button class="action admin-only" id="scan-all-btn" data-i18n="vulns.scan_all">Ejecutar escaneo completo</button>
         </div>
       </div>
       <div class="stat-row" id="vulns-stats"></div>
-      <table>
-        <thead><tr><th>Severidad</th><th>Dispositivo</th><th>Nombre</th><th>Hallazgo</th><th>Fuente</th><th>Evidencia</th></tr></thead>
-        <tbody id="findings-body"><tr><td colspan="6" class="empty">Sin datos</td></tr></tbody>
-      </table>
+      <div class="table-scroll" id="findings-scroll">
+        <table>
+          <thead>
+          <tr><th data-i18n="vulns.col_severity">Severidad</th><th data-i18n="vulns.col_device">Dispositivo</th><th data-i18n="vulns.col_name">Nombre</th><th data-i18n="vulns.col_finding">Hallazgo</th><th data-i18n="vulns.col_source">Fuente</th><th data-i18n="vulns.col_evidence">Evidencia</th></tr>
+          <tr class="filter-row">
+            <th data-col="severidad"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="dispositivo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="nombre"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="hallazgo"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="fuente"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+            <th data-col="evidencia"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderFindingsTable()" /></th>
+          </tr>
+          </thead>
+          <tbody id="findings-body"><tr><td colspan="6" class="empty">Sin datos</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
   <section id="tab-users" class="tab">
+    <div class="muted" id="users-org-note" style="font-size:12.5px; margin: -4px 0 12px;"></div>
     <div class="card">
-      <h2>Crear usuario</h2>
+      <h2 data-i18n="users.create_title">Crear usuario</h2>
       <div class="row">
         <div>
-          <label>Usuario</label>
+          <label data-i18n="users.username">Usuario</label>
           <input id="new-user-username" />
         </div>
         <div>
-          <label>Contraseña</label>
+          <label data-i18n="users.password">Contraseña</label>
           <input id="new-user-password" type="password" />
         </div>
         <div>
-          <label>Perfil</label>
+          <label data-i18n="users.role">Perfil</label>
           <select id="new-user-role">
-            <option value="viewer">Visualizador</option>
-            <option value="editor">Editor</option>
+            <option value="viewer" data-i18n="users.role_viewer">Visualizador</option>
+            <option value="admin" data-i18n="users.role_admin">Administrador</option>
+            <option value="super_admin" class="super-admin-only hidden" data-i18n="users.role_super_admin">Super Admin</option>
           </select>
         </div>
-        <button class="action" id="create-user-btn">Crear</button>
+        <button class="action" id="create-user-btn" data-i18n="users.create_btn">Crear</button>
       </div>
       <div id="create-user-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
     </div>
 
     <div class="card">
       <div class="flex-between">
-        <h2>Usuarios</h2>
-        <button class="action secondary" id="refresh-users-btn">Actualizar</button>
+        <h2 data-i18n="users.title">Usuarios</h2>
+        <button class="action secondary" onclick="clearColumnFilters('users-body', renderUsersTable)" data-i18n="common.clear_filters">Limpiar filtros</button>
       </div>
       <table>
-        <thead><tr><th>Usuario</th><th>Perfil</th><th>Creado</th><th></th></tr></thead>
+        <thead>
+        <tr><th data-i18n="users.username">Usuario</th><th data-i18n="users.role">Perfil</th><th data-i18n="users.col_created">Creado</th><th></th></tr>
+        <tr class="filter-row">
+          <th data-col="usuario"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderUsersTable()" /></th>
+          <th data-col="perfil"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderUsersTable()" /></th>
+          <th data-col="creado"><input type="search" class="col-filter" placeholder="Filtrar…" oninput="renderUsersTable()" /></th>
+          <th></th>
+        </tr>
+        </thead>
         <tbody id="users-body"><tr><td colspan="4" class="empty">Sin datos</td></tr></tbody>
       </table>
+    </div>
+  </section>
+
+  <section id="tab-reports" class="tab">
+    <div class="card">
+      <div class="flex-between">
+        <h2 data-i18n="reports.title">Reporte</h2>
+        <button class="action secondary" id="export-full-report-pdf-btn" data-i18n="reports.export_pdf">Exportar PDF</button>
+      </div>
+      <p class="muted" style="margin:0 0 14px; font-size:12.5px;" data-i18n="reports.intro">
+        Resumen combinado de inventario, vulnerabilidades y capturas.
+      </p>
+      <div class="stat-row" id="reports-stats"></div>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="reports.inventory_title">Inventario</h2>
+      <div class="stat-row" id="reports-inventory-stats"></div>
+      <table>
+        <thead><tr><th data-i18n="reports.col_type">Tipo</th><th data-i18n="reports.col_count">Cantidad</th></tr></thead>
+        <tbody id="reports-inventory-body"><tr><td colspan="2" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="reports.captures_title">Capturas</h2>
+      <table>
+        <thead><tr><th data-i18n="capture.col_name">Nombre</th><th data-i18n="capture.col_type">Tipo</th><th data-i18n="capture.col_status">Estado</th><th data-i18n="capture.col_packets">Paquetes</th><th data-i18n="capture.col_start">Inicio</th></tr></thead>
+        <tbody id="reports-captures-body"><tr><td colspan="5" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="reports.vulns_title">Vulnerabilidades</h2>
+      <div class="stat-row" id="reports-vulns-stats"></div>
+      <table>
+        <thead><tr><th data-i18n="vulns.col_severity">Severidad</th><th data-i18n="vulns.col_device">Dispositivo</th><th data-i18n="vulns.col_finding">Hallazgo</th></tr></thead>
+        <tbody id="reports-vulns-body"><tr><td colspan="3" class="empty">Sin datos</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-create-site" class="tab admin-only">
+    <div class="card">
+      <h2 data-i18n="infra.create_site_title">Crear sitio</h2>
+      <div class="row">
+        <div>
+          <label data-i18n="infra.site_name">Nombre</label>
+          <input id="new-site-name" placeholder="Planta Bogotá" />
+        </div>
+        <div>
+          <label data-i18n="infra.site_city">Ciudad</label>
+          <input id="new-site-city" />
+        </div>
+        <div>
+          <label data-i18n="infra.site_country">País</label>
+          <input id="new-site-country" />
+        </div>
+        <div>
+          <label data-i18n="infra.site_timezone">Zona horaria</label>
+          <input id="new-site-timezone" placeholder="America/Bogota" />
+        </div>
+        <div class="super-admin-only hidden">
+          <label data-i18n="infra.organization">Organización</label>
+          <select id="new-site-organization"></select>
+        </div>
+        <button class="action" id="create-site-btn" data-i18n="infra.create_btn">Crear</button>
+      </div>
+      <div id="create-site-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
+    </div>
+  </section>
+
+  <section id="tab-create-zone" class="tab admin-only">
+    <div class="card">
+      <h2 data-i18n="infra.create_zone_title">Crear zona</h2>
+      <div class="row">
+        <div>
+          <label data-i18n="infra.zone_site">Sitio</label>
+          <select id="new-zone-site"></select>
+        </div>
+        <div>
+          <label data-i18n="infra.zone_name">Nombre</label>
+          <input id="new-zone-name" placeholder="Línea 1" />
+        </div>
+        <div>
+          <label data-i18n="infra.zone_description">Descripción</label>
+          <input id="new-zone-description" />
+        </div>
+        <div>
+          <label data-i18n="infra.zone_security_level">Nivel de seguridad (IEC 62443)</label>
+          <select id="new-zone-security-level">
+            <option value="" data-i18n="infra.security_level_none">Sin clasificar</option>
+            <option value="SL0">SL0</option>
+            <option value="SL1">SL1</option>
+            <option value="SL2">SL2</option>
+            <option value="SL3">SL3</option>
+            <option value="SL4">SL4</option>
+          </select>
+        </div>
+        <button class="action" id="create-zone-btn" data-i18n="infra.create_btn">Crear</button>
+      </div>
+      <div id="create-zone-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
+    </div>
+  </section>
+
+  <section id="tab-create-sensor" class="tab admin-only">
+    <div class="card">
+      <h2 data-i18n="infra.create_sensor_title">Crear sensor</h2>
+      <div class="row">
+        <div>
+          <label data-i18n="infra.sensor_zone">Zona</label>
+          <select id="new-sensor-zone"></select>
+        </div>
+        <div>
+          <label data-i18n="infra.sensor_name">Nombre</label>
+          <input id="new-sensor-name" placeholder="Sensor línea 1" />
+        </div>
+        <div>
+          <label data-i18n="infra.sensor_description">Descripción</label>
+          <input id="new-sensor-description" />
+        </div>
+        <div>
+          <label data-i18n="infra.sensor_kind">Tipo</label>
+          <select id="new-sensor-kind">
+            <option value="live" data-i18n="infra.sensor_kind_live">En vivo</option>
+            <option value="external" data-i18n="infra.sensor_kind_external">Externo (solo pcap)</option>
+          </select>
+        </div>
+        <button class="action" id="create-sensor-btn" data-i18n="infra.create_btn">Crear</button>
+      </div>
+      <div id="create-sensor-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
+    </div>
+  </section>
+
+  <section id="tab-create-org" class="tab super-admin-only hidden">
+    <div class="card">
+      <h2 data-i18n="orgs.create_title">Crear organización</h2>
+      <div class="row">
+        <div>
+          <label data-i18n="orgs.name">Nombre</label>
+          <input id="new-org-name" placeholder="Cervecería SA" />
+        </div>
+        <div>
+          <label data-i18n="orgs.slug">Identificador</label>
+          <input id="new-org-slug" placeholder="cerveceria-sa" />
+        </div>
+        <div>
+          <label data-i18n="orgs.deployment_mode">Modo</label>
+          <select id="new-org-deployment-mode">
+            <option value="managed" data-i18n="orgs.deployment_managed">Consola central</option>
+            <option value="self_hosted" data-i18n="orgs.deployment_self_hosted">Auto-alojado</option>
+          </select>
+        </div>
+        <div>
+          <label data-i18n="orgs.admin_username">Usuario admin</label>
+          <input id="new-org-admin-username" />
+        </div>
+        <div>
+          <label data-i18n="orgs.admin_password">Contraseña admin</label>
+          <input id="new-org-admin-password" type="password" />
+        </div>
+        <button class="action" id="create-org-btn" data-i18n="orgs.create_btn">Crear</button>
+      </div>
+      <div id="create-org-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
     </div>
   </section>
 
   </main>
 </div>
 
+<div id="print-report"></div>
+
 <script>
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+// ---------- theme (light/dark) ----------
+const THEME_STORAGE_KEY = 'tridentyot_theme';
+
+function getStoredTheme() {
+  return localStorage.getItem(THEME_STORAGE_KEY); // 'light' | 'dark' | null (follow OS)
+}
+
+function applyStoredTheme() {
+  const stored = getStoredTheme();
+  if (stored) document.documentElement.setAttribute('data-theme', stored);
+  else document.documentElement.removeAttribute('data-theme');
+}
+
+function effectiveTheme() {
+  return getStoredTheme() || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+}
+
+function updateThemeToggleUI() {
+  const isLight = effectiveTheme() === 'light';
+  const label = $('#theme-toggle-label');
+  if (label) label.textContent = isLight ? 'Claro' : 'Oscuro';
+  const switchEl = $('#theme-switch');
+  if (switchEl) switchEl.classList.toggle('is-light', isLight);
+
+  const loginLogo = $('#login-logo');
+  if (loginLogo) loginLogo.src = isLight ? '/brand/mark_dark.png' : '/brand/mark_light.png';
+  const sidebarLogo = $('#sidebar-logo');
+  if (sidebarLogo) sidebarLogo.src = isLight ? '/brand/lockup_dark.png' : '/brand/lockup_light.png';
+}
+
+function toggleTheme() {
+  const next = effectiveTheme() === 'light' ? 'dark' : 'light';
+  localStorage.setItem(THEME_STORAGE_KEY, next);
+  applyStoredTheme();
+  updateThemeToggleUI();
+}
+
+// Apply immediately (before login screen renders) to avoid a flash of the wrong theme.
+applyStoredTheme();
+
+// ---------- language (es/en) ----------
+// Covers interface chrome (nav, section titles, table headers, forms) --
+// see [data-i18n] markup above. Content generated at detection time
+// (device_type_evidence, vulnerability title/description/evidence)
+// already comes back translated from the API, per the requesting user's
+// locale -- see app/i18n on the backend. Text built by the render*Table()
+// functions below (status labels, "Detener"/"Borrar" buttons, empty-state
+// messages) is not yet covered by this dictionary and still renders in
+// Spanish regardless of locale.
+const LOCALE_STORAGE_KEY = 'tridentyot_locale';
+
+const I18N = {
+  'app.subtitle': { es: 'Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)', en: 'Passive network inventory and vulnerability analysis (IT/OT)' },
+  'nav.capture': { es: 'Captura', en: 'Capture' },
+  'nav.inventory': { es: 'Inventario', en: 'Inventory' },
+  'nav.flows': { es: 'Flujos', en: 'Flows' },
+  'nav.vulns': { es: 'Vulnerabilidades', en: 'Vulnerabilities' },
+  'nav.users': { es: 'Usuarios', en: 'Users' },
+  'nav.logout': { es: 'Cerrar sesión', en: 'Log out' },
+  'login.title': { es: 'Ingresa a TridentyOT', en: 'Sign in to TridentyOT' },
+  'login.username': { es: 'Usuario', en: 'Username' },
+  'login.password': { es: 'Contraseña', en: 'Password' },
+  'login.submit': { es: 'Entrar', en: 'Sign in' },
+  'common.clear_filters': { es: 'Limpiar filtros', en: 'Clear filters' },
+  'capture.live_title': { es: 'Captura en vivo', en: 'Live capture' },
+  'capture.sensor': { es: 'Sensor', en: 'Sensor' },
+  'capture.pcap_sensor_hint': { es: 'Se asocia al sensor seleccionado arriba.', en: 'Attributed to the sensor selected above.' },
+  'capture.external_title': { es: 'Sensor externo', en: 'External sensor' },
+  'capture.external_hint': {
+    es: 'Este sensor es externo: todavía no admite conexión remota, así que no puede iniciar una captura en vivo desde este servidor. Por ahora, analizá lo que capture adjuntando el archivo .pcap/.pcapng generado por él.',
+    en: "This sensor is external: it doesn't support a remote connection yet, so it can't start a live capture from this server. For now, analyze what it captures by uploading the .pcap/.pcapng file it generates.",
+  },
+  'capture.interface': { es: 'Interfaz de red', en: 'Network interface' },
+  'capture.bpf_filter': { es: 'Filtro BPF', en: 'BPF filter' },
+  'capture.start': { es: 'Iniciar captura', en: 'Start capture' },
+  'capture.live_hint': {
+    es: 'Requiere que el proceso tenga permisos de captura raw (root o CAP_NET_RAW) y que libpcap esté disponible en el host, además de estar conectado a un puerto SPAN/mirror o al segmento a inspeccionar.',
+    en: 'Requires the process to have raw-capture privileges (root or CAP_NET_RAW) and libpcap available on the host, and to be connected to a SPAN/mirror port or the segment being inspected.',
+  },
+  'capture.pcap_title': { es: 'Analizar archivo .pcap / .pcapng', en: 'Analyze a .pcap / .pcapng file' },
+  'capture.dropzone_text': { es: 'Arrastra aquí un archivo <b>.pcap</b>/<b>.pcapng</b>, o', en: 'Drop a <b>.pcap</b>/<b>.pcapng</b> file here, or' },
+  'capture.dropzone_pick': { es: 'selecciónalo', en: 'choose one' },
+  'capture.sessions_title': { es: 'Sesiones de captura', en: 'Capture sessions' },
+  'capture.viewer_note': {
+    es: 'Perfil visualizador: solo lectura, no puedes iniciar/detener capturas ni subir archivos.',
+    en: 'Viewer role: read-only, you cannot start/stop captures or upload files.',
+  },
+  'capture.col_id': { es: 'ID', en: 'ID' },
+  'capture.col_name': { es: 'Nombre', en: 'Name' },
+  'capture.col_type': { es: 'Tipo', en: 'Type' },
+  'capture.col_source': { es: 'Origen', en: 'Source' },
+  'capture.col_status': { es: 'Estado', en: 'Status' },
+  'capture.col_progress': { es: 'Avance', en: 'Progress' },
+  'capture.col_packets': { es: 'Paquetes', en: 'Packets' },
+  'capture.col_start': { es: 'Inicio', en: 'Started' },
+  'capture.danger_title': { es: 'Zona de peligro', en: 'Danger zone' },
+  'capture.danger_text': {
+    es: 'Borra todas las sesiones de captura, dispositivos, protocolos, flujos y hallazgos de vulnerabilidades -- para arrancar una captura completamente en blanco. Los usuarios no se ven afectados. <b>Esta acción no se puede deshacer.</b>',
+    en: 'Deletes every capture session, device, protocol, flow, and vulnerability finding -- for starting a completely blank capture. User accounts are unaffected. <b>This action cannot be undone.</b>',
+  },
+  'capture.wipe_btn': { es: 'Borrar toda la base de datos', en: 'Wipe entire database' },
+  'inventory.title': { es: 'Dispositivos detectados', en: 'Detected devices' },
+  'inventory.ot_only': { es: 'Solo dispositivos OT', en: 'OT devices only' },
+  'inventory.hide_external': { es: 'Ocultar equipos externos', en: 'Hide external devices' },
+  'inventory.columns_btn': { es: 'Columnas', en: 'Columns' },
+  'inventory.columns_title': { es: 'Columnas visibles', en: 'Visible columns' },
+  'inventory.col_ip': { es: 'IP', en: 'IP' },
+  'inventory.col_name': { es: 'Nombre', en: 'Name' },
+  'inventory.col_type': { es: 'Tipo', en: 'Type' },
+  'inventory.col_subtype': { es: 'Subtipo', en: 'Subtype' },
+  'inventory.col_vendor': { es: 'Fabricante', en: 'Vendor' },
+  'inventory.col_reference': { es: 'Referencia', en: 'Reference' },
+  'inventory.col_os': { es: 'SO estimado', en: 'Estimated OS' },
+  'inventory.col_confidence': { es: 'Confianza', en: 'Confidence' },
+  'inventory.col_protocols': { es: 'Protocolos', en: 'Protocols' },
+  'inventory.col_last_seen': { es: 'Últ. visto', en: 'Last seen' },
+  'flows.title': { es: 'Flujos (sesiones TCP/UDP) — quién conversa con quién', en: 'Flows (TCP/UDP sessions) — who talks to whom' },
+  'flows.hide_external': { es: 'Ocultar flujos externos', en: 'Hide external flows' },
+  'flows.all_categories': { es: 'Todas las categorías', en: 'All categories' },
+  'flows.ot_only': { es: 'Solo OT', en: 'OT only' },
+  'flows.it_only': { es: 'Solo IT', en: 'IT only' },
+  'flows.col_source': { es: 'Origen', en: 'Source' },
+  'flows.col_dest': { es: 'Destino', en: 'Destination' },
+  'flows.col_protocol': { es: 'Protocolo', en: 'Protocol' },
+  'flows.col_port': { es: 'Puerto', en: 'Port' },
+  'flows.col_transport': { es: 'Transporte', en: 'Transport' },
+  'flows.col_packets': { es: 'Paquetes', en: 'Packets' },
+  'flows.col_first': { es: 'Primero', en: 'First' },
+  'flows.col_last': { es: 'Último', en: 'Last' },
+  'vulns.title': { es: 'Hallazgos de vulnerabilidades', en: 'Vulnerability findings' },
+  'vulns.all_severities': { es: 'Todas las severidades', en: 'All severities' },
+  'vulns.export_pdf': { es: 'Exportar PDF', en: 'Export PDF' },
+  'vulns.scan_all': { es: 'Ejecutar escaneo completo', en: 'Run full scan' },
+  'vulns.col_severity': { es: 'Severidad', en: 'Severity' },
+  'vulns.col_device': { es: 'Dispositivo', en: 'Device' },
+  'vulns.col_name': { es: 'Nombre', en: 'Name' },
+  'vulns.col_finding': { es: 'Hallazgo', en: 'Finding' },
+  'vulns.col_source': { es: 'Fuente', en: 'Source' },
+  'vulns.col_evidence': { es: 'Evidencia', en: 'Evidence' },
+  'users.create_title': { es: 'Crear usuario', en: 'Create user' },
+  'users.username': { es: 'Usuario', en: 'Username' },
+  'users.password': { es: 'Contraseña', en: 'Password' },
+  'users.role': { es: 'Perfil', en: 'Role' },
+  'users.role_viewer': { es: 'Visualizador', en: 'Viewer' },
+  'users.role_admin': { es: 'Administrador', en: 'Admin' },
+  'users.role_super_admin': { es: 'Super Admin', en: 'Super Admin' },
+  'users.create_btn': { es: 'Crear', en: 'Create' },
+  'users.title': { es: 'Usuarios', en: 'Users' },
+  'users.col_created': { es: 'Creado', en: 'Created' },
+  'infra.create_site_title': { es: 'Crear sitio', en: 'Create site' },
+  'infra.site_name': { es: 'Nombre', en: 'Name' },
+  'infra.site_city': { es: 'Ciudad', en: 'City' },
+  'infra.site_country': { es: 'País', en: 'Country' },
+  'infra.site_timezone': { es: 'Zona horaria', en: 'Timezone' },
+  'infra.organization': { es: 'Organización', en: 'Organization' },
+  'infra.create_btn': { es: 'Crear', en: 'Create' },
+  'infra.sites_title': { es: 'Sitios', en: 'Sites' },
+  'infra.create_zone_title': { es: 'Crear zona', en: 'Create zone' },
+  'infra.zone_site': { es: 'Sitio', en: 'Site' },
+  'infra.zone_name': { es: 'Nombre', en: 'Name' },
+  'infra.zone_description': { es: 'Descripción', en: 'Description' },
+  'infra.zone_security_level': { es: 'Nivel de seguridad (IEC 62443)', en: 'Security level (IEC 62443)' },
+  'infra.security_level_none': { es: 'Sin clasificar', en: 'Unclassified' },
+  'infra.zones_title': { es: 'Zonas', en: 'Zones' },
+  'infra.create_sensor_title': { es: 'Crear sensor', en: 'Create sensor' },
+  'infra.sensor_zone': { es: 'Zona', en: 'Zone' },
+  'infra.sensor_name': { es: 'Nombre', en: 'Name' },
+  'infra.sensor_description': { es: 'Descripción', en: 'Description' },
+  'infra.sensor_kind': { es: 'Tipo', en: 'Kind' },
+  'infra.sensor_kind_live': { es: 'En vivo', en: 'Live' },
+  'infra.sensor_kind_external': { es: 'Externo (solo pcap)', en: 'External (pcap only)' },
+  'infra.sensors_title': { es: 'Sensores', en: 'Sensors' },
+  'orgs.create_title': { es: 'Crear organización', en: 'Create organization' },
+  'orgs.name': { es: 'Nombre', en: 'Name' },
+  'orgs.slug': { es: 'Identificador', en: 'Slug' },
+  'orgs.deployment_mode': { es: 'Modo', en: 'Mode' },
+  'orgs.deployment_managed': { es: 'Consola central', en: 'Central console' },
+  'orgs.deployment_self_hosted': { es: 'Auto-alojado', en: 'Self-hosted' },
+  'orgs.admin_username': { es: 'Usuario admin', en: 'Admin username' },
+  'orgs.admin_password': { es: 'Contraseña admin', en: 'Admin password' },
+  'orgs.create_btn': { es: 'Crear', en: 'Create' },
+  'orgs.title': { es: 'Organizaciones', en: 'Organizations' },
+  'reports.title': { es: 'Reporte', en: 'Report' },
+  'reports.export_pdf': { es: 'Exportar PDF', en: 'Export PDF' },
+  'reports.intro': {
+    es: 'Resumen combinado de inventario, vulnerabilidades y capturas.',
+    en: 'Combined summary of inventory, vulnerabilities, and captures.',
+  },
+  'reports.inventory_title': { es: 'Inventario', en: 'Inventory' },
+  'reports.col_type': { es: 'Tipo', en: 'Type' },
+  'reports.col_count': { es: 'Cantidad', en: 'Count' },
+  'reports.captures_title': { es: 'Capturas', en: 'Captures' },
+  'reports.vulns_title': { es: 'Vulnerabilidades', en: 'Vulnerabilities' },
+};
+
+function getStoredLocale() {
+  return localStorage.getItem(LOCALE_STORAGE_KEY); // 'es' | 'en' | null
+}
+
+function currentLocale() {
+  return (currentUser && currentUser.locale) || getStoredLocale() || 'es';
+}
+
+function applyTranslations() {
+  const locale = currentLocale();
+  document.documentElement.lang = locale;
+  $$('[data-i18n]').forEach(el => {
+    const entry = I18N[el.dataset.i18n];
+    if (!entry) return;
+    const text = entry[locale] || entry.es;
+    if (el.hasAttribute('data-i18n-html')) el.innerHTML = text;
+    else el.textContent = text;
+  });
+  updateLangToggleUI();
+}
+
+function updateLangToggleUI() {
+  const isEn = currentLocale() === 'en';
+  const label = $('#lang-toggle-label');
+  if (label) label.textContent = isEn ? 'EN' : 'ES';
+  const switchEl = $('#lang-switch');
+  if (switchEl) switchEl.classList.toggle('is-light', isEn);
+}
+
+async function setLocale(locale) {
+  localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+  if (currentUser) currentUser.locale = locale;
+  applyTranslations();
+  if (getToken()) {
+    try {
+      await api('/api/auth/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locale }),
+      });
+    } catch (e) { /* best-effort: the toggle already applied locally */ }
+  }
+}
+
+function toggleLocale() {
+  setLocale(currentLocale() === 'es' ? 'en' : 'es');
+}
+
 let currentUser = null;
 
-function isEditor() {
-  return !!currentUser && currentUser.role === 'editor';
+// Apply immediately (before login screen renders), same reasoning as the theme above.
+applyTranslations();
+
+let autoRefreshTimer = null;
+let countdownTimer = null;
+let vulnScanTimer = null;
+let nextRefreshAt = null;
+let nextVulnScanAt = null;
+const AUTO_REFRESH_MS = 15000;
+const VULN_AUTO_SCAN_MS = 60000;
+
+function stopBackgroundTimers() {
+  [autoRefreshTimer, countdownTimer, vulnScanTimer].forEach(t => { if (t) clearInterval(t); });
+  autoRefreshTimer = countdownTimer = vulnScanTimer = null;
+  nextRefreshAt = nextVulnScanAt = null;
+}
+
+function updateCountdowns() {
+  const secsLeft = (target) => target ? Math.max(0, Math.round((target - Date.now()) / 1000)) : null;
+  const refreshSecs = secsLeft(nextRefreshAt);
+  const refreshLabel = refreshSecs === null ? '' : `Se actualiza en ${refreshSecs}s`;
+  const invTimer = $('#inventory-refresh-timer');
+  if (invTimer) invTimer.textContent = refreshLabel;
+  const flowTimer = $('#flows-refresh-timer');
+  if (flowTimer) flowTimer.textContent = refreshLabel;
+
+  const scanSecs = secsLeft(nextVulnScanAt);
+  const vulnTimer = $('#vuln-scan-timer');
+  if (vulnTimer) vulnTimer.textContent = scanSecs === null ? '' : `Próximo reporte automático en ${scanSecs}s`;
+}
+
+function isAdmin() {
+  return !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin');
+}
+
+function isSuperAdmin() {
+  return !!currentUser && currentUser.role === 'super_admin';
 }
 
 function applyRoleVisibility() {
-  const editor = isEditor();
-  $$('.editor-only').forEach(el => el.classList.toggle('hidden', !editor));
-  $$('.viewer-only').forEach(el => el.classList.toggle('hidden', editor));
-  $('#nav-users').classList.toggle('hidden', !editor);
+  const admin = isAdmin();
+  const superAdmin = isSuperAdmin();
+  $$('.admin-only').forEach(el => el.classList.toggle('hidden', !admin));
+  $$('.super-admin-only').forEach(el => el.classList.toggle('hidden', !superAdmin));
+  $$('.viewer-only').forEach(el => el.classList.toggle('hidden', admin));
+  renderSidebarRail();
 }
+
+const ROLE_LABELS = { super_admin: 'Super Admin', admin: 'Administrador', viewer: 'Visualizador' };
 
 // ---------- auth ----------
 function getToken() {
@@ -440,6 +1232,19 @@ function showAppShell() {
   $('#app-shell').classList.remove('hidden');
 }
 
+// FastAPI's own request-validation errors (422, e.g. a field failing a
+// regex pattern) send `detail` as a list of {msg, loc, ...} objects, not a
+// string like every hand-written HTTPException in this app uses --
+// new Error(thatArray) would otherwise stringify to "[object Object]".
+function formatErrorDetail(detail) {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(d => (d && typeof d === 'object' && d.msg) ? d.msg : JSON.stringify(d)).join('; ');
+  }
+  if (detail && typeof detail === 'object') return JSON.stringify(detail);
+  return String(detail);
+}
+
 async function api(path, options = {}) {
   const headers = Object.assign({}, options.headers || {});
   const token = getToken();
@@ -447,6 +1252,7 @@ async function api(path, options = {}) {
 
   const res = await fetch(path, Object.assign({}, options, { headers }));
   if (res.status === 401) {
+    stopBackgroundTimers();
     setToken(null);
     currentUser = null;
     showLoginScreen();
@@ -454,8 +1260,11 @@ async function api(path, options = {}) {
   }
   if (!res.ok) {
     let detail = res.statusText;
-    try { detail = (await res.json()).detail || detail; } catch (e) {}
-    throw new Error(detail);
+    try {
+      const body = await res.json();
+      if (body && body.detail !== undefined && body.detail !== null) detail = body.detail;
+    } catch (e) {}
+    throw new Error(formatErrorDetail(detail));
   }
   if (res.status === 204) return null;
   return res.json();
@@ -464,15 +1273,47 @@ async function api(path, options = {}) {
 async function bootstrapAfterLogin() {
   currentUser = await api('/api/auth/me');
   $('#current-username').textContent = currentUser.username;
-  $('#current-role').textContent = currentUser.role === 'editor' ? 'Editor' : 'Visualizador';
+  $('#current-role').textContent = ROLE_LABELS[currentUser.role] || currentUser.role;
+  applyTranslations(); // the account's saved locale (currentUser.locale) now takes over from any local guess
   applyRoleVisibility();
   showAppShell();
+  // A Super Admin has no organization of its own -- Captura (the default
+  // tab) has nothing for it to do. Land it on "crear organización" instead,
+  // where creating the first organization is the actual first step.
+  if (isSuperAdmin()) activateTab('create-org');
   loadInterfaces();
+  refreshAllData();
+
+  stopBackgroundTimers();
+  nextRefreshAt = Date.now() + AUTO_REFRESH_MS;
+  nextVulnScanAt = Date.now() + VULN_AUTO_SCAN_MS;
+  autoRefreshTimer = setInterval(() => { refreshAllData(); nextRefreshAt = Date.now() + AUTO_REFRESH_MS; }, AUTO_REFRESH_MS);
+  vulnScanTimer = setInterval(() => { autoScanVulnerabilities(); nextVulnScanAt = Date.now() + VULN_AUTO_SCAN_MS; }, VULN_AUTO_SCAN_MS);
+  countdownTimer = setInterval(updateCountdowns, 1000);
+  updateCountdowns();
+}
+
+async function refreshAllData() {
   loadSessions();
-  loadDevices();
+  await loadDevices();
   loadFlows();
   loadFindings();
-  if (isEditor()) loadUsers();
+  if (isAdmin()) loadUsers();
+  loadSites();
+  loadZones();
+  loadSensors();
+  if (isSuperAdmin()) loadOrganizations();
+}
+
+async function autoScanVulnerabilities() {
+  try {
+    await api('/api/vuln/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ use_nvd: false }),
+    });
+  } catch (e) { /* transient failure -- the next minute's tick retries */ }
+  loadFindings();
 }
 
 $('#login-form').addEventListener('submit', async (e) => {
@@ -499,6 +1340,7 @@ $('#login-form').addEventListener('submit', async (e) => {
 });
 
 $('#logout-btn').addEventListener('click', async () => {
+  stopBackgroundTimers();
   try { await api('/api/auth/logout', { method: 'POST' }); } catch (e) {}
   setToken(null);
   currentUser = null;
@@ -506,17 +1348,28 @@ $('#logout-btn').addEventListener('click', async () => {
 });
 
 function activateTab(name) {
-  $$('.sidebar nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  // Defaults to "nothing selected" on every switch; selectZoneLeaf() (for a
+  // Zona's Captura/Inventario/Flujos/Vulnerabilidades) and selectSiteLeaf()
+  // (for a Sitio's Reportes) set the relevant ones back right after calling
+  // this. Also closes whichever flyout panel was open, since its contents
+  // no longer describe what's on screen.
+  selectedZoneId = null;
+  selectedSiteId = null;
+  selectedLeafTab = null;
+  activeRailKey = null;
+  openFlyoutKey = null;
+  const breadcrumb = $('#zone-breadcrumb');
+  if (breadcrumb) breadcrumb.classList.add('hidden');
+
   $$('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + name));
   // Row heights can only be measured once the tab's container is actually
   // visible (display:block) -- a tab loaded in the background while hidden
   // would otherwise measure everything as 0px.
   if (name === 'inventory') fitTableScroll('devices-scroll');
+  if (name === 'flows') fitTableScroll('flows-scroll');
+  if (name === 'vulns') fitTableScroll('findings-scroll');
+  renderSidebarRail();
 }
-
-$$('.sidebar nav button').forEach(btn => {
-  btn.addEventListener('click', () => activateTab(btn.dataset.tab));
-});
 
 async function jumpToDevice(deviceId) {
   activateTab('inventory');
@@ -544,21 +1397,41 @@ async function loadInterfaces() {
   }
 }
 
+function progressCell(s) {
+  if (s.source_type !== 'pcap' || s.progress_percent === null || s.progress_percent === undefined) {
+    return '<span class="muted">—</span>';
+  }
+  return `<div class="progress-cell">
+    <div class="progress-track"><div class="progress-fill" style="width:${s.progress_percent}%"></div></div>
+    <span class="progress-pct">${s.progress_percent}%</span>
+  </div>`;
+}
+
+let allSessions = [];
+
 async function loadSessions() {
+  allSessions = await api(`/api/capture/sessions${zoneFilterQuery()}`);
+  renderSessionsTable();
+  renderReportsTab();
+}
+
+function renderSessionsTable() {
   const tbody = $('#sessions-body');
-  const sessions = await api('/api/capture/sessions');
-  if (!sessions.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin sesiones aún</td></tr>'; return; }
-  const editor = isEditor();
-  tbody.innerHTML = sessions.map(s => `
+  if (!allSessions.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin sesiones aún</td></tr>'; return; }
+  const admin = isAdmin();
+  tbody.innerHTML = allSessions.map(s => `
     <tr>
-      <td>${s.id}</td><td>${s.name}</td><td>${s.source_type}</td><td>${s.source}</td>
-      <td class="status-${s.status}">${s.status}${s.error_message ? ' — ' + s.error_message : ''}</td>
-      <td>${s.packet_count}</td><td>${fmtDate(s.started_at)}</td>
+      <td data-col="id">${s.id}</td><td data-col="nombre">${s.name}</td><td data-col="tipo">${s.source_type}</td><td data-col="origen">${s.source}</td>
+      <td data-col="estado" class="status-${s.status}">${s.status}${s.error_message ? ' — ' + s.error_message : ''}</td>
+      <td>${progressCell(s)}</td>
+      <td data-col="paquetes">${s.packet_count}</td><td data-col="inicio">${fmtDate(s.started_at)}</td>
       <td>
-        ${editor && s.status === 'running' && s.source_type === 'live' ? `<button class="action danger" onclick="stopLive(${s.id})">Detener</button>` : ''}
-        ${editor ? `<button class="action secondary" onclick="deleteSession(${s.id})">Borrar</button>` : ''}
+        ${admin && s.status === 'running' && s.source_type === 'live' ? `<button class="action danger" onclick="stopLive(${s.id})">Detener</button>` : ''}
+        ${admin ? `<button class="action secondary" onclick="deleteSession(${s.id})">Borrar</button>` : ''}
       </td>
     </tr>`).join('');
+  populateColumnDatalists('sessions-body');
+  applyColumnFilters('sessions-body');
 }
 
 async function stopLive(id) {
@@ -572,18 +1445,42 @@ async function deleteSession(id) {
   if (!confirm('¿Borrar esta sesión de captura? Esta acción no se puede deshacer.')) return;
   try {
     await api(`/api/capture/sessions/${id}`, { method: 'DELETE' });
+    // Deleting a session also removes whatever it contributed to the shared
+    // inventory (devices, protocols, flows, findings), so those tabs' cached
+    // data needs a refresh too, not just the sessions list.
     loadSessions();
+    loadDevices();
+    loadFlows();
+    loadFindings();
   } catch (e) { alert('No se pudo borrar: ' + e.message); }
 }
+
+$('#wipe-db-btn').addEventListener('click', async () => {
+  const ok = confirm(
+    'Esto borra TODAS las sesiones de captura, dispositivos, protocolos, flujos y hallazgos ' +
+    'de vulnerabilidades. Los usuarios no se ven afectados. Esta acción no se puede deshacer. ' +
+    '¿Continuar?'
+  );
+  if (!ok) return;
+  try {
+    await api('/api/capture/wipe', { method: 'DELETE' });
+    refreshAllData();
+  } catch (e) { alert('No se pudo borrar la base de datos: ' + e.message); }
+});
 
 $('#start-live-btn').addEventListener('click', async () => {
   const iface = $('#iface-select').value;
   if (!iface) { alert('Selecciona una interfaz'); return; }
+  const sensorId = $('#capture-sensor-select').value;
   try {
     await api('/api/capture/live/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ interface: iface, bpf_filter: $('#bpf-filter').value }),
+      body: JSON.stringify({
+        interface: iface,
+        bpf_filter: $('#bpf-filter').value,
+        sensor_id: sensorId ? Number(sensorId) : null,
+      }),
     });
     loadSessions();
   } catch (e) { alert('No se pudo iniciar la captura: ' + e.message); }
@@ -595,10 +1492,15 @@ async function uploadPcapFile(file) {
   nameEl.textContent = `Subiendo ${file.name}...`;
   const form = new FormData();
   form.append('file', file);
+  const sensorId = $('#capture-sensor-select').value;
+  if (sensorId) form.append('sensor_id', sensorId);
   try {
     await api('/api/capture/pcap', { method: 'POST', body: form });
     nameEl.textContent = `${file.name} — subido, procesando...`;
     loadSessions();
+    loadDevices();
+    loadFlows();
+    loadFindings();
   } catch (e) {
     nameEl.textContent = '';
     alert('No se pudo subir el archivo: ' + e.message);
@@ -610,7 +1512,7 @@ $('#pcap-file').addEventListener('change', (e) => uploadPcapFile(e.target.files[
 const dropzone = $('#pcap-dropzone');
 ['dragenter', 'dragover'].forEach(evt => dropzone.addEventListener(evt, (e) => {
   e.preventDefault(); e.stopPropagation();
-  if (isEditor()) dropzone.classList.add('dragover');
+  if (isAdmin()) dropzone.classList.add('dragover');
 }));
 ['dragleave', 'dragend'].forEach(evt => dropzone.addEventListener(evt, (e) => {
   e.preventDefault(); e.stopPropagation();
@@ -619,7 +1521,7 @@ const dropzone = $('#pcap-dropzone');
 dropzone.addEventListener('drop', (e) => {
   e.preventDefault(); e.stopPropagation();
   dropzone.classList.remove('dragover');
-  if (!isEditor()) return;
+  if (!isAdmin()) return;
   const file = e.dataTransfer.files && e.dataTransfer.files[0];
   if (!file) return;
   if (!/\.(pcap|pcapng|cap)$/i.test(file.name)) {
@@ -629,90 +1531,305 @@ dropzone.addEventListener('drop', (e) => {
   uploadPcapFile(file);
 });
 
-$('#refresh-sessions-btn').addEventListener('click', loadSessions);
-
 // ---------- Inventory tab ----------
 let currentDeviceId = null;
+let currentDeviceAutoType = null;
+let currentDeviceData = null;
 let allDevices = [];
 
-function fitTableScroll(wrapperId, rowsToShow = 10) {
+function fitTableScroll(wrapperId, rowsToShow = 7) {
   const wrapper = document.getElementById(wrapperId);
   if (!wrapper) return;
   const table = wrapper.querySelector('table');
   const thead = table && table.querySelector('thead');
-  const rows = table ? table.querySelectorAll('tbody tr') : [];
+  // Only rows a column filter hasn't hidden count towards the "show ~7
+  // rows before scrolling" height -- otherwise a filtered-out row (height
+  // 0) could get counted in the first N and undercount the real height.
+  const rows = table ? Array.from(table.querySelectorAll('tbody tr')).filter(r => r.style.display !== 'none') : [];
   if (!thead || rows.length <= rowsToShow) { wrapper.style.maxHeight = 'none'; return; }
   let height = thead.getBoundingClientRect().height;
   for (let i = 0; i < rowsToShow; i++) height += rows[i].getBoundingClientRect().height;
   wrapper.style.maxHeight = Math.ceil(height) + 'px';
 }
 
-async function loadDevices() {
-  allDevices = await api('/api/inventory/devices');
-  renderDeviceStats();
-  renderDevicesTable();
+// ---------- generic per-column text filters (all tables) ----------
+function getColumnFilters(theadEl) {
+  const filters = {};
+  if (!theadEl) return filters;
+  theadEl.querySelectorAll('tr.filter-row th[data-col]').forEach(th => {
+    const inp = th.querySelector('input.col-filter');
+    const val = inp ? inp.value.trim().toLowerCase() : '';
+    if (val) filters[th.dataset.col] = val;
+  });
+  return filters;
 }
 
-function renderDeviceStats() {
-  const total = allDevices.length;
-  const otCount = allDevices.filter(d => d.is_ot_suspected).length;
+// Hides/shows already-rendered <tr> in tbodyId based on its table's
+// filter-row inputs, matched against the [data-col] cell in each row --
+// keeps filtering independent of exactly how each cell renders (badges,
+// pills, formatted dates...) since it just reads the cell's own text.
+function applyColumnFilters(tbodyId) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  const table = tbody.closest('table');
+  const filters = getColumnFilters(table.querySelector('thead'));
+  const filterKeys = Object.keys(filters);
+  const dataRows = Array.from(tbody.querySelectorAll('tr')).filter(tr => !tr.classList.contains('no-match-row'));
+  let visibleCount = 0;
+  dataRows.forEach(tr => {
+    const match = filterKeys.every(col => {
+      const cell = tr.querySelector(`[data-col="${col}"]`);
+      return !cell || (cell.textContent || '').toLowerCase().includes(filters[col]);
+    });
+    tr.style.display = match ? '' : 'none';
+    if (match) visibleCount++;
+  });
+
+  let noMatchRow = tbody.querySelector('tr.no-match-row');
+  const hasRealRows = dataRows.some(tr => !tr.querySelector('td.empty'));
+  if (hasRealRows && filterKeys.length && visibleCount === 0) {
+    if (!noMatchRow) {
+      const headerCols = table.querySelectorAll('thead tr:first-child th').length;
+      noMatchRow = document.createElement('tr');
+      noMatchRow.className = 'no-match-row';
+      noMatchRow.innerHTML = `<td colspan="${headerCols}" class="empty">Sin resultados para el filtro</td>`;
+      tbody.appendChild(noMatchRow);
+    }
+    noMatchRow.style.display = '';
+  } else if (noMatchRow) {
+    noMatchRow.style.display = 'none';
+  }
+
+  const scrollWrapper = table.closest('.table-scroll');
+  if (scrollWrapper) fitTableScroll(scrollWrapper.id);
+}
+
+const MAX_DATALIST_OPTIONS = 200;
+const MAX_DATALIST_OPTION_LENGTH = 60;
+
+// Refreshes each column's <datalist> with the distinct values currently on
+// screen, so a filter input's native suggestion dropdown lets you *pick* a
+// value instead of only typing one -- while still just being a text input,
+// so partial/substring search keeps working the same either way. Built from
+// the same [data-col] cells applyColumnFilters reads, before it hides any
+// row, so the suggestions always reflect every row this render produced,
+// not just whatever currently happens to be visible.
+function populateColumnDatalists(tbodyId) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  const table = tbody.closest('table');
+  const filterRow = table.querySelector('thead tr.filter-row');
+  if (!filterRow) return;
+  const dataRows = Array.from(tbody.querySelectorAll('tr')).filter(tr => !tr.querySelector('td.empty'));
+  filterRow.querySelectorAll('th[data-col]').forEach(th => {
+    const col = th.dataset.col;
+    const input = th.querySelector('input.col-filter');
+    if (!input) return;
+    let datalistId = input.getAttribute('list');
+    if (!datalistId) {
+      datalistId = `dl-${tbodyId}-${col}`;
+      input.setAttribute('list', datalistId);
+    }
+    let datalist = document.getElementById(datalistId);
+    if (!datalist) {
+      datalist = document.createElement('datalist');
+      datalist.id = datalistId;
+      input.insertAdjacentElement('afterend', datalist);
+    }
+    const values = new Set();
+    dataRows.forEach(tr => {
+      const cell = tr.querySelector(`[data-col="${col}"]`);
+      let text = cell ? cell.textContent.trim().replace(/\s+/g, ' ') : '';
+      if (!text) return;
+      if (text.length > MAX_DATALIST_OPTION_LENGTH) text = text.slice(0, MAX_DATALIST_OPTION_LENGTH);
+      values.add(text);
+    });
+    datalist.innerHTML = Array.from(values).sort().slice(0, MAX_DATALIST_OPTIONS)
+      .map(v => `<option value="${v.replace(/"/g, '&quot;')}"></option>`).join('');
+  });
+}
+
+// "Limpiar filtros" button handler -- resets every column filter for one
+// table at once, on top of each input's own native per-column clear (x)
+// button (type="search").
+function clearColumnFilters(tbodyId, rerender) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  const table = tbody.closest('table');
+  table.querySelectorAll('thead tr.filter-row input.col-filter').forEach(inp => { inp.value = ''; });
+  rerender();
+}
+
+async function loadDevices() {
+  // hide_external also collapses a detected gateway's duplicate public-IP
+  // rows (see routes_inventory.list_devices) -- same opt-in toggle as
+  // is_external, so both are refetched together instead of only filtering
+  // is_external client-side, which the gateway duplicates wouldn't match
+  // (they do have a captured mac -- the gateway's -- so is_external is
+  // false for them even though they're the same kind of noise).
+  const hideExternal = $('#hide-external-checkbox').checked;
+  const zq = zoneFilterQuery();
+  const hideExternalParam = hideExternal ? 'hide_external=true' : '';
+  const query = [zq.slice(1), hideExternalParam].filter(Boolean).join('&');
+  allDevices = await api(`/api/inventory/devices${query ? '?' + query : ''}`);
+  renderDevicesTable();
+  renderReportsTab();
+}
+
+const DEVICE_TYPE_LABELS = {
+  plc: 'PLC',
+  hmi: 'HMI',
+  server: 'Servidor/VM',
+  workstation: 'PC',
+  network_device: 'Equipo de red',
+  other: 'Otro',
+};
+const DEVICE_TYPE_PILL_CLASS = {
+  plc: 'plc',
+  hmi: 'hmi',
+  server: 'server',
+  network_device: 'network',
+  workstation: 'workstation',
+  other: 'other',
+};
+const SUBTYPE_LABELS = {
+  switch_l2: 'Switch L2',
+  switch_l3: 'Switch L3',
+  firewall: 'Firewall',
+  access_point: 'Access Point',
+  router_nat: 'Router/NAT',
+  transport_controller: 'Transportador',
+};
+// Which subtypes are selectable for each primary Tipo -- mirrors the
+// backend's NETWORK_DEVICE_SUBTYPES / OTHER_SUBTYPES split.
+const SUBTYPES_BY_TYPE = {
+  network_device: ['switch_l2', 'switch_l3', 'firewall', 'access_point', 'router_nat'],
+  other: ['transport_controller'],
+};
+
+function deviceTypeBadge(d) {
+  const type = d.display_device_type;
+  if (!type) return '<span class="muted">—</span>';
+  const label = DEVICE_TYPE_LABELS[type] || type;
+  const pillClass = DEVICE_TYPE_PILL_CLASS[type];
+  const badge = pillClass ? `<span class="pill ${pillClass}">${label}</span>` : label;
+  return `${badge}${d.custom_device_type ? '<span class="manual-tag">manual</span>' : ''}`;
+}
+
+function deviceSubtypeBadge(d) {
+  const subtype = d.display_device_type_secondary;
+  if (!subtype) return '<span class="muted">—</span>';
+  const label = SUBTYPE_LABELS[subtype] || subtype;
+  const pillClass = DEVICE_TYPE_PILL_CLASS[d.display_device_type] || 'network';
+  return `<span class="pill ${pillClass}">${label}</span>${d.custom_device_type_secondary ? '<span class="manual-tag">manual</span>' : ''}`;
+}
+
+function renderDeviceStats(devices) {
+  const total = devices.length;
+  const plcCount = devices.filter(d => d.display_device_type === 'plc').length;
+  const hmiCount = devices.filter(d => d.display_device_type === 'hmi').length;
+  const serverCount = devices.filter(d => d.display_device_type === 'server').length;
+  const workstationCount = devices.filter(d => d.display_device_type === 'workstation').length;
+  const networkCount = devices.filter(d => d.display_device_type === 'network_device').length;
+  const otherCount = total - plcCount - hmiCount - serverCount - workstationCount - networkCount;
   $('#inventory-stats').innerHTML = `
     <div class="stat-tile"><div class="stat-num">${total}</div><div class="stat-label">Dispositivos detectados</div></div>
-    <div class="stat-tile"><div class="stat-num ot">${otCount}</div><div class="stat-label">Sospechosos de OT</div></div>
+    <div class="stat-tile"><div class="stat-num plc">${plcCount}</div><div class="stat-label">PLC</div></div>
+    <div class="stat-tile"><div class="stat-num hmi">${hmiCount}</div><div class="stat-label">HMI</div></div>
+    <div class="stat-tile"><div class="stat-num server">${serverCount}</div><div class="stat-label">Servidores/VM</div></div>
+    <div class="stat-tile"><div class="stat-num workstation">${workstationCount}</div><div class="stat-label">PCs</div></div>
+    <div class="stat-tile"><div class="stat-num network">${networkCount}</div><div class="stat-label">Equipos de red</div></div>
+    <div class="stat-tile"><div class="stat-num other">${otherCount}</div><div class="stat-label">Otros equipos</div></div>
   `;
 }
 
 function renderDevicesTable() {
   const tbody = $('#devices-body');
   const otOnly = $('#ot-only-checkbox').checked;
-  const devices = otOnly ? allDevices.filter(d => d.is_ot_suspected) : allDevices;
+  const hideExternal = $('#hide-external-checkbox').checked;
+  const statsDevices = hideExternal ? allDevices.filter(d => !d.is_external) : allDevices;
+  renderDeviceStats(statsDevices);
+  const devices = otOnly ? statsDevices.filter(d => d.is_ot_suspected) : statsDevices;
   if (!devices.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin dispositivos detectados aún</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" class="empty">Sin dispositivos detectados aún</td></tr>';
     fitTableScroll('devices-scroll');
     return;
   }
   tbody.innerHTML = devices.map(d => `
     <tr class="clickable" onclick="showDeviceDetail(${d.id})">
-      <td>${d.ip || '—'} ${d.is_ot_suspected ? '<span class="pill ot">OT</span>' : ''}</td>
-      <td>${d.display_name || '<span class="muted">—</span>'}${d.custom_name ? '<span class="manual-tag">manual</span>' : ''}</td>
-      <td>${d.display_vendor || '<span class="muted">—</span>'}${d.custom_vendor ? '<span class="manual-tag">manual</span>' : ''}</td>
-      <td class="mono">${d.mac || '—'}</td>
-      <td>${d.os_guess || '—'}</td>
-      <td>${(d.os_confidence * 100).toFixed(0)}%</td>
-      <td class="protocol-list">${(d.protocol_names && d.protocol_names.length) ? d.protocol_names.join(', ') : '<span class="muted">—</span>'}</td>
-      <td>${fmtDate(d.last_seen)}</td>
+      <td data-col="ip">${d.ip || '—'} ${d.is_ot_suspected ? '<span class="pill ot">OT</span>' : ''} ${d.is_external ? '<span class="pill external" title="Sin MAC capturada y con IP pública: probablemente fuera de esta red">Externo</span>' : ''}</td>
+      <td data-col="nombre">${d.display_name || '<span class="muted">—</span>'}${d.custom_name ? '<span class="manual-tag">manual</span>' : ''}</td>
+      <td data-col="tipo">${deviceTypeBadge(d)}</td>
+      <td data-col="subtipo">${deviceSubtypeBadge(d)}</td>
+      <td data-col="fabricante">${d.display_vendor || '<span class="muted">—</span>'}${d.custom_vendor ? '<span class="manual-tag">manual</span>' : ''}</td>
+      <td data-col="referencia">${d.display_model || '<span class="muted">—</span>'}${d.custom_model ? '<span class="manual-tag">manual</span>' : ''}</td>
+      <td data-col="mac" class="mono">${d.mac || '—'}</td>
+      <td data-col="so">${d.os_guess || '—'}${d.display_firmware_version ? ` <span class="muted">· FW ${d.display_firmware_version}</span>` : ''}</td>
+      <td data-col="confianza">${(d.os_confidence * 100).toFixed(0)}%</td>
+      <td data-col="protocolos" class="protocol-list">${(d.protocol_names && d.protocol_names.length) ? d.protocol_names.join(', ') : '<span class="muted">—</span>'}</td>
+      <td data-col="visto">${fmtDate(d.last_seen)}</td>
     </tr>`).join('');
-  fitTableScroll('devices-scroll');
+  applyColumnVisibility();
+  populateColumnDatalists('devices-body');
+  applyColumnFilters('devices-body');
 }
 
 async function showDeviceDetail(id) {
   currentDeviceId = id;
   const device = await api(`/api/inventory/devices/${id}`);
+  currentDeviceAutoType = device.device_type;
+  currentDeviceData = device;
   const protoRows = device.protocols.map(p => `
     <span class="pill ${p.category === 'OT' ? 'ot' : ''}">${p.protocol}:${p.port ?? '-'} (${p.role}, ${p.packet_count}x)</span>`).join(' ');
   const findingRows = device.findings.map(f => `
     <tr><td>${sevBadge(f.severity)}</td><td>${f.title}</td><td>${f.cve_id || f.rule_id || '—'}</td></tr>`).join('') ||
     '<tr><td colspan="3" class="empty">Sin hallazgos (ejecuta un escaneo desde la pestaña Vulnerabilidades)</td></tr>';
 
-  const editor = isEditor();
+  const admin = isAdmin();
   $('#device-detail').innerHTML = `
     <h2>Detalle: ${device.ip || device.mac}</h2>
     <div class="edit-field">
       <label>Nombre</label>
-      <input id="edit-name" value="${device.custom_name || ''}" placeholder="${device.hostname || 'sin detectar — escribe uno'}" ${editor ? '' : 'disabled'} />
+      <input id="edit-name" value="${device.custom_name || ''}" placeholder="${device.hostname || 'sin detectar — escribe uno'}" ${admin ? '' : 'disabled'} />
       <span class="hint">${device.hostname ? `auto: ${device.hostname}` : 'no detectado automáticamente'}</span>
     </div>
     <div class="edit-field">
+      <label>Tipo</label>
+      <select id="edit-device-type" ${admin ? '' : 'disabled'} onchange="toggleSubtypeFieldVisibility()">
+        <option value="" ${!device.custom_device_type ? 'selected' : ''}>${device.device_type ? 'Automático: ' + (DEVICE_TYPE_LABELS[device.device_type] || device.device_type) : 'Automático (sin clasificar aún)'}</option>
+        ${Object.entries(DEVICE_TYPE_LABELS).map(([value, label]) => `
+        <option value="${value}" ${device.custom_device_type === value ? 'selected' : ''}>${label}</option>`).join('')}
+      </select>
+      <span class="hint">${device.device_type_evidence ? `evidencia: ${device.device_type_evidence}` : 'sin evidencia suficiente para clasificar aún'}</span>
+    </div>
+    <div class="edit-field" id="subtype-field-wrapper">
+      <label>Subtipo</label>
+      <select id="edit-device-type-secondary" ${admin ? '' : 'disabled'}>
+        ${subtypeOptionsHtml(device.device_type)}
+      </select>
+      <span class="hint" id="subtype-field-hint"></span>
+    </div>
+    <div class="edit-field">
       <label>Fabricante</label>
-      <input id="edit-vendor" value="${device.custom_vendor || ''}" placeholder="${device.vendor || 'sin detectar — escribe uno'}" ${editor ? '' : 'disabled'} />
+      <input id="edit-vendor" value="${device.custom_vendor || ''}" placeholder="${device.vendor || 'sin detectar — escribe uno'}" ${admin ? '' : 'disabled'} />
       <span class="hint">${device.vendor ? `auto: ${device.vendor}` : 'no detectado automáticamente'}</span>
     </div>
-    ${editor ? `
+    <div class="edit-field">
+      <label>Referencia</label>
+      <input id="edit-model" value="${device.custom_model || ''}" placeholder="${device.model || 'sin detectar — escribe una'}" ${admin ? '' : 'disabled'} />
+      <span class="hint">${device.model ? `auto: ${device.model}` : 'no detectado automáticamente'}</span>
+    </div>
+    <div class="edit-field">
+      <label>Firmware</label>
+      <input id="edit-firmware" value="${device.custom_firmware_version || ''}" placeholder="${device.firmware_version || 'sin detectar — escribe uno'}" ${admin ? '' : 'disabled'} />
+      <span class="hint">${device.firmware_version ? `auto: ${device.firmware_version}` : 'no detectado automáticamente'}</span>
+    </div>
+    ${admin ? `
     <div class="row" style="margin-bottom:14px;">
       <button class="action" id="save-device-btn">Guardar</button>
       <button class="action secondary" id="reset-device-btn">Restablecer a automático</button>
     </div>` : ''}
-    <p><b>SO estimado:</b> ${device.os_guess || 'desconocido'} (confianza ${(device.os_confidence*100).toFixed(0)}%)</p>
+    <p><b>SO estimado:</b> ${device.os_guess || 'desconocido'} (confianza ${(device.os_confidence*100).toFixed(0)}%)${device.display_firmware_version ? ` — <b>firmware:</b> ${device.display_firmware_version}` : ''}</p>
     <p><b>Protocolos/servicios:</b><br/>${protoRows || '<span class="muted">ninguno</span>'}</p>
     <table>
       <thead><tr><th>Severidad</th><th>Hallazgo</th><th>Ref.</th></tr></thead>
@@ -720,18 +1837,61 @@ async function showDeviceDetail(id) {
     </table>
   `;
 
-  if (editor) {
+  if (admin) {
     $('#save-device-btn').addEventListener('click', () => saveDeviceOverrides(id));
     $('#reset-device-btn').addEventListener('click', () => saveDeviceOverrides(id, true));
   }
+  toggleSubtypeFieldVisibility();
+}
+
+function subtypeOptionsHtml(effectiveType) {
+  const device = currentDeviceData || {};
+  const keys = SUBTYPES_BY_TYPE[effectiveType] || [];
+  const autoLabel = device.device_type_secondary ? (SUBTYPE_LABELS[device.device_type_secondary] || device.device_type_secondary) : null;
+  return `
+    <option value="" ${!device.custom_device_type_secondary ? 'selected' : ''}>${autoLabel ? 'Automático: ' + autoLabel : 'Sin subtipo'}</option>
+    ${keys.map(value => `
+    <option value="${value}" ${device.custom_device_type_secondary === value ? 'selected' : ''}>${SUBTYPE_LABELS[value]}</option>`).join('')}
+  `;
+}
+
+const SUBTYPE_FIELD_HINTS = {
+  network_device: 'Solo aplica a Equipos de red (Switch L2/L3, Firewall, Access Point, Router/NAT)',
+  other: 'Solo aplica a Otro (Transportador)',
+};
+
+function toggleSubtypeFieldVisibility() {
+  const select = $('#edit-device-type');
+  const secondarySelect = $('#edit-device-type-secondary');
+  const wrapper = $('#subtype-field-wrapper');
+  if (!select || !wrapper) return;
+  const effectiveType = select.value || currentDeviceAutoType;
+  const applies = Object.prototype.hasOwnProperty.call(SUBTYPES_BY_TYPE, effectiveType);
+  wrapper.classList.toggle('hidden', !applies);
+  if (applies && secondarySelect) {
+    secondarySelect.innerHTML = subtypeOptionsHtml(effectiveType);
+  }
+  const hint = $('#subtype-field-hint');
+  if (hint) hint.textContent = SUBTYPE_FIELD_HINTS[effectiveType] || '';
 }
 
 async function saveDeviceOverrides(id, reset = false) {
   const body = reset
-    ? { custom_name: null, custom_vendor: null }
+    ? {
+        custom_name: null,
+        custom_vendor: null,
+        custom_model: null,
+        custom_firmware_version: null,
+        custom_device_type: null,
+        custom_device_type_secondary: null,
+      }
     : {
         custom_name: $('#edit-name').value.trim() || null,
         custom_vendor: $('#edit-vendor').value.trim() || null,
+        custom_model: $('#edit-model').value.trim() || null,
+        custom_firmware_version: $('#edit-firmware').value.trim() || null,
+        custom_device_type: $('#edit-device-type').value || null,
+        custom_device_type_secondary: $('#edit-device-type-secondary').value || null,
       };
   try {
     await api(`/api/inventory/devices/${id}`, {
@@ -744,61 +1904,129 @@ async function saveDeviceOverrides(id, reset = false) {
   } catch (e) { alert('No se pudo guardar: ' + e.message); }
 }
 
-$('#refresh-devices-btn').addEventListener('click', loadDevices);
 $('#ot-only-checkbox').addEventListener('change', renderDevicesTable);
+$('#hide-external-checkbox').addEventListener('change', loadDevices);
+
+// ---------- Inventory column visibility (persisted per-browser) ----------
+const COLUMNS_STORAGE_KEY = 'tridentyot_inventory_columns';
+
+function loadColumnPrefs() {
+  try {
+    return JSON.parse(localStorage.getItem(COLUMNS_STORAGE_KEY)) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveColumnPrefs(prefs) {
+  localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(prefs));
+}
+
+function applyColumnVisibility() {
+  const prefs = loadColumnPrefs();
+  $$('#columns-panel input[data-col-toggle]').forEach(cb => {
+    const col = cb.dataset.colToggle;
+    const visible = prefs[col] !== false;
+    cb.checked = visible;
+    $$(`#devices-scroll [data-col="${col}"]`).forEach(cell => {
+      cell.style.display = visible ? '' : 'none';
+    });
+  });
+}
+
+$('#columns-btn').addEventListener('click', () => {
+  $('#columns-panel').classList.toggle('hidden');
+});
+
+document.addEventListener('click', (e) => {
+  const panel = $('#columns-panel');
+  if (!panel.classList.contains('hidden') && !panel.contains(e.target) && e.target !== $('#columns-btn')) {
+    panel.classList.add('hidden');
+  }
+});
+
+$$('#columns-panel input[data-col-toggle]').forEach(cb => {
+  cb.addEventListener('change', () => {
+    const prefs = loadColumnPrefs();
+    prefs[cb.dataset.colToggle] = cb.checked;
+    saveColumnPrefs(prefs);
+    applyColumnVisibility();
+  });
+});
+
+applyColumnVisibility();
 
 // ---------- Flows tab ----------
 let allFlows = [];
 
 async function loadFlows() {
-  allFlows = await api('/api/inventory/flows');
-  renderFlowStats();
+  allFlows = await api(`/api/inventory/flows${zoneFilterQuery()}`);
   renderFlowsTable();
 }
 
-function renderFlowStats() {
-  const total = allFlows.length;
-  const otCount = allFlows.filter(f => f.category === 'OT').length;
+function renderFlowStats(flows) {
+  const total = flows.length;
+  const otCount = flows.filter(f => f.category === 'OT').length;
   $('#flows-stats').innerHTML = `
     <div class="stat-tile"><div class="stat-num">${total}</div><div class="stat-label">Flujos detectados</div></div>
     <div class="stat-tile"><div class="stat-num ot">${otCount}</div><div class="stat-label">De protocolos industriales (OT)</div></div>
   `;
 }
 
+function isFlowExternal(f, deviceById) {
+  const a = deviceById.get(f.device_a_id);
+  const b = deviceById.get(f.device_b_id);
+  return !!(a && a.is_external) || !!(b && b.is_external);
+}
+
 function renderFlowsTable() {
   const tbody = $('#flows-body');
   const cat = $('#flow-category-filter').value;
-  const flows = cat ? allFlows.filter(f => f.category === cat) : allFlows;
-  if (!flows.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">Sin flujos detectados aún</td></tr>'; return; }
+  const hideExternal = $('#hide-external-flows-checkbox').checked;
+  const deviceById = new Map(allDevices.map(d => [d.id, d]));
+
+  const statsFlows = hideExternal ? allFlows.filter(f => !isFlowExternal(f, deviceById)) : allFlows;
+  renderFlowStats(statsFlows);
+  const flows = cat ? statsFlows.filter(f => f.category === cat) : statsFlows;
+  if (!flows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin flujos detectados aún</td></tr>';
+    fitTableScroll('flows-scroll');
+    return;
+  }
   tbody.innerHTML = flows.map(f => {
+    const aDevice = deviceById.get(f.device_a_id);
+    const bDevice = deviceById.get(f.device_b_id);
     const aLabel = f.device_a_name || f.device_a_ip || `#${f.device_a_id}`;
     const bLabel = f.device_b_name || f.device_b_ip || `#${f.device_b_id}`;
     const aIsServer = f.server_device_id === f.device_a_id;
+    const externalPill = ' <span class="pill external">Externo</span>';
     return `
     <tr>
-      <td>${aLabel}${aIsServer ? ' <span class="pill">servidor</span>' : ''}</td>
-      <td class="flow-arrow">${aIsServer ? '&larr;' : '&rarr;'}</td>
-      <td>${bLabel}${!aIsServer ? ' <span class="pill">servidor</span>' : ''}</td>
-      <td>${f.protocol}${f.category === 'OT' ? ' <span class="pill ot">OT</span>' : ''}</td>
-      <td>${f.port ?? '—'}</td>
-      <td>${f.transport}</td>
-      <td>${f.packet_count}</td>
-      <td class="muted">${fmtDate(f.first_seen)}</td>
-      <td class="muted">${fmtDate(f.last_seen)}</td>
+      <td data-col="origen">${aLabel}${aIsServer ? ' <span class="pill">servidor</span>' : ''}${aDevice && aDevice.is_external ? externalPill : ''}</td>
+      <td data-col="destino">${bLabel}${!aIsServer ? ' <span class="pill">servidor</span>' : ''}${bDevice && bDevice.is_external ? externalPill : ''}</td>
+      <td data-col="protocolo">${f.protocol}${f.category === 'OT' ? ' <span class="pill ot">OT</span>' : ''}</td>
+      <td data-col="puerto">${f.port ?? '—'}</td>
+      <td data-col="transporte">${f.transport}</td>
+      <td data-col="paquetes">${f.packet_count}</td>
+      <td data-col="primero" class="muted">${fmtDate(f.first_seen)}</td>
+      <td data-col="ultimo" class="muted">${fmtDate(f.last_seen)}</td>
     </tr>`;
   }).join('');
+  populateColumnDatalists('flows-body');
+  applyColumnFilters('flows-body');
 }
 
-$('#refresh-flows-btn').addEventListener('click', loadFlows);
 $('#flow-category-filter').addEventListener('change', renderFlowsTable);
+$('#hide-external-flows-checkbox').addEventListener('change', renderFlowsTable);
 
 // ---------- Vulnerabilities tab ----------
 let allFindings = [];
 
 async function loadFindings() {
-  allFindings = await api('/api/vuln/findings');
+  allFindings = await api(`/api/vuln/findings${zoneFilterQuery()}`);
   renderFindingsStats();
   renderFindingsTable();
+  renderReportsTab();
 }
 
 function renderFindingsStats() {
@@ -814,19 +2042,24 @@ function renderFindingsTable() {
   const tbody = $('#findings-body');
   const sev = $('#severity-filter').value;
   const findings = sev ? allFindings.filter(f => f.severity === sev) : allFindings;
-  if (!findings.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">Sin hallazgos. Ejecuta un escaneo.</td></tr>'; return; }
+  if (!findings.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">Sin hallazgos. Ejecuta un escaneo.</td></tr>';
+    fitTableScroll('findings-scroll');
+    return;
+  }
   tbody.innerHTML = findings.map(f => `
     <tr>
-      <td>${sevBadge(f.severity)}</td>
-      <td class="clickable" onclick="jumpToDevice(${f.device_id})">${f.device_ip || '#' + f.device_id}</td>
-      <td>${f.device_name || '<span class="muted">—</span>'}</td>
-      <td><b>${f.title}</b><br/><span class="muted">${f.description}</span></td>
-      <td>${f.source}${f.cve_id ? ' · ' + f.cve_id : ''}</td>
-      <td class="muted">${f.evidence || '—'}</td>
+      <td data-col="severidad">${sevBadge(f.severity)}</td>
+      <td data-col="dispositivo" class="clickable" onclick="jumpToDevice(${f.device_id})">${f.device_ip || '#' + f.device_id}</td>
+      <td data-col="nombre">${f.device_name || '<span class="muted">—</span>'}</td>
+      <td data-col="hallazgo"><b>${f.title}</b><br/><span class="muted">${f.description}</span></td>
+      <td data-col="fuente">${f.source}${f.cve_id ? ' · ' + f.cve_id : ''}</td>
+      <td data-col="evidencia" class="muted">${f.evidence || '—'}</td>
     </tr>`).join('');
+  populateColumnDatalists('findings-body');
+  applyColumnFilters('findings-body');
 }
 
-$('#refresh-findings-btn').addEventListener('click', loadFindings);
 $('#severity-filter').addEventListener('change', renderFindingsTable);
 $('#scan-all-btn').addEventListener('click', async () => {
   $('#scan-all-btn').textContent = 'Escaneando...';
@@ -841,26 +2074,210 @@ $('#scan-all-btn').addEventListener('click', async () => {
   finally { $('#scan-all-btn').textContent = 'Ejecutar escaneo completo'; }
 });
 
-// ---------- Users tab (editor only) ----------
-async function loadUsers() {
-  if (!isEditor()) return;
-  const tbody = $('#users-body');
-  const users = await api('/api/users');
-  tbody.innerHTML = users.map(u => `
+function buildVulnReportHtml() {
+  const now = new Date();
+  const bySeverity = {};
+  allFindings.forEach(f => { bySeverity[f.severity] = (bySeverity[f.severity] || 0) + 1; });
+  const affectedDevices = new Set(allFindings.map(f => f.device_id)).size;
+  const rows = allFindings.map(f => `
     <tr>
-      <td>${u.username}${u.id === currentUser.id ? ' <span class="pill">tú</span>' : ''}</td>
+      <td>${(f.severity || 'unknown').toUpperCase()}</td>
+      <td>${f.device_ip || '#' + f.device_id}</td>
+      <td>${f.device_name || '—'}</td>
+      <td>${f.title}</td>
+      <td>${f.source}${f.cve_id ? ' · ' + f.cve_id : ''}</td>
+      <td>${f.evidence || '—'}</td>
+    </tr>`).join('') || '<tr><td colspan="6">Sin hallazgos</td></tr>';
+
+  return `
+    <div class="pr-header">
+      <img src="/brand/lockup_dark.png" alt="TridentyOT" />
+      <div class="pr-meta">Generado: ${now.toLocaleString()}</div>
+    </div>
+    <h1>Reporte de vulnerabilidades</h1>
+    <p class="pr-sub">Inventario de red y análisis de vulnerabilidades pasivo (IT/OT)</p>
+    <div class="pr-stats">
+      <div class="pr-stat"><div class="n">${allFindings.length}</div><div class="l">Hallazgos totales</div></div>
+      <div class="pr-stat"><div class="n">${affectedDevices}</div><div class="l">Dispositivos afectados</div></div>
+      <div class="pr-stat"><div class="n">${bySeverity.critical || 0}</div><div class="l">Critical</div></div>
+      <div class="pr-stat"><div class="n">${bySeverity.high || 0}</div><div class="l">High</div></div>
+      <div class="pr-stat"><div class="n">${bySeverity.medium || 0}</div><div class="l">Medium</div></div>
+      <div class="pr-stat"><div class="n">${bySeverity.low || 0}</div><div class="l">Low</div></div>
+    </div>
+    <table>
+      <thead><tr><th>Severidad</th><th>Dispositivo</th><th>Nombre</th><th>Hallazgo</th><th>Fuente</th><th>Evidencia</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="pr-footer">TridentyOT — reporte generado automáticamente a partir de la última captura analizada.</div>
+  `;
+}
+
+$('#export-vuln-pdf-btn').addEventListener('click', () => {
+  $('#print-report').innerHTML = buildVulnReportHtml();
+  window.print();
+});
+
+// ---------- Reportes tab: combined inventory + vulnerabilities + captures ----------
+// NOTE: deliberately org-wide, not scoped to the Sitio it's opened from --
+// unlike Captura/Inventario/Flujos/Vulnerabilidades (which filter to the
+// active Zona via zoneFilterQuery()), Reportes is meant to always summarize
+// the entire organization. That's also why it lives at the Sitio level in
+// the tree (SITE_LEAVES) instead of nested under each Zona.
+function renderReportsTab() {
+  const totalDevices = allDevices.length;
+  const otDevices = allDevices.filter(d => d.is_ot_suspected).length;
+  const bySeverity = {};
+  allFindings.forEach(f => { bySeverity[f.severity] = (bySeverity[f.severity] || 0) + 1; });
+  const affectedDevices = new Set(allFindings.map(f => f.device_id)).size;
+  const totalPackets = allSessions.reduce((sum, s) => sum + (s.packet_count || 0), 0);
+
+  $('#reports-stats').innerHTML = `
+    <div class="stat-tile"><div class="stat-num">${totalDevices}</div><div class="stat-label">Dispositivos</div></div>
+    <div class="stat-tile"><div class="stat-num ot">${otDevices}</div><div class="stat-label">Sospechosos de OT</div></div>
+    <div class="stat-tile"><div class="stat-num">${allFindings.length}</div><div class="stat-label">Hallazgos de vulnerabilidades</div></div>
+    <div class="stat-tile"><div class="stat-num">${allSessions.length}</div><div class="stat-label">Sesiones de captura</div></div>
+    <div class="stat-tile"><div class="stat-num">${totalPackets}</div><div class="stat-label">Paquetes capturados</div></div>
+  `;
+
+  const byType = {};
+  allDevices.forEach(d => {
+    const type = d.display_device_type;
+    const label = type ? (DEVICE_TYPE_LABELS[type] || type) : 'Sin clasificar';
+    byType[label] = (byType[label] || 0) + 1;
+  });
+  $('#reports-inventory-stats').innerHTML = `
+    <div class="stat-tile"><div class="stat-num">${totalDevices}</div><div class="stat-label">Total</div></div>
+    <div class="stat-tile"><div class="stat-num ot">${otDevices}</div><div class="stat-label">OT</div></div>
+    <div class="stat-tile"><div class="stat-num">${totalDevices - otDevices}</div><div class="stat-label">IT</div></div>
+  `;
+  $('#reports-inventory-body').innerHTML = Object.entries(byType).map(([label, count]) => `
+    <tr><td>${label}</td><td>${count}</td></tr>`).join('') || '<tr><td colspan="2" class="empty">Sin dispositivos</td></tr>';
+
+  $('#reports-captures-body').innerHTML = allSessions.map(s => `
+    <tr>
+      <td>${s.name}</td><td>${s.source_type}</td>
+      <td class="status-${s.status}">${s.status}</td>
+      <td>${s.packet_count}</td><td>${fmtDate(s.started_at)}</td>
+    </tr>`).join('') || '<tr><td colspan="5" class="empty">Sin capturas</td></tr>';
+
+  $('#reports-vulns-stats').innerHTML = `
+    <div class="stat-tile"><div class="stat-num">${affectedDevices}</div><div class="stat-label">Dispositivos afectados</div></div>
+    <div class="stat-tile"><div class="stat-num crit">${bySeverity.critical || 0}</div><div class="stat-label">Critical</div></div>
+    <div class="stat-tile"><div class="stat-num high">${bySeverity.high || 0}</div><div class="stat-label">High</div></div>
+  `;
+  $('#reports-vulns-body').innerHTML = allFindings.slice(0, 25).map(f => `
+    <tr>
+      <td>${sevBadge(f.severity)}</td>
+      <td>${f.device_ip || '#' + f.device_id}</td>
+      <td>${f.title}</td>
+    </tr>`).join('') || '<tr><td colspan="3" class="empty">Sin hallazgos</td></tr>';
+}
+
+function buildFullReportHtml() {
+  const now = new Date();
+  const byType = {};
+  allDevices.forEach(d => {
+    const type = d.display_device_type;
+    const label = type ? (DEVICE_TYPE_LABELS[type] || type) : 'Sin clasificar';
+    byType[label] = (byType[label] || 0) + 1;
+  });
+  const bySeverity = {};
+  allFindings.forEach(f => { bySeverity[f.severity] = (bySeverity[f.severity] || 0) + 1; });
+  const totalPackets = allSessions.reduce((sum, s) => sum + (s.packet_count || 0), 0);
+
+  const inventoryRows = Object.entries(byType).map(([label, count]) => `
+    <tr><td>${label}</td><td>${count}</td></tr>`).join('') || '<tr><td colspan="2">Sin dispositivos</td></tr>';
+  const captureRows = allSessions.map(s => `
+    <tr><td>${s.name}</td><td>${s.source_type}</td><td>${s.status}</td><td>${s.packet_count}</td></tr>`).join('')
+    || '<tr><td colspan="4">Sin capturas</td></tr>';
+  const vulnRows = allFindings.map(f => `
+    <tr>
+      <td>${(f.severity || 'unknown').toUpperCase()}</td>
+      <td>${f.device_ip || '#' + f.device_id}</td>
+      <td>${f.device_name || '—'}</td>
+      <td>${f.title}</td>
+      <td>${f.source}${f.cve_id ? ' · ' + f.cve_id : ''}</td>
+    </tr>`).join('') || '<tr><td colspan="5">Sin hallazgos</td></tr>';
+
+  return `
+    <div class="pr-header">
+      <img src="/brand/lockup_dark.png" alt="TridentyOT" />
+      <div class="pr-meta">Generado: ${now.toLocaleString()}</div>
+    </div>
+    <h1>Reporte combinado</h1>
+    <p class="pr-sub">Inventario, vulnerabilidades y capturas</p>
+    <div class="pr-stats">
+      <div class="pr-stat"><div class="n">${allDevices.length}</div><div class="l">Dispositivos</div></div>
+      <div class="pr-stat"><div class="n">${allFindings.length}</div><div class="l">Hallazgos</div></div>
+      <div class="pr-stat"><div class="n">${allSessions.length}</div><div class="l">Sesiones de captura</div></div>
+      <div class="pr-stat"><div class="n">${totalPackets}</div><div class="l">Paquetes</div></div>
+    </div>
+    <h2>Inventario por tipo</h2>
+    <table><thead><tr><th>Tipo</th><th>Cantidad</th></tr></thead><tbody>${inventoryRows}</tbody></table>
+    <h2>Capturas</h2>
+    <table><thead><tr><th>Nombre</th><th>Tipo</th><th>Estado</th><th>Paquetes</th></tr></thead><tbody>${captureRows}</tbody></table>
+    <h2>Vulnerabilidades (${allFindings.length}, ${bySeverity.critical || 0} critical, ${bySeverity.high || 0} high)</h2>
+    <table><thead><tr><th>Severidad</th><th>Dispositivo</th><th>Nombre</th><th>Hallazgo</th><th>Fuente</th></tr></thead><tbody>${vulnRows}</tbody></table>
+    <div class="pr-footer">TridentyOT — reporte generado automáticamente a partir de la última captura analizada.</div>
+  `;
+}
+
+$('#export-full-report-pdf-btn').addEventListener('click', () => {
+  $('#print-report').innerHTML = buildFullReportHtml();
+  window.print();
+});
+
+// ---------- Users tab (admin only) ----------
+let allUsers = [];
+
+// Only meaningful for a Super Admin, who can see every organization's
+// users -- null means "no organization chosen yet, show them all" (the
+// state right after login, before any tree "Usuarios" click). An admin
+// always sees their own organization regardless of this value; the
+// backend enforces that too, this is just what the frontend requests.
+let usersFilterOrgId = null;
+
+async function loadUsers() {
+  if (!isAdmin()) return;
+  const qs = isSuperAdmin() && usersFilterOrgId != null ? `?organization_id=${usersFilterOrgId}` : '';
+  allUsers = await api('/api/users' + qs);
+  renderUsersTable();
+  renderUsersOrgNote();
+}
+
+function renderUsersOrgNote() {
+  const note = $('#users-org-note');
+  if (!note) return;
+  if (isSuperAdmin() && usersFilterOrgId != null) {
+    const org = allOrganizations.find(o => o.id === usersFilterOrgId);
+    note.textContent = `Gestionando usuarios de: ${org ? org.name : '#' + usersFilterOrgId}`;
+  } else {
+    note.textContent = '';
+  }
+}
+
+function renderUsersTable() {
+  const tbody = $('#users-body');
+  tbody.innerHTML = allUsers.map(u => `
+    <tr>
+      <td data-col="usuario">${escapeHtml(u.username)}${u.id === currentUser.id ? ' <span class="pill">tú</span>' : ''}</td>
       <td>
-        <select onchange="changeUserRole(${u.id}, this.value)" ${u.id === currentUser.id ? 'disabled' : ''}>
+        <span data-col="perfil" style="display:none">${ROLE_LABELS[u.role] || u.role}</span>
+        ${u.role === 'super_admin'
+          ? `<span class="pill">Super Admin</span>`
+          : `<select onchange="changeUserRole(${u.id}, this.value)" ${u.id === currentUser.id ? 'disabled' : ''}>
           <option value="viewer" ${u.role === 'viewer' ? 'selected' : ''}>Visualizador</option>
-          <option value="editor" ${u.role === 'editor' ? 'selected' : ''}>Editor</option>
-        </select>
+          <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Administrador</option>
+        </select>`}
       </td>
-      <td class="muted">${fmtDate(u.created_at)}</td>
+      <td data-col="creado" class="muted">${fmtDate(u.created_at)}</td>
       <td>
         <button class="action secondary" onclick="resetUserPassword(${u.id})">Restablecer contraseña</button>
         <button class="action danger" onclick="deleteUser(${u.id})" ${u.id === currentUser.id ? 'disabled' : ''}>Eliminar</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin usuarios</td></tr>';
+  populateColumnDatalists('users-body');
+  applyColumnFilters('users-body');
 }
 
 async function changeUserRole(id, role) {
@@ -898,23 +2315,661 @@ async function deleteUser(id) {
   } catch (e) { alert('No se pudo eliminar: ' + e.message); }
 }
 
-$('#refresh-users-btn').addEventListener('click', loadUsers);
 $('#create-user-btn').addEventListener('click', async () => {
   const username = $('#new-user-username').value.trim();
   const password = $('#new-user-password').value;
   const role = $('#new-user-role').value;
   $('#create-user-error').textContent = '';
+  const payload = { username, password, role };
+  if (isSuperAdmin()) payload.organization_id = usersFilterOrgId;
   try {
     await api('/api/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, role }),
+      body: JSON.stringify(payload),
     });
     $('#new-user-username').value = '';
     $('#new-user-password').value = '';
+    // A new super_admin has no organization, so it would never show up in
+    // whatever single org's list is currently filtered -- switch to "every
+    // organization" so it's actually visible right after creating it.
+    if (role === 'super_admin') usersFilterOrgId = null;
     loadUsers();
   } catch (e) { $('#create-user-error').textContent = e.message; }
 });
+
+// ---------- Sidebar: Meraki-style rail + flyout ----------
+// Two switcher cards (Organización, Sitio) plus a rail of clickable rows
+// (one per Zona in the current Sitio, plus Reportes and Organización-admin)
+// -- clicking any of them opens a flyout panel to the right (#flyout-panel)
+// grouping its destinations under Monitor/Configure, exactly like Meraki's
+// dashboard nav. Selecting a destination inside the flyout closes it and
+// loads the tab; the rail row it came from stays highlighted (activeRailKey)
+// so there's still a visible "you are here" after the flyout closes.
+let allSites = [];
+let allZones = [];
+let allSensors = [];
+let allOrganizations = [];
+// Which organization's rail a Super Admin is currently looking at -- picked
+// from the Organización switcher flyout. Irrelevant for admin/viewer, who
+// only ever see their own organization.
+let selectedOrgId = null;
+// Which Sitio's Zonas populate the rail -- picked from the Sitio switcher
+// flyout. Analogous to Meraki's "current network".
+let currentSiteId = null;
+// Key of the flyout currently open (null when closed): 'org-switcher',
+// 'site-switcher', 'org-admin', 'reports', or `zone-<id>`.
+let openFlyoutKey = null;
+// Key of the rail row whose destination is the content currently on
+// screen -- kept highlighted even after its flyout closes.
+let activeRailKey = null;
+let selectedZoneId = null;
+let selectedSiteId = null;
+let selectedLeafTab = null;
+
+const SENSOR_KIND_LABELS = { live: 'En vivo', external: 'Externo (solo pcap)' };
+const ZONE_LEAVES = [
+  { tab: 'capture', label: 'Captura' },
+  { tab: 'inventory', label: 'Inventario' },
+  { tab: 'flows', label: 'Flujos' },
+  { tab: 'vulns', label: 'Vulnerabilidades' },
+];
+// Which Zona leaves are grouped under each flyout heading -- Inventario/
+// Flujos/Vulnerabilidades are read-only analysis (Monitor), Captura is
+// where you actively start/stop capture and manage sessions (Configure).
+const ZONE_MONITOR_TABS = ['inventory', 'flows', 'vulns'];
+const ZONE_CONFIGURE_TABS = ['capture'];
+// Reportes lives one level up from the Zona leaves, at the Sitio itself --
+// unlike Captura/Inventario/Flujos/Vulnerabilidades it's not pretending to
+// be zone-scoped: it's deliberately always a whole-organization summary
+// (inventory + vulnerabilities + captures), so it doesn't belong under any
+// one Zona.
+const SITE_LEAVES = [
+  { tab: 'reports', label: 'Reportes' },
+];
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text == null ? '' : String(text);
+  return div.innerHTML;
+}
+
+// Captura/Inventario/Flujos/Vulnerabilidades are scoped to the active Zona
+// (selectZoneLeaf sets selectedZoneId) via the backend's zone_id filter --
+// unfiltered (whole organization) when no Zona is selected, e.g. right
+// after login or while looking at Reportes (deliberately org-wide, see
+// SITE_LEAVES).
+function zoneFilterQuery() {
+  return selectedZoneId != null ? `?zone_id=${selectedZoneId}` : '';
+}
+
+// The organization whose Sitio/Zona rail is on screen: the caller's own
+// for admin/viewer, or whichever one Super Admin picked in the switcher.
+function currentOrgId() {
+  if (isSuperAdmin()) return selectedOrgId;
+  return currentUser ? currentUser.organization_id : null;
+}
+
+async function loadSites() {
+  allSites = await api('/api/sites');
+  populateSiteSelects();
+  renderSidebarRail();
+}
+
+function populateSiteSelects() {
+  const select = $('#new-zone-site');
+  if (!select) return;
+  const previous = select.value;
+  const orgName = id => (allOrganizations.find(o => o.id === id) || {}).name;
+  select.innerHTML = allSites.map(s => {
+    const label = isSuperAdmin() && orgName(s.organization_id) ? `${orgName(s.organization_id)} — ${s.name}` : s.name;
+    return `<option value="${s.id}">${label}</option>`;
+  }).join('');
+  if (previous && allSites.some(s => String(s.id) === previous)) select.value = previous;
+}
+
+async function loadZones() {
+  allZones = await api('/api/zones');
+  populateZoneSelects();
+  renderSidebarRail();
+}
+
+function populateZoneSelects() {
+  const select = $('#new-sensor-zone');
+  if (!select) return;
+  const previous = select.value;
+  const siteName = id => (allSites.find(s => s.id === id) || {}).name || `#${id}`;
+  select.innerHTML = allZones.map(z => `<option value="${z.id}">${siteName(z.site_id)} — ${z.name}</option>`).join('');
+  if (previous && allZones.some(z => String(z.id) === previous)) select.value = previous;
+}
+
+async function loadSensors() {
+  allSensors = await api('/api/sensors');
+  populateCaptureSensorSelect();
+  renderSidebarRail();
+}
+
+// Scoped to the active Zona's own sensors when Captura was opened from one
+// (selectZoneLeaf sets selectedZoneId), so a capture started/uploaded from
+// "Línea 1" can only ever be attributed to a sensor that's actually in
+// Línea 1 -- otherwise (no Zona context yet, e.g. right after login) shows
+// every sensor in scope, labeled with its Zona so it's still unambiguous.
+function populateCaptureSensorSelect() {
+  const select = $('#capture-sensor-select');
+  if (!select) return;
+  const previous = select.value;
+  const inZone = selectedZoneId != null;
+  const sensors = inZone ? allSensors.filter(s => s.zone_id === selectedZoneId) : allSensors;
+  const zoneName = id => (allZones.find(z => z.id === id) || {}).name || `#${id}`;
+  select.innerHTML = sensors.length
+    ? sensors.map(s => {
+        const label = inZone ? s.name : `${zoneName(s.zone_id)} — ${s.name}`;
+        return `<option value="${s.id}">${escapeHtml(label)}</option>`;
+      }).join('')
+    : '<option value="">(sin sensores)</option>';
+  if (previous && sensors.some(s => String(s.id) === previous)) select.value = previous;
+  updateCaptureSensorKindUI();
+}
+
+// Toggles the "Captura en vivo" card vs. the "Sensor externo" notice based
+// on the selected sensor's kind -- an external sensor has no remote
+// connection built yet (see SENSOR_KIND_EXTERNAL in models.py), so it can
+// only ever be fed via a pcap upload, never a live capture on this server.
+function updateCaptureSensorKindUI() {
+  const select = $('#capture-sensor-select');
+  const liveCard = $('#live-capture-card');
+  const externalCard = $('#external-sensor-card');
+  const badge = $('#capture-sensor-kind-badge');
+  if (!select || !liveCard || !externalCard) return;
+
+  const sensor = allSensors.find(s => String(s.id) === select.value);
+  const isExternal = sensor ? sensor.kind === 'external' : false;
+  liveCard.classList.toggle('hidden', isExternal);
+  externalCard.classList.toggle('hidden', !isExternal);
+  if (badge) badge.textContent = sensor ? (SENSOR_KIND_LABELS[sensor.kind] || sensor.kind) : '';
+}
+
+async function loadOrganizations() {
+  allOrganizations = await api('/api/organizations');
+  populateOrganizationSelect();
+  populateSiteSelects(); // re-labels site options with org names now that allOrganizations is loaded
+  renderSidebarRail();
+}
+
+function populateOrganizationSelect() {
+  const select = $('#new-site-organization');
+  if (!select) return;
+  const previous = select.value;
+  select.innerHTML = allOrganizations.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+  if (previous && allOrganizations.some(o => String(o.id) === previous)) select.value = previous;
+}
+
+function toggleFlyout(key) {
+  openFlyoutKey = (openFlyoutKey === key) ? null : key;
+  renderSidebarRail();
+}
+
+function closeFlyout() {
+  openFlyoutKey = null;
+  renderSidebarRail();
+}
+
+function selectOrgContext(orgId) {
+  selectedOrgId = orgId;
+  currentSiteId = null; // re-derived to the new org's first site on next render
+  activeRailKey = null;
+  openFlyoutKey = null;
+  renderSidebarRail();
+}
+
+function selectSiteContext(siteId) {
+  currentSiteId = siteId;
+  activeRailKey = null;
+  openFlyoutKey = null;
+  renderSidebarRail();
+}
+
+function renderSidebarRail() {
+  const container = $('#sidebar-rail');
+  if (!container || !currentUser) return;
+  if (!isSuperAdmin() && !currentUser.organization_id) { container.innerHTML = ''; renderFlyoutPanel(); return; }
+
+  const admin = isAdmin();
+  // Defaults to the first organization the first time (or after the
+  // previously selected one no longer exists, e.g. right after login).
+  if (isSuperAdmin() && allOrganizations.length && (selectedOrgId == null || !allOrganizations.some(o => o.id === selectedOrgId))) {
+    selectedOrgId = allOrganizations[0].id;
+  }
+  const orgId = currentOrgId();
+
+  let orgCardHtml = '';
+  if (orgId != null) {
+    const org = allOrganizations.find(o => o.id === orgId) || { id: orgId, name: currentUser.organization_name || currentUser.username };
+    orgCardHtml = `
+      <div class="rail-card${openFlyoutKey === 'org-switcher' ? ' open' : ''}" onclick="toggleFlyout('org-switcher')">
+        <div class="rail-card-text">
+          <div class="rail-card-label">Organización</div>
+          <div class="rail-card-value" title="${escapeHtml(org.name)}">${escapeHtml(org.name)}</div>
+        </div>
+        <span class="rail-card-chevron">›</span>
+      </div>`;
+  } else if (isSuperAdmin()) {
+    orgCardHtml = `
+      <div class="rail-card${openFlyoutKey === 'org-switcher' ? ' open' : ''}" onclick="toggleFlyout('org-switcher')">
+        <div class="rail-card-text">
+          <div class="rail-card-label">Organización</div>
+          <div class="rail-card-value">Sin organizaciones</div>
+        </div>
+        <span class="rail-card-chevron">›</span>
+      </div>`;
+  }
+
+  const sitesForOrg = orgId != null ? allSites.filter(s => s.organization_id === orgId) : [];
+  if (currentSiteId == null || !sitesForOrg.some(s => s.id === currentSiteId)) {
+    currentSiteId = sitesForOrg.length ? sitesForOrg[0].id : null;
+  }
+  const currentSite = sitesForOrg.find(s => s.id === currentSiteId) || null;
+
+  let siteCardHtml = '';
+  if (orgId != null) {
+    siteCardHtml = `
+      <div class="rail-card${openFlyoutKey === 'site-switcher' ? ' open' : ''}" onclick="toggleFlyout('site-switcher')">
+        <div class="rail-card-text">
+          <div class="rail-card-label">Sitio</div>
+          <div class="rail-card-value" title="${escapeHtml(currentSite ? currentSite.name : '')}">${currentSite ? escapeHtml(currentSite.name) : 'Sin sitios'}</div>
+        </div>
+        <span class="rail-card-chevron">›</span>
+      </div>`;
+  }
+
+  const zonesForSite = currentSiteId != null ? allZones.filter(z => z.site_id === currentSiteId) : [];
+  const zoneRowsHtml = zonesForSite.map(zone => {
+    const key = `zone-${zone.id}`;
+    return `
+      <button type="button" class="rail-item${openFlyoutKey === key ? ' open' : ''}${activeRailKey === key ? ' active' : ''}" onclick="toggleFlyout('${key}')">
+        <span class="rail-item-label" title="${escapeHtml(zone.name)}">${escapeHtml(zone.name)}</span>
+        <span class="rail-item-chevron">›</span>
+      </button>`;
+  }).join('');
+  const emptyZonesHtml = (currentSiteId != null && !zonesForSite.length)
+    ? `<div class="tree-empty">${admin ? 'Sin zonas — creá una con "+ Zona"' : 'Sin zonas'}</div>` : '';
+  const addZoneHtml = (admin && currentSiteId != null)
+    ? `<button type="button" class="rail-add" onclick="openCreateZone(${currentSiteId})">+ Zona</button>` : '';
+
+  const reportsHtml = currentSiteId != null ? `
+    <button type="button" class="rail-item${openFlyoutKey === 'reports' ? ' open' : ''}${activeRailKey === 'reports' ? ' active' : ''}" onclick="toggleFlyout('reports')">
+      <span class="rail-item-label">Reportes</span>
+      <span class="rail-item-chevron">›</span>
+    </button>` : '';
+
+  const orgAdminHtml = (admin && orgId != null) ? `
+    <button type="button" class="rail-item${openFlyoutKey === 'org-admin' ? ' open' : ''}${activeRailKey === 'org-admin' ? ' active' : ''}" onclick="toggleFlyout('org-admin')">
+      <span class="rail-item-label">Administración</span>
+      <span class="rail-item-chevron">›</span>
+    </button>` : '';
+
+  container.innerHTML = `
+    ${orgCardHtml}
+    ${siteCardHtml}
+    <div class="rail-list">
+      ${zoneRowsHtml}
+      ${emptyZonesHtml}
+      ${addZoneHtml}
+      ${reportsHtml}
+      ${orgAdminHtml}
+    </div>`;
+
+  renderFlyoutPanel();
+}
+
+function renderFlyoutPanel() {
+  const backdrop = $('#flyout-backdrop');
+  const panel = $('#flyout-panel');
+  if (!panel || !backdrop) return;
+  if (!openFlyoutKey) {
+    backdrop.classList.add('hidden');
+    panel.classList.add('hidden');
+    panel.innerHTML = '';
+    return;
+  }
+  backdrop.classList.remove('hidden');
+  panel.classList.remove('hidden');
+  if (openFlyoutKey === 'org-switcher') panel.innerHTML = buildOrgSwitcherFlyout();
+  else if (openFlyoutKey === 'site-switcher') panel.innerHTML = buildSiteSwitcherFlyout();
+  else if (openFlyoutKey === 'org-admin') panel.innerHTML = buildOrgAdminFlyout();
+  else if (openFlyoutKey === 'reports') panel.innerHTML = buildReportsFlyout();
+  else if (openFlyoutKey.startsWith('zone-')) panel.innerHTML = buildZoneFlyout(Number(openFlyoutKey.slice(5)));
+  else panel.innerHTML = '';
+}
+
+function buildOrgSwitcherFlyout() {
+  const rows = allOrganizations.map(o => `
+    <div class="flyout-row">
+      <button type="button" class="flyout-link" onclick="selectOrgContext(${o.id})">${escapeHtml(o.name)}</button>
+      ${isSuperAdmin() ? `<button type="button" class="flyout-icon-btn" onclick="renameOrganization(${o.id})" title="Renombrar">✎</button>` : ''}
+    </div>`).join('');
+  return `
+    <div class="flyout-header">
+      <div class="flyout-title">Organización</div>
+      <button type="button" class="flyout-close" onclick="closeFlyout()">×</button>
+    </div>
+    ${rows || '<div class="flyout-empty">Sin organizaciones</div>'}
+    ${isSuperAdmin() ? `<button type="button" class="flyout-add" onclick="openCreateOrg()">+ Nueva organización</button>` : ''}`;
+}
+
+function buildSiteSwitcherFlyout() {
+  const orgId = currentOrgId();
+  const admin = isAdmin();
+  const sites = orgId != null ? allSites.filter(s => s.organization_id === orgId) : [];
+  const rows = sites.map(s => `
+    <div class="flyout-row">
+      <button type="button" class="flyout-link" onclick="selectSiteContext(${s.id})">${escapeHtml(s.name)}</button>
+      ${admin ? `<button type="button" class="flyout-icon-btn" onclick="renameSite(${s.id})" title="Renombrar">✎</button>` : ''}
+    </div>`).join('');
+  return `
+    <div class="flyout-header">
+      <div class="flyout-title">Sitio</div>
+      <button type="button" class="flyout-close" onclick="closeFlyout()">×</button>
+    </div>
+    ${rows || `<div class="flyout-empty">Sin sitios</div>`}
+    ${admin && orgId != null ? `<button type="button" class="flyout-add" onclick="openCreateSite(${orgId})">+ Nuevo sitio</button>` : ''}`;
+}
+
+function buildZoneFlyout(zoneId) {
+  const zone = allZones.find(z => z.id === zoneId);
+  if (!zone) return '<div class="flyout-empty">Zona no encontrada</div>';
+  const admin = isAdmin();
+  const sensorsForZone = allSensors.filter(s => s.zone_id === zone.id);
+  const sensorLine = sensorsForZone.length
+    ? sensorsForZone.map(s => `${escapeHtml(s.name)} (${SENSOR_KIND_LABELS[s.kind] || s.kind})`).join(', ')
+    : (admin ? 'Sin sensores — creá uno abajo' : 'Sin sensores');
+  const monitorLinks = ZONE_LEAVES.filter(l => ZONE_MONITOR_TABS.includes(l.tab)).map(l => `
+    <button type="button" class="flyout-link" onclick="selectZoneLeaf(${zone.id}, '${l.tab}')">${l.label}</button>`).join('');
+  const configureLinks = ZONE_LEAVES.filter(l => ZONE_CONFIGURE_TABS.includes(l.tab)).map(l => `
+    <button type="button" class="flyout-link" onclick="selectZoneLeaf(${zone.id}, '${l.tab}')">${l.label}</button>`).join('');
+
+  return `
+    <div class="flyout-header">
+      <div class="flyout-title" title="${escapeHtml(zone.name)}">${escapeHtml(zone.name)}</div>
+      <button type="button" class="flyout-close" onclick="closeFlyout()">×</button>
+    </div>
+    <div class="flyout-empty">${sensorLine}${zone.security_level ? ' · ' + zone.security_level : ''}</div>
+    <div class="flyout-section-title">Monitor</div>
+    ${monitorLinks}
+    <div class="flyout-section-title">Configure</div>
+    ${configureLinks}
+    ${admin ? `<button type="button" class="flyout-link" onclick="openCreateSensor(${zone.id})">+ Sensor</button>` : ''}
+    ${admin ? `<button type="button" class="flyout-link" onclick="renameZone(${zone.id})">✎ Renombrar zona</button>` : ''}`;
+}
+
+function buildReportsFlyout() {
+  return `
+    <div class="flyout-header">
+      <div class="flyout-title">Reportes</div>
+      <button type="button" class="flyout-close" onclick="closeFlyout()">×</button>
+    </div>
+    <div class="flyout-section-title">Monitor</div>
+    <button type="button" class="flyout-link" onclick="selectSiteLeaf(${currentSiteId}, 'reports')">Resumen combinado</button>`;
+}
+
+function buildOrgAdminFlyout() {
+  const orgId = currentOrgId();
+  const org = allOrganizations.find(o => o.id === orgId);
+  const title = org ? org.name : (currentUser.organization_name || 'Organización');
+  return `
+    <div class="flyout-header">
+      <div class="flyout-title" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
+      <button type="button" class="flyout-close" onclick="closeFlyout()">×</button>
+    </div>
+    <div class="flyout-section-title">Configure</div>
+    <button type="button" class="flyout-link" onclick="openUsersFor(${orgId})">Usuarios</button>`;
+}
+
+async function renameOrganization(id) {
+  const org = allOrganizations.find(o => o.id === id);
+  const name = (prompt('Nuevo nombre de la organización:', org ? org.name : '') || '').trim();
+  if (!name || (org && name === org.name)) return;
+  try {
+    await api(`/api/organizations/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    loadOrganizations();
+  } catch (e) { alert('No se pudo renombrar la organización: ' + e.message); }
+}
+
+async function renameSite(id) {
+  const site = allSites.find(s => s.id === id);
+  const name = (prompt('Nuevo nombre del sitio:', site ? site.name : '') || '').trim();
+  if (!name || (site && name === site.name)) return;
+  try {
+    await api(`/api/sites/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    loadSites();
+  } catch (e) { alert('No se pudo renombrar el sitio: ' + e.message); }
+}
+
+async function renameZone(id) {
+  const zone = allZones.find(z => z.id === id);
+  const name = (prompt('Nuevo nombre de la zona:', zone ? zone.name : '') || '').trim();
+  if (!name || (zone && name === zone.name)) return;
+  try {
+    await api(`/api/zones/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    loadZones();
+  } catch (e) { alert('No se pudo renombrar la zona: ' + e.message); }
+}
+
+function selectZoneLeaf(zoneId, tabName) {
+  const zone = allZones.find(z => z.id === zoneId);
+  const site = zone ? allSites.find(s => s.id === zone.site_id) : null;
+  const orgName = site
+    ? (isSuperAdmin() ? (allOrganizations.find(o => o.id === site.organization_id) || {}).name : currentUser.organization_name)
+    : null;
+
+  activateTab(tabName); // resets activeRailKey/openFlyoutKey/breadcrumb -- set back below
+  selectedZoneId = zoneId;
+  selectedLeafTab = tabName;
+  activeRailKey = `zone-${zoneId}`;
+
+  const breadcrumb = $('#zone-breadcrumb');
+  const path = $('#zone-breadcrumb-path');
+  const note = $('#zone-breadcrumb-note');
+  if (zone && site && breadcrumb && path) {
+    const leafLabel = (ZONE_LEAVES.find(l => l.tab === tabName) || {}).label || tabName;
+    path.innerHTML = `<b>${escapeHtml(orgName || '—')}</b> › <b>${escapeHtml(site.name)}</b> › <b>${escapeHtml(zone.name)}</b> › ${escapeHtml(leafLabel)}`;
+    if (note) note.textContent = 'filtrado por esta Zona';
+    breadcrumb.classList.remove('hidden');
+  }
+  populateCaptureSensorSelect();
+  // Refetches with the new selectedZoneId already in place, via
+  // zoneFilterQuery() -- otherwise the view would keep showing whatever
+  // (unfiltered, or a different Zona's) data the last periodic refresh
+  // happened to load.
+  loadSessions();
+  loadDevices();
+  loadFlows();
+  loadFindings();
+  renderSidebarRail();
+}
+
+function selectSiteLeaf(siteId, tabName) {
+  const site = allSites.find(s => s.id === siteId);
+  const orgName = site
+    ? (isSuperAdmin() ? (allOrganizations.find(o => o.id === site.organization_id) || {}).name : currentUser.organization_name)
+    : null;
+
+  activateTab(tabName);
+  selectedSiteId = siteId;
+  selectedLeafTab = tabName;
+  activeRailKey = 'reports';
+
+  const breadcrumb = $('#zone-breadcrumb');
+  const path = $('#zone-breadcrumb-path');
+  const note = $('#zone-breadcrumb-note');
+  if (site && breadcrumb && path) {
+    const leafLabel = (SITE_LEAVES.find(l => l.tab === tabName) || {}).label || tabName;
+    path.innerHTML = `<b>${escapeHtml(orgName || '—')}</b> › <b>${escapeHtml(site.name)}</b> › ${escapeHtml(leafLabel)}`;
+    // Unlike the Zona leaves, Reportes is org-wide by design, not a
+    // filtering gap waiting on a follow-up -- see the SITE_LEAVES comment.
+    if (note) note.textContent = 'mostrando datos de toda la organización';
+    breadcrumb.classList.remove('hidden');
+  }
+  // selectedZoneId is already null here (activateTab reset it, and Reportes
+  // never sets it) -- these refetch without a zone_id filter, back to the
+  // org-wide totals Reportes is meant to show even right after leaving a
+  // Zona's filtered view.
+  loadSessions();
+  loadDevices();
+  loadFlows();
+  loadFindings();
+  renderSidebarRail();
+}
+
+function openCreateSite(organizationId) {
+  activateTab('create-site');
+  const select = $('#new-site-organization');
+  if (select) select.value = String(organizationId);
+}
+
+function openCreateZone(siteId) {
+  activateTab('create-zone');
+  const select = $('#new-zone-site');
+  if (select) select.value = String(siteId);
+}
+
+function openCreateSensor(zoneId) {
+  activateTab('create-sensor');
+  const select = $('#new-sensor-zone');
+  if (select) select.value = String(zoneId);
+}
+
+function openCreateOrg() {
+  activateTab('create-org');
+}
+
+function openUsersFor(organizationId) {
+  usersFilterOrgId = organizationId;
+  activateTab('users'); // resets activeRailKey -- set back below
+  activeRailKey = 'org-admin';
+  loadUsers();
+  renderSidebarRail();
+}
+
+$('#create-site-btn').addEventListener('click', async () => {
+  const name = $('#new-site-name').value.trim();
+  const city = $('#new-site-city').value.trim();
+  const country = $('#new-site-country').value.trim();
+  const timezone = $('#new-site-timezone').value.trim();
+  const organizationSelect = $('#new-site-organization');
+  const payload = { name, city: city || null, country: country || null, timezone: timezone || null };
+  if (isSuperAdmin() && organizationSelect.value) payload.organization_id = Number(organizationSelect.value);
+  $('#create-site-error').textContent = '';
+  try {
+    await api('/api/sites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    $('#new-site-name').value = '';
+    $('#new-site-city').value = '';
+    $('#new-site-country').value = '';
+    $('#new-site-timezone').value = '';
+    loadSites();
+  } catch (e) { $('#create-site-error').textContent = e.message; }
+});
+
+$('#create-zone-btn').addEventListener('click', async () => {
+  const site_id = Number($('#new-zone-site').value);
+  const name = $('#new-zone-name').value.trim();
+  const description = $('#new-zone-description').value.trim();
+  const security_level = $('#new-zone-security-level').value || null;
+  $('#create-zone-error').textContent = '';
+  try {
+    await api('/api/zones', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ site_id, name, description: description || null, security_level }),
+    });
+    $('#new-zone-name').value = '';
+    $('#new-zone-description').value = '';
+    $('#new-zone-security-level').value = '';
+    loadZones();
+  } catch (e) { $('#create-zone-error').textContent = e.message; }
+});
+
+$('#create-sensor-btn').addEventListener('click', async () => {
+  const zone_id = Number($('#new-sensor-zone').value);
+  const name = $('#new-sensor-name').value.trim();
+  const description = $('#new-sensor-description').value.trim();
+  const kind = $('#new-sensor-kind').value;
+  $('#create-sensor-error').textContent = '';
+  try {
+    await api('/api/sensors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zone_id, name, description: description || null, kind }),
+    });
+    $('#new-sensor-name').value = '';
+    $('#new-sensor-description').value = '';
+    loadSensors();
+  } catch (e) { $('#create-sensor-error').textContent = e.message; }
+});
+
+// The backend requires the slug to be lowercase (^[a-z0-9][a-z0-9-]*$,
+// see OrganizationCreateRequest) -- auto-deriving it from the name, and
+// sanitizing whatever's typed directly into it, means a mixed-case name
+// like "Netmask-co" never trips that validation in the first place.
+let orgSlugTouched = false;
+function slugify(value) {
+  return value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+/, '');
+}
+$('#new-org-name').addEventListener('input', () => {
+  if (!orgSlugTouched) $('#new-org-slug').value = slugify($('#new-org-name').value);
+});
+$('#new-org-slug').addEventListener('input', (e) => {
+  orgSlugTouched = true;
+  const sanitized = slugify(e.target.value);
+  if (sanitized !== e.target.value) e.target.value = sanitized;
+});
+
+$('#create-org-btn').addEventListener('click', async () => {
+  const name = $('#new-org-name').value.trim();
+  const slug = $('#new-org-slug').value.trim();
+  const deployment_mode = $('#new-org-deployment-mode').value;
+  const admin_username = $('#new-org-admin-username').value.trim();
+  const admin_password = $('#new-org-admin-password').value;
+  $('#create-org-error').textContent = '';
+  try {
+    const created = await api('/api/organizations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, slug, deployment_mode, admin_username, admin_password }),
+    });
+    $('#new-org-name').value = '';
+    $('#new-org-slug').value = '';
+    $('#new-org-admin-username').value = '';
+    $('#new-org-admin-password').value = '';
+    orgSlugTouched = false;
+    selectedOrgId = created.organization.id; // jump the org switcher straight to the one just created
+    loadOrganizations();
+  } catch (e) { $('#create-org-error').textContent = e.message; }
+});
+
+$('#theme-switch').addEventListener('click', toggleTheme);
+window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+  if (!getStoredTheme()) updateThemeToggleUI();
+});
+updateThemeToggleUI();
+
+$('#lang-switch').addEventListener('click', toggleLocale);
 
 // ---------- boot ----------
 (async function boot() {
