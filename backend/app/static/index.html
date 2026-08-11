@@ -480,6 +480,7 @@
           <select id="capture-sensor-select" onchange="updateCaptureSensorKindUI()"></select>
         </div>
         <div id="capture-sensor-kind-badge" class="muted" style="align-self:center; font-size:12.5px;"></div>
+        <button type="button" class="action secondary" onclick="openCreateSensor(selectedZoneId)" data-i18n="capture.add_sensor">+ Sensor</button>
       </div>
     </div>
 
@@ -983,6 +984,7 @@ const I18N = {
   'common.clear_filters': { es: 'Limpiar filtros', en: 'Clear filters' },
   'capture.live_title': { es: 'Captura en vivo', en: 'Live capture' },
   'capture.sensor': { es: 'Sensor', en: 'Sensor' },
+  'capture.add_sensor': { es: '+ Sensor', en: '+ Sensor' },
   'capture.pcap_sensor_hint': { es: 'Se asocia al sensor seleccionado arriba.', en: 'Attributed to the sensor selected above.' },
   'capture.external_title': { es: 'Sensor externo', en: 'External sensor' },
   'capture.external_hint': {
@@ -2679,12 +2681,11 @@ function buildZoneFlyout(zoneId) {
   const zone = allZones.find(z => z.id === zoneId);
   if (!zone) return '<div class="flyout-empty">Zona no encontrada</div>';
   const admin = isAdmin();
-  const sensorsForZone = allSensors.filter(s => s.zone_id === zone.id);
-  const sensorLine = sensorsForZone.length
-    ? sensorsForZone.map(s => `${escapeHtml(s.name)} (${SENSOR_KIND_LABELS[s.kind] || s.kind})`).join(', ')
-    : (admin ? 'Sin sensores — creá uno abajo' : 'Sin sensores');
   const monitorLinks = ZONE_LEAVES.filter(l => ZONE_MONITOR_TABS.includes(l.tab)).map(l => `
     <button type="button" class="flyout-link" onclick="selectZoneLeaf(${zone.id}, '${l.tab}')">${l.label}</button>`).join('');
+  // "+ Sensor" lives inside the Captura tab itself now (next to the
+  // sensor picker), not here -- managing sensors is something you do
+  // while already looking at Captura, not a separate menu action.
   const configureLinks = ZONE_LEAVES.filter(l => ZONE_CONFIGURE_TABS.includes(l.tab)).map(l => `
     <button type="button" class="flyout-link" onclick="selectZoneLeaf(${zone.id}, '${l.tab}')">${l.label}</button>`).join('');
 
@@ -2693,12 +2694,10 @@ function buildZoneFlyout(zoneId) {
       <div class="flyout-title" title="${escapeHtml(zone.name)}">${escapeHtml(zone.name)}</div>
       <button type="button" class="flyout-close" onclick="closeFlyout()">×</button>
     </div>
-    <div class="flyout-empty">${sensorLine}${zone.security_level ? ' · ' + zone.security_level : ''}</div>
     <div class="flyout-section-title">Monitor</div>
     ${monitorLinks}
     <div class="flyout-section-title">Configure</div>
     ${configureLinks}
-    ${admin ? `<button type="button" class="flyout-link" onclick="openCreateSensor(${zone.id})">+ Sensor</button>` : ''}
     ${admin ? `<button type="button" class="flyout-link" onclick="renameZone(${zone.id})">✎ Renombrar zona</button>` : ''}`;
 }
 
