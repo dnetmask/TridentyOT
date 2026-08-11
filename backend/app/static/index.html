@@ -627,6 +627,7 @@
   </section>
 
   <section id="tab-users" class="tab">
+    <div class="muted" id="users-org-note" style="font-size:12.5px; margin: -4px 0 12px;"></div>
     <div class="card">
       <h2 data-i18n="users.create_title">Crear usuario</h2>
       <div class="row">
@@ -1250,10 +1251,12 @@ $('#logout-btn').addEventListener('click', async () => {
 });
 
 function activateTab(name) {
-  // Defaults to "no Zona selected" on every switch; selectZoneTab() (the
-  // only path that reaches a Zona's Captura/Inventario/Flujos/
-  // Vulnerabilidades/Reportes) sets it back right after calling this.
+  // Defaults to "nothing selected" on every switch; selectZoneTab() (for a
+  // Zona's Captura/Inventario/Flujos/Vulnerabilidades) and selectSiteTab()
+  // (for a Sitio's Reportes) set the relevant one back right after calling
+  // this.
   selectedZoneId = null;
+  selectedSiteId = null;
   selectedLeafTab = null;
   const breadcrumb = $('#zone-breadcrumb');
   if (breadcrumb) breadcrumb.classList.add('hidden');
@@ -2005,11 +2008,12 @@ $('#export-vuln-pdf-btn').addEventListener('click', () => {
 });
 
 // ---------- Reportes tab: combined inventory + vulnerabilities + captures ----------
-// NOTE: not yet scoped to the Zona the sidebar tree is showing when this
-// tab is opened -- same org-wide data as every other tab, see the
-// zone-breadcrumb note. Real per-zone filtering is a follow-up (there's no
-// zone_id on Device/Flow/VulnerabilityFinding yet, only a
-// capture_session -> sensor -> zone chain -- see docs).
+// NOTE: deliberately org-wide, not scoped to the Sitio it's opened from --
+// unlike Captura/Inventario/Flujos/Vulnerabilidades (which show the whole
+// organization only because per-zone filtering isn't built yet), Reportes
+// is meant to always summarize the entire organization. That's also why it
+// lives at the Sitio level in the tree (SITE_LEAVES) instead of nested
+// under each Zona.
 function renderReportsTab() {
   const totalDevices = allDevices.length;
   const otDevices = allDevices.filter(d => d.is_ot_suspected).length;
@@ -2117,10 +2121,30 @@ $('#export-full-report-pdf-btn').addEventListener('click', () => {
 // ---------- Users tab (admin only) ----------
 let allUsers = [];
 
+// Only meaningful for a Super Admin, who can see every organization's
+// users -- null means "no organization chosen yet, show them all" (the
+// state right after login, before any tree "Usuarios" click). An admin
+// always sees their own organization regardless of this value; the
+// backend enforces that too, this is just what the frontend requests.
+let usersFilterOrgId = null;
+
 async function loadUsers() {
   if (!isAdmin()) return;
-  allUsers = await api('/api/users');
+  const qs = isSuperAdmin() && usersFilterOrgId != null ? `?organization_id=${usersFilterOrgId}` : '';
+  allUsers = await api('/api/users' + qs);
   renderUsersTable();
+  renderUsersOrgNote();
+}
+
+function renderUsersOrgNote() {
+  const note = $('#users-org-note');
+  if (!note) return;
+  if (isSuperAdmin() && usersFilterOrgId != null) {
+    const org = allOrganizations.find(o => o.id === usersFilterOrgId);
+    note.textContent = `Gestionando usuarios de: ${org ? org.name : '#' + usersFilterOrgId}`;
+  } else {
+    note.textContent = '';
+  }
 }
 
 function renderUsersTable() {
@@ -2185,11 +2209,13 @@ $('#create-user-btn').addEventListener('click', async () => {
   const password = $('#new-user-password').value;
   const role = $('#new-user-role').value;
   $('#create-user-error').textContent = '';
+  const payload = { username, password, role };
+  if (isSuperAdmin()) payload.organization_id = usersFilterOrgId;
   try {
     await api('/api/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, role }),
+      body: JSON.stringify(payload),
     });
     $('#new-user-username').value = '';
     $('#new-user-password').value = '';
@@ -2203,6 +2229,7 @@ let allZones = [];
 let allSensors = [];
 let allOrganizations = [];
 let selectedZoneId = null;
+let selectedSiteId = null;
 let selectedLeafTab = null;
 const collapsedTreeNodes = new Set();
 
@@ -2212,6 +2239,13 @@ const ZONE_LEAVES = [
   { tab: 'inventory', label: 'Inventario' },
   { tab: 'flows', label: 'Flujos' },
   { tab: 'vulns', label: 'Vulnerabilidades' },
+];
+// Reportes lives one level up from the Zona leaves, at the Sitio itself --
+// unlike Captura/Inventario/Flujos/Vulnerabilidades it's not pretending to
+// be zone-scoped: it's deliberately always a whole-organization summary
+// (inventory + vulnerabilities + captures), so it doesn't belong under any
+// one Zona.
+const SITE_LEAVES = [
   { tab: 'reports', label: 'Reportes' },
 ];
 
@@ -2314,6 +2348,9 @@ function renderSiteNode(site) {
   const key = `site-${site.id}`;
   const admin = isAdmin();
   const zones = allZones.filter(z => z.site_id === site.id);
+  const siteLeaves = SITE_LEAVES.map(leaf => `
+    <button type="button" class="tree-leaf${selectedSiteId === site.id && selectedLeafTab === leaf.tab ? ' active' : ''}"
+      onclick="selectSiteTab(${site.id}, '${leaf.tab}')">${leaf.label}</button>`).join('');
   return `
     <div class="tree-node">
       <div class="tree-row">
@@ -2323,6 +2360,7 @@ function renderSiteNode(site) {
       </div>
       <div class="tree-children${collapsedTreeNodes.has(key) ? ' collapsed' : ''}">
         ${zones.length ? zones.map(renderZoneNode).join('') : `<div class="tree-empty">Sin zonas${admin ? ' — creá una con "+ Zona"' : ''}</div>`}
+        ${siteLeaves}
       </div>
     </div>`;
 }
@@ -2387,9 +2425,35 @@ function selectZoneTab(zoneId, tabName) {
 
   const breadcrumb = $('#zone-breadcrumb');
   const path = $('#zone-breadcrumb-path');
+  const note = $('#zone-breadcrumb-note');
   if (zone && site && breadcrumb && path) {
     const leafLabel = (ZONE_LEAVES.find(l => l.tab === tabName) || {}).label || tabName;
     path.innerHTML = `<b>${escapeHtml(orgName || '—')}</b> › <b>${escapeHtml(site.name)}</b> › <b>${escapeHtml(zone.name)}</b> › ${escapeHtml(leafLabel)}`;
+    if (note) note.textContent = 'mostrando datos de toda la organización — filtrado por Zona próximamente';
+    breadcrumb.classList.remove('hidden');
+  }
+  renderNavTree();
+}
+
+function selectSiteTab(siteId, tabName) {
+  const site = allSites.find(s => s.id === siteId);
+  const orgName = site
+    ? (isSuperAdmin() ? (allOrganizations.find(o => o.id === site.organization_id) || {}).name : currentUser.organization_name)
+    : null;
+
+  activateTab(tabName);
+  selectedSiteId = siteId;
+  selectedLeafTab = tabName;
+
+  const breadcrumb = $('#zone-breadcrumb');
+  const path = $('#zone-breadcrumb-path');
+  const note = $('#zone-breadcrumb-note');
+  if (site && breadcrumb && path) {
+    const leafLabel = (SITE_LEAVES.find(l => l.tab === tabName) || {}).label || tabName;
+    path.innerHTML = `<b>${escapeHtml(orgName || '—')}</b> › <b>${escapeHtml(site.name)}</b> › ${escapeHtml(leafLabel)}`;
+    // Unlike the Zona leaves, Reportes is org-wide by design, not a
+    // filtering gap waiting on a follow-up -- see the SITE_LEAVES comment.
+    if (note) note.textContent = 'mostrando datos de toda la organización';
     breadcrumb.classList.remove('hidden');
   }
   renderNavTree();
@@ -2417,11 +2481,10 @@ function openCreateOrg() {
   activateTab('create-org');
 }
 
-function openUsersFor(_organizationId) {
-  // Not yet scoped to a single organization -- GET /api/users returns every
-  // organization's users to a Super Admin (see routes_users.py). Clicking
-  // "Usuarios" from any org node lands on the same shared list for now.
+function openUsersFor(organizationId) {
+  usersFilterOrgId = organizationId;
   activateTab('users');
+  loadUsers();
 }
 
 $('#create-site-btn').addEventListener('click', async () => {

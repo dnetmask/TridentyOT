@@ -174,9 +174,14 @@ class UserCreateRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=4, max_length=256)
     # super_admin is deliberately not assignable here -- this endpoint
-    # always attaches the new user to the caller's own organization, and a
-    # super_admin has none (see routes_users.create_user).
+    # always attaches the new user to an organization, and a super_admin
+    # has none of its own (see routes_users.create_user).
     role: Literal["admin", "viewer"]
+    # Only used (and required) when the caller is a super_admin, who has no
+    # organization of their own to default to -- ignored for an admin,
+    # whose new user always belongs to their own organization. Mirrors
+    # SiteCreateRequest.organization_id.
+    organization_id: int | None = None
 
 
 class UserUpdateRequest(BaseModel):

@@ -13,9 +13,19 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 
 
 @router.get("", response_model=list[UserOut])
-def list_users(db: Session = Depends(get_db), current: User = Depends(require_admin)):
+def list_users(
+    organization_id: int | None = None,
+    db: Session = Depends(get_db),
+    current: User = Depends(require_admin),
+):
     query = db.query(User)
-    if not is_super_admin(current):
+    if is_super_admin(current):
+        if organization_id is not None:
+            query = query.filter(User.organization_id == organization_id)
+    else:
+        # An admin can only ever see their own organization's users --
+        # any organization_id they pass is ignored rather than honored, so
+        # they can't probe another organization's user list by guessing ids.
         query = query.filter(User.organization_id == current.organization_id)
     return query.order_by(User.username).all()
 
@@ -23,14 +33,19 @@ def list_users(db: Session = Depends(get_db), current: User = Depends(require_ad
 @router.post("", response_model=UserOut, status_code=201)
 def create_user(payload: UserCreateRequest, db: Session = Depends(get_db), current: User = Depends(require_admin)):
     if current.organization_id is None:
-        # A super_admin has no organization of its own to attach a new user
-        # to -- creating a user *within* a specific organization is a
-        # separate, not-yet-built endpoint (see docs, Parte C paso 2).
-        raise HTTPException(status_code=400, detail=message("users.super_admin_has_no_organization", current.locale))
+        # A super_admin has no organization of its own to default to --
+        # they must say which organization the new user belongs to.
+        if payload.organization_id is None:
+            raise HTTPException(status_code=400, detail=message("users.super_admin_has_no_organization", current.locale))
+        organization_id = payload.organization_id
+    else:
+        # An admin's new user always belongs to their own organization --
+        # any organization_id they pass is ignored, mirroring list_users.
+        organization_id = current.organization_id
 
     if (
         db.query(User)
-        .filter(User.organization_id == current.organization_id, User.username == payload.username)
+        .filter(User.organization_id == organization_id, User.username == payload.username)
         .one_or_none()
         is not None
     ):
@@ -38,7 +53,7 @@ def create_user(payload: UserCreateRequest, db: Session = Depends(get_db), curre
 
     salt, password_hash = hash_password(payload.password)
     user = User(
-        organization_id=current.organization_id,
+        organization_id=organization_id,
         username=payload.username,
         password_salt=salt,
         password_hash=password_hash,
