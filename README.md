@@ -317,15 +317,27 @@ por límite técnico. Cada host que responde entra al inventario igual que uno p
 identifica alimenta la misma búsqueda en NVD que ya usa la captura pasiva
 (`vuln.rules.extract_banner_product_version`) -- ese es el objetivo real de esta opción: no solo
 inventariar, sino darle a Vulnerabilidades algo que buscar cuando la captura pasiva todavía no vio
-suficiente tráfico del servicio como para tener su banner. Requiere rol admin, un sensor **en
-vivo**, y un objetivo (host o red/CIDR pequeña -- no está pensado para barrer rangos grandes: el
-tiempo máximo de escaneo es un límite duro de 300 segundos, y si se alcanza sin terminar, la sesión
-queda en error en vez de devolver resultados parciales). Por API:
+suficiente tráfico del servicio como para tener su banner. Requiere rol admin y un sensor **en
+vivo**.
+
+No tiene un tiempo máximo fijo -- corre hasta que nmap termina solo o hasta que se lo detiene a
+mano (botón **Detener**, o `POST /api/discovery/nmap/stop/{id}`). Mientras corre, una barra de
+avance muestra cuántas de las IPs del objetivo ya se escanearon (parseando en vivo la salida de
+`nmap -v`) y el contador de "equipos identificados" sube en tiempo real, no solo al terminar --
+cada host que nmap ya reportó se reingresa al inventario en cada actualización (`GET
+/api/capture/sessions/{id}` expone `progress_percent`/`packet_count` para esto). Si se detiene a
+mitad de camino, no se pierden los resultados ya obtenidos: el XML parcial de nmap queda sin sus
+etiquetas de cierre, pero cada bloque `<host>` que sí se terminó de escribir se recupera igual (ver
+`_make_xml_parseable` en `app/capture/nmap_discovery.py`), solo se descarta el host que estaba a
+medio escanear en el momento de la interrupción. Por API:
 
 ```bash
 curl -X POST http://localhost:8000/api/discovery/nmap \
   -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
-  -d '{"target": "192.168.1.0/24", "sensor_id": 1, "duration_seconds": 60}'
+  -d '{"target": "192.168.1.0/24", "sensor_id": 1}'
+
+curl -X POST http://localhost:8000/api/discovery/nmap/stop/42 \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 La opción **SNMP** está planeada para el mismo bloque, pero todavía no implementada (aparece como

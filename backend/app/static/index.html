@@ -631,11 +631,14 @@
           <label data-i18n="discovery.nmap_target">Red u host objetivo</label>
           <input id="discovery-nmap-target" placeholder="192.168.1.0/24" />
         </div>
-        <div>
-          <label data-i18n="discovery.duration">Duración (segundos)</label>
-          <input type="number" id="discovery-nmap-duration" value="60" min="10" max="300" style="width:80px" />
-        </div>
         <button class="action" id="start-nmap-scan-btn" data-i18n="discovery.start_scan">Escanear ahora</button>
+        <button class="action danger hidden" id="stop-nmap-scan-btn" data-i18n="discovery.stop_scan">Detener</button>
+      </div>
+      <div id="nmap-scan-progress" class="hidden" style="margin-top:10px;">
+        <div class="progress-cell">
+          <div class="progress-track"><div class="progress-fill" id="nmap-scan-progress-fill" style="width:0%"></div></div>
+          <span class="progress-pct" id="nmap-scan-progress-pct">0%</span>
+        </div>
       </div>
       <div id="nmap-scan-status" class="muted" style="margin-top:10px;"></div>
     </div>
@@ -1096,6 +1099,7 @@ const I18N = {
   },
   'discovery.duration': { es: 'Duración (segundos)', en: 'Duration (seconds)' },
   'discovery.start_scan': { es: 'Escanear ahora', en: 'Scan now' },
+  'discovery.stop_scan': { es: 'Detener', en: 'Stop' },
   'discovery.coming_soon': { es: 'Próximamente', en: 'Coming soon' },
   'discovery.nmap_title': { es: 'Nmap', en: 'Nmap' },
   'discovery.nmap_hint': {
@@ -1561,7 +1565,7 @@ function applySensorDefaultInterface(sensorSelectId, ifaceSelectId) {
 }
 
 function progressCell(s) {
-  if (s.source_type !== 'pcap' || s.progress_percent === null || s.progress_percent === undefined) {
+  if (!['pcap', 'active_nmap'].includes(s.source_type) || s.progress_percent === null || s.progress_percent === undefined) {
     return '<span class="muted">—</span>';
   }
   return `<div class="progress-cell">
@@ -1590,6 +1594,7 @@ function renderSessionsTable() {
       <td data-col="paquetes">${s.packet_count}</td><td data-col="inicio">${fmtDate(s.started_at)}</td>
       <td>
         ${admin && s.status === 'running' && s.source_type === 'live' ? `<button class="action danger" onclick="stopLive(${s.id})">Detener</button>` : ''}
+        ${admin && s.status === 'running' && s.source_type === 'active_nmap' ? `<button class="action danger" onclick="stopNmapSession(${s.id})">Detener</button>` : ''}
         ${admin ? `<button class="action secondary" onclick="deleteSession(${s.id})">Borrar</button>` : ''}
       </td>
     </tr>`).join('');
@@ -1600,6 +1605,13 @@ function renderSessionsTable() {
 async function stopLive(id) {
   try {
     await api(`/api/capture/live/stop/${id}`, { method: 'POST' });
+    loadSessions();
+  } catch (e) { alert('No se pudo detener: ' + e.message); }
+}
+
+async function stopNmapSession(id) {
+  try {
+    await api(`/api/discovery/nmap/stop/${id}`, { method: 'POST' });
     loadSessions();
   } catch (e) { alert('No se pudo detener: ' + e.message); }
 }
@@ -1693,35 +1705,70 @@ $('#start-dcp-scan-btn').addEventListener('click', async () => {
   }
 });
 
+// No fixed duration (unlike PROFINET DCP): this scan runs until nmap
+// finishes on its own or the user clicks Detener, so it needs its own
+// poll loop that keeps updating a progress bar and a live "equipos
+// identificados" count instead of just waiting once for a final result.
+let nmapPollActive = false;
+
+async function pollNmapScanProgress(sessionId) {
+  nmapPollActive = true;
+  const progressBox = $('#nmap-scan-progress');
+  const fill = $('#nmap-scan-progress-fill');
+  const pct = $('#nmap-scan-progress-pct');
+  const status = $('#nmap-scan-status');
+  progressBox.classList.remove('hidden');
+  try {
+    for (;;) {
+      const session = await api(`/api/capture/sessions/${sessionId}`);
+      const percent = session.progress_percent == null ? 0 : session.progress_percent;
+      fill.style.width = `${percent}%`;
+      pct.textContent = `${percent}%`;
+      status.textContent = `Escaneando -- ${session.packet_count} equipo(s) identificado(s) hasta ahora...`;
+      loadDevices(); // so Inventario climbs live too, not only once it's done
+      if (session.status !== 'running') return session;
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  } finally {
+    nmapPollActive = false;
+  }
+}
+
 $('#start-nmap-scan-btn').addEventListener('click', async () => {
   const target = $('#discovery-nmap-target').value.trim();
   if (!target) { alert('Indicá una red o host objetivo'); return; }
   const sensorId = $('#discovery-sensor-select').value;
   if (!sensorId) { alert('Selecciona un sensor en vivo'); return; }
-  const durationSeconds = Number($('#discovery-nmap-duration').value) || 60;
 
-  const btn = $('#start-nmap-scan-btn');
+  const startBtn = $('#start-nmap-scan-btn');
+  const stopBtn = $('#stop-nmap-scan-btn');
   const status = $('#nmap-scan-status');
-  btn.disabled = true;
-  status.textContent = `Escaneando ${target}... (puede tardar hasta ${durationSeconds}s)`;
+  startBtn.disabled = true;
+  stopBtn.classList.remove('hidden');
+  status.textContent = `Escaneando ${target}...`;
   try {
     const started = await api('/api/discovery/nmap', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target, sensor_id: Number(sensorId), duration_seconds: durationSeconds }),
+      body: JSON.stringify({ target, sensor_id: Number(sensorId) }),
     });
-    const finished = await pollCaptureSessionUntilDone(started.id);
+    stopBtn.onclick = () => stopNmapSession(started.id);
+    loadSessions();
+    const finished = await pollNmapScanProgress(started.id);
     if (finished.status === 'error') {
       status.textContent = `Error: ${finished.error_message || 'no se pudo completar el escaneo'}`;
+    } else if (finished.status === 'stopped') {
+      status.textContent = `Detenido -- ${finished.packet_count} equipo(s) identificado(s) antes de parar. Revisá Inventario.`;
     } else {
-      status.textContent = `Listo -- ${finished.packet_count} host(s) encontrado(s). Revisá Inventario y Vulnerabilidades.`;
+      status.textContent = `Listo -- ${finished.packet_count} equipo(s) identificado(s). Revisá Inventario y Vulnerabilidades.`;
     }
     loadSessions();
     loadDevices();
   } catch (e) {
     status.textContent = `No se pudo iniciar el escaneo: ${e.message}`;
   } finally {
-    btn.disabled = false;
+    startBtn.disabled = false;
+    stopBtn.classList.add('hidden');
   }
 });
 

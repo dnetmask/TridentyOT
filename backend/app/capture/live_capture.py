@@ -222,17 +222,19 @@ live_capture_manager = LiveCaptureManager()
 
 
 def mark_orphaned_live_sessions_stopped() -> None:
-    """Called once at app startup. `live_capture_manager` is always empty
-    at this point -- it's a fresh in-memory object -- so any live capture
-    session still marked "running" in the database is necessarily a leftover
-    from a previous process (e.g. the server was restarted or crashed while
-    a capture was active). Left alone, the "Detener" button for one of these
-    used to 409 forever, since there was never a real sniffer left to stop.
+    """Called once at app startup. `live_capture_manager` and
+    `nmap_scan_manager` (see app/capture/nmap_discovery.py) are always
+    empty at this point -- fresh in-memory objects -- so any live capture
+    or nmap scan session still marked "running" in the database is
+    necessarily a leftover from a previous process (e.g. the server was
+    restarted or crashed mid-capture/mid-scan). Left alone, the "Detener"
+    button for one of these used to 409 forever, since there was never a
+    real sniffer/subprocess left to stop.
     """
     with session_scope() as db:
         orphaned = (
             db.query(CaptureSession)
-            .filter(CaptureSession.source_type == "live", CaptureSession.status == "running")
+            .filter(CaptureSession.source_type.in_(["live", "active_nmap"]), CaptureSession.status == "running")
             .all()
         )
         now = datetime.datetime.now(datetime.timezone.utc)
@@ -241,7 +243,7 @@ def mark_orphaned_live_sessions_stopped() -> None:
             session_obj.ended_at = now
             session_obj.error_message = encode_i18n(
                 bilingual(
-                    es="Interrumpida: el servidor se reinició mientras esta captura estaba activa.",
-                    en="Interrupted: the server restarted while this capture was active.",
+                    es="Interrumpida: el servidor se reinició mientras esta captura/escaneo estaba activo.",
+                    en="Interrupted: the server restarted while this capture/scan was active.",
                 )
             )

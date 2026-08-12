@@ -161,13 +161,16 @@ class ProfinetDcpScanRequest(BaseModel):
 
 class NmapScanRequest(BaseModel):
     """A light nmap service/OS scan -- see app/capture/nmap_discovery.py
-    for exactly what it does and doesn't run. sensor_id is required for the
-    same reason as ProfinetDcpScanRequest's: this is a deliberate, explicit
-    active action, never something to auto-pick a target or a sensor for."""
+    for exactly what it does and doesn't run. No duration_seconds: this
+    scan has no fixed time limit, and instead exposes live progress
+    (CaptureSessionOut.progress_percent) and a stop endpoint
+    (POST /api/discovery/nmap/stop/{id}) for cutting it short. sensor_id is
+    required for the same reason as ProfinetDcpScanRequest's: this is a
+    deliberate, explicit active action, never something to auto-pick a
+    target or a sensor for."""
 
     target: str = Field(min_length=1, max_length=255)
     sensor_id: int
-    duration_seconds: float = Field(default=60.0, ge=10, le=300)
 
 
 class ScanRequest(BaseModel):

@@ -121,6 +121,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "Hay más de un sensor disponible: indicá cuál sensor usar para esta captura",
         "en": "More than one sensor is available: specify which sensor this capture belongs to",
     },
+    "discovery.not_an_nmap_session": {
+        "es": "La sesión no es un escaneo de Nmap",
+        "en": "Session is not an Nmap scan",
+    },
     "discovery.sensor_must_be_live": {
         "es": "Este sensor es externo: el descubrimiento activo necesita una interfaz en vivo en este servidor",
         "en": "That sensor is external: active discovery needs a live interface on this server",

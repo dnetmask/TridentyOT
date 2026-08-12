@@ -4,8 +4,34 @@ full or aggressive scan and never an NSE script: those have documented
 cases of putting a live PLC into a fault state, which is exactly the kind
 of risk a "light discovery mode" is meant to avoid. See the investigation
 this followed -- python-nmap adds nothing over shelling out to the real
-`nmap` binary and parsing its own XML output (`-oX -`) directly, which is
-what this does.
+`nmap` binary and parsing its own XML output directly, which is what this
+does.
+
+No fixed time limit: a scan runs until nmap finishes on its own or an
+admin stops it (NmapScanManager.stop, mirroring live_capture.py's own
+manager). Progress and results update live rather than only at the end:
+
+  nmap's own stdout (line-buffered)   this module's worker thread
+  "N hosts left" as each host's   ->  CaptureSession.bytes_processed
+  SYN-scan phase completes            (of .total_bytes, the target's own
+                                       address count -- reuses the same
+                                       progress_percent property pcap
+                                       uploads use, just for a different
+                                       kind of "how far along" this time)
+
+  nmap's own -oX file, growing    ->  re-parsed on the same tick and
+  as each host's <host> block         re-ingested (idempotent -- see
+  is written                          get_or_create_device/upsert_
+                                       protocol), so CaptureSession.
+                                       packet_count (repurposed here as
+                                       "hosts identified so far") and
+                                       Inventario climb during the scan,
+                                       not just once it's done.
+
+Stopping mid-scan (SIGTERM) leaves nmap's XML file without its closing
+tags -- see _make_xml_parseable, which recovers every fully-written
+<host> block and discards whatever host was still in progress, rather
+than losing every result just because the very last one was incomplete.
 
 Feeds each host nmap finds through the same Device/DeviceProtocol
 machinery the passive engine uses (get_or_create_device/upsert_protocol/
@@ -20,12 +46,20 @@ field, on top of whatever passive capture happened to observe.
 """
 
 import datetime
+import ipaddress
+import logging
+import re
 import subprocess
+import tempfile
+import threading
+import time
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.db import session_scope
 from app.fingerprint.os_fingerprint import OsGuess
 from app.fingerprint.protocol_detect import classify
 from app.inventory.inventory_service import (
@@ -38,9 +72,7 @@ from app.inventory.inventory_service import (
 )
 from app.models import CaptureSession
 
-MIN_SCAN_SECONDS = 10
-MAX_SCAN_SECONDS = 300
-DEFAULT_SCAN_SECONDS = 60
+logger = logging.getLogger(__name__)
 
 # Deliberately fixed, not user-configurable, so this stays a "light" scan
 # by construction rather than something that can accidentally be turned
@@ -48,24 +80,47 @@ DEFAULT_SCAN_SECONDS = 60
 #   -F              fast mode -- ~100 common ports, not all 65535
 #   -sV --version-light   cheap version probes (fewer/lighter than plain -sV)
 #   -O              one OS fingerprint pass
+#   -v              needed for the "N hosts left" progress lines this
+#                   module parses -- without it nmap prints only the
+#                   final per-host report, with no incremental signal.
 # No NSE scripts, no UDP, no full port sweep.
-_NMAP_ARGS = ["-T4", "-F", "-sV", "--version-light", "-O"]
+_NMAP_ARGS = ["-T4", "-F", "-sV", "--version-light", "-O", "-v"]
 
-# nmap's own subprocess grace period beyond --host-timeout to finish
-# writing its XML report before this hard-kills it.
-_SUBPROCESS_GRACE_SECONDS = 15
+_HOSTS_LEFT_RE = re.compile(r"\((\d+) hosts? left\)")
+
+# How often (seconds) the worker re-checks the growing XML file and
+# commits progress -- a real-time bound on freshness, not a packet-count
+# one: nmap's own line cadence is unpredictable (long silent stretches
+# during OS detection retries, then a burst of "hosts left" lines).
+_PROGRESS_INTERVAL_SECONDS = 2.0
 
 
-def _run_nmap_xml(target: str, timeout_seconds: float) -> str:
-    proc = subprocess.run(
-        ["nmap", *_NMAP_ARGS, "--host-timeout", f"{int(timeout_seconds)}s", "-oX", "-", target],
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds + _SUBPROCESS_GRACE_SECONDS,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip() or f"nmap exited with status {proc.returncode}")
-    return proc.stdout
+def _estimate_target_count(target: str) -> int:
+    """How many addresses `target` covers, for the progress bar's
+    denominator. Handles the common case (a single host or a CIDR network)
+    exactly; anything nmap itself would treat as a host list (comma-
+    separated, hyphenated ranges, a bare hostname) falls back to a rough
+    comma-count rather than pretending to understand nmap's full target
+    syntax -- an approximate progress bar beats none, but this is not a
+    target-spec parser."""
+    try:
+        return ipaddress.ip_network(target, strict=False).num_addresses
+    except ValueError:
+        return max(1, target.count(",") + 1)
+
+
+def _make_xml_parseable(xml_text: str) -> str:
+    """A scan stopped mid-flight (or killed) leaves nmap's XML without its
+    closing tags, and possibly with the last <host> block half-written --
+    ElementTree refuses to parse that at all. Recovers every *complete*
+    <host>...</host> block instead of losing all of them over one
+    unfinished one."""
+    if xml_text.rstrip().endswith("</nmaprun>"):
+        return xml_text
+    last_host_end = xml_text.rfind("</host>")
+    if last_host_end == -1:
+        return "<nmaprun>\n</nmaprun>"
+    return xml_text[: last_host_end + len("</host>")] + "\n</nmaprun>"
 
 
 def _parse_hosts(xml_text: str) -> list[dict[str, Any]]:
@@ -141,39 +196,143 @@ def _ingest_nmap_host(
     apply_device_type_guess(session, device)
 
 
-def run_nmap_scan(
-    db_session: Session, target: str, duration_seconds: float, capture_session: CaptureSession
-) -> None:
-    try:
-        xml_text = _run_nmap_xml(target, duration_seconds)
-        hosts = _parse_hosts(xml_text)
-
-        cache = IngestCache()
-        for host in hosts:
-            _ingest_nmap_host(db_session, host, capture_session.organization_id, capture_session.id, cache)
-        apply_gateway_detection(db_session, capture_session.organization_id)
-
-        # packet_count doesn't literally apply to an nmap scan (there's no
-        # raw-capture packet count in its XML report) -- repurposed here as
-        # "hosts found up", the closest equivalent summary number the
-        # shared Sesiones de captura table has a column for already.
-        capture_session.packet_count = len(hosts)
-        capture_session.status = "completed"
-    except subprocess.TimeoutExpired:
-        db_session.rollback()
-        capture_session.status = "error"
-        capture_session.error_message = (
-            f"El escaneo no terminó dentro de los {int(duration_seconds)}s permitidos -- "
-            "probá con un objetivo más chico (un host o una subred pequeña)."
+class _NmapScanWorker:
+    def __init__(self, capture_session_id: int, target: str) -> None:
+        self.capture_session_id = capture_session_id
+        self.target = target
+        self.total_targets = _estimate_target_count(target)
+        self._xml_path = Path(tempfile.gettempdir()) / f"tridentyot-nmap-{capture_session_id}.xml"
+        self._stop_requested = False
+        self._process: subprocess.Popen | None = None
+        self._thread = threading.Thread(
+            target=self._run, name=f"nmap-scan-{capture_session_id}", daemon=True
         )
-    except Exception as exc:
-        # Mirrors process_pcap_file/run_profinet_dcp_scan's own handling --
-        # a failed flush/commit can leave the session's transaction aborted
-        # on Postgres, so any further statement (including the finally
-        # block's own commit below) needs a rollback first.
-        db_session.rollback()
-        capture_session.status = "error"
-        capture_session.error_message = str(exc)
-    finally:
-        capture_session.ended_at = datetime.datetime.now(datetime.timezone.utc)
-        db_session.commit()
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_requested = True
+        if self._process is not None and self._process.poll() is None:
+            self._process.terminate()
+
+    def _run(self) -> None:
+        with session_scope() as db:
+            capture_session = db.get(CaptureSession, self.capture_session_id)
+            if capture_session is None:
+                return
+            capture_session.total_bytes = self.total_targets
+            db.commit()
+
+        if self._stop_requested:
+            self._finish("stopped")
+            return
+
+        try:
+            self._process = subprocess.Popen(
+                ["nmap", *_NMAP_ARGS, "-oX", str(self._xml_path), self.target],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+            )
+        except Exception as exc:
+            self._finish("error", str(exc))
+            return
+
+        scanned_so_far = 0
+        last_progress_at = 0.0
+
+        for line in self._process.stdout:
+            match = _HOSTS_LEFT_RE.search(line)
+            if match:
+                scanned_so_far = max(scanned_so_far, self.total_targets - int(match.group(1)))
+            now = time.monotonic()
+            if now - last_progress_at >= _PROGRESS_INTERVAL_SECONDS:
+                self._commit_progress(scanned_so_far)
+                last_progress_at = now
+
+        self._process.wait()
+        self._commit_progress(scanned_so_far)
+        self._finish("stopped" if self._stop_requested else "completed")
+
+    def _read_hosts_so_far(self) -> list[dict[str, Any]]:
+        if not self._xml_path.exists():
+            return []
+        try:
+            xml_text = self._xml_path.read_text()
+        except OSError:
+            return []
+        try:
+            return _parse_hosts(_make_xml_parseable(xml_text))
+        except ET.ParseError:
+            logger.warning("nmap scan %d: XML not parseable yet, skipping this tick", self.capture_session_id)
+            return []
+
+    def _commit_progress(self, scanned_so_far: int) -> None:
+        hosts = self._read_hosts_so_far()
+        with session_scope() as db:
+            capture_session = db.get(CaptureSession, self.capture_session_id)
+            if capture_session is None or capture_session.status != "running":
+                return
+            capture_session.bytes_processed = min(scanned_so_far, self.total_targets)
+            if hosts:
+                cache = IngestCache()
+                for host in hosts:
+                    _ingest_nmap_host(db, host, capture_session.organization_id, capture_session.id, cache)
+                apply_gateway_detection(db, capture_session.organization_id)
+                capture_session.packet_count = len(hosts)
+            db.commit()
+
+    def _finish(self, status: str, error_message: str | None = None) -> None:
+        with session_scope() as db:
+            capture_session = db.get(CaptureSession, self.capture_session_id)
+            if capture_session is None:
+                return
+            try:
+                hosts = self._read_hosts_so_far()
+                if hosts:
+                    cache = IngestCache()
+                    for host in hosts:
+                        _ingest_nmap_host(db, host, capture_session.organization_id, capture_session.id, cache)
+                    apply_gateway_detection(db, capture_session.organization_id)
+                    capture_session.packet_count = len(hosts)
+                if status == "completed":
+                    capture_session.bytes_processed = capture_session.total_bytes
+                capture_session.status = status
+                if error_message:
+                    capture_session.error_message = error_message
+            except Exception as exc:
+                db.rollback()
+                capture_session.status = "error"
+                capture_session.error_message = str(exc)
+            finally:
+                capture_session.ended_at = datetime.datetime.now(datetime.timezone.utc)
+                db.commit()
+        self._xml_path.unlink(missing_ok=True)
+
+
+class NmapScanManager:
+    def __init__(self) -> None:
+        self._workers: dict[int, _NmapScanWorker] = {}
+        self._lock = threading.Lock()
+
+    def start(self, capture_session_id: int, target: str) -> None:
+        worker = _NmapScanWorker(capture_session_id, target)
+        with self._lock:
+            self._workers[capture_session_id] = worker
+        worker.start()
+
+    def stop(self, capture_session_id: int) -> bool:
+        with self._lock:
+            worker = self._workers.pop(capture_session_id, None)
+        if worker is None:
+            return False
+        worker.stop()
+        return True
+
+    def stop_all(self) -> None:
+        with self._lock:
+            session_ids = list(self._workers.keys())
+        for session_id in session_ids:
+            self.stop(session_id)
+
+
+nmap_scan_manager = NmapScanManager()
