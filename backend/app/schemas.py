@@ -173,6 +173,19 @@ class NmapScanRequest(BaseModel):
     sensor_id: int
 
 
+class SnmpScanRequest(BaseModel):
+    """A light SNMP sweep -- see app/capture/snmp_discovery.py for exactly
+    what it does and doesn't run. Same no-fixed-duration/progress/stop
+    shape as NmapScanRequest above (POST /api/discovery/snmp/stop/{id}).
+    Only SNMPv1/v2c (community-string auth) is supported -- see the module
+    docstring for why SNMPv3 is out of scope for a "light" scan."""
+
+    target: str = Field(min_length=1, max_length=255)
+    sensor_id: int
+    community: str = Field(default="public", min_length=1, max_length=255)
+    version: Literal["v1", "v2c"] = "v2c"
+
+
 class ScanRequest(BaseModel):
     device_id: int | None = None
     use_nvd: bool = True

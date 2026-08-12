@@ -125,6 +125,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "La sesión no es un escaneo de Nmap",
         "en": "Session is not an Nmap scan",
     },
+    "discovery.not_an_snmp_session": {
+        "es": "La sesión no es un escaneo SNMP",
+        "en": "Session is not an SNMP scan",
+    },
     "discovery.sensor_must_be_live": {
         "es": "Este sensor es externo: el descubrimiento activo necesita una interfaz en vivo en este servidor",
         "en": "That sensor is external: active discovery needs a live interface on this server",

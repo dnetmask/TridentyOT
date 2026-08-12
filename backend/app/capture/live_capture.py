@@ -222,19 +222,23 @@ live_capture_manager = LiveCaptureManager()
 
 
 def mark_orphaned_live_sessions_stopped() -> None:
-    """Called once at app startup. `live_capture_manager` and
-    `nmap_scan_manager` (see app/capture/nmap_discovery.py) are always
-    empty at this point -- fresh in-memory objects -- so any live capture
-    or nmap scan session still marked "running" in the database is
-    necessarily a leftover from a previous process (e.g. the server was
-    restarted or crashed mid-capture/mid-scan). Left alone, the "Detener"
-    button for one of these used to 409 forever, since there was never a
-    real sniffer/subprocess left to stop.
+    """Called once at app startup. `live_capture_manager`, `nmap_scan_manager`
+    (see app/capture/nmap_discovery.py) and `snmp_scan_manager` (see
+    app/capture/snmp_discovery.py) are always empty at this point -- fresh
+    in-memory objects -- so any live capture or active-discovery scan
+    session still marked "running" in the database is necessarily a
+    leftover from a previous process (e.g. the server was restarted or
+    crashed mid-capture/mid-scan). Left alone, the "Detener" button for one
+    of these used to 409 forever, since there was never a real
+    sniffer/subprocess/sweep left to stop.
     """
     with session_scope() as db:
         orphaned = (
             db.query(CaptureSession)
-            .filter(CaptureSession.source_type.in_(["live", "active_nmap"]), CaptureSession.status == "running")
+            .filter(
+                CaptureSession.source_type.in_(["live", "active_nmap", "active_snmp"]),
+                CaptureSession.status == "running",
+            )
             .all()
         )
         now = datetime.datetime.now(datetime.timezone.utc)

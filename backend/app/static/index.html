@@ -643,14 +643,38 @@
       <div id="nmap-scan-status" class="muted" style="margin-top:10px;"></div>
     </div>
 
-    <div class="card admin-only" style="opacity:0.65;">
-      <div class="flex-between">
-        <h2 data-i18n="discovery.snmp_title">SNMP</h2>
-        <span class="pill" data-i18n="discovery.coming_soon">Próximamente</span>
-      </div>
-      <p class="muted" style="margin:0; font-size:12.5px;" data-i18n="discovery.snmp_hint">
-        Consulta activa vía SNMP (sysDescr, tabla ARP, interfaces). Todavía no disponible.
+    <div class="card admin-only" id="discovery-snmp-card">
+      <h2 data-i18n="discovery.snmp_title">SNMP</h2>
+      <p class="muted" style="margin:0 0 10px; font-size:12.5px;" data-i18n="discovery.snmp_hint">
+        Consulta liviana vía SNMP (sysDescr, sysObjectID, sysName) a cada IP del objetivo --
+        solo SNMPv1/v2c con community string, sin walks completos de MIB.
       </p>
+      <div class="row">
+        <div>
+          <label data-i18n="discovery.snmp_target">Red u host objetivo</label>
+          <input id="discovery-snmp-target" placeholder="192.168.1.0/24" />
+        </div>
+        <div>
+          <label data-i18n="discovery.snmp_community">Community string</label>
+          <input id="discovery-snmp-community" value="public" style="width:110px" />
+        </div>
+        <div>
+          <label data-i18n="discovery.snmp_version">Versión</label>
+          <select id="discovery-snmp-version" style="width:80px">
+            <option value="v2c" selected>v2c</option>
+            <option value="v1">v1</option>
+          </select>
+        </div>
+        <button class="action" id="start-snmp-scan-btn" data-i18n="discovery.start_scan">Escanear ahora</button>
+        <button class="action danger hidden" id="stop-snmp-scan-btn" data-i18n="discovery.stop_scan">Detener</button>
+      </div>
+      <div id="snmp-scan-progress" class="hidden" style="margin-top:10px;">
+        <div class="progress-cell">
+          <div class="progress-track"><div class="progress-fill" id="snmp-scan-progress-fill" style="width:0%"></div></div>
+          <span class="progress-pct" id="snmp-scan-progress-pct">0%</span>
+        </div>
+      </div>
+      <div id="snmp-scan-status" class="muted" style="margin-top:10px;"></div>
     </div>
   </section>
 
@@ -1109,9 +1133,12 @@ const I18N = {
   'discovery.nmap_target': { es: 'Red u host objetivo', en: 'Target network or host' },
   'discovery.snmp_title': { es: 'SNMP', en: 'SNMP' },
   'discovery.snmp_hint': {
-    es: 'Consulta activa vía SNMP (sysDescr, tabla ARP, interfaces). Todavía no disponible.',
-    en: 'Active SNMP querying (sysDescr, ARP table, interfaces). Not available yet.',
+    es: 'Consulta liviana vía SNMP (sysDescr, sysObjectID, sysName) a cada IP del objetivo -- solo SNMPv1/v2c con community string, sin walks completos de MIB.',
+    en: 'Light SNMP querying (sysDescr, sysObjectID, sysName) against each target IP -- SNMPv1/v2c community strings only, no full MIB walks.',
   },
+  'discovery.snmp_target': { es: 'Red u host objetivo', en: 'Target network or host' },
+  'discovery.snmp_community': { es: 'Community string', en: 'Community string' },
+  'discovery.snmp_version': { es: 'Versión', en: 'Version' },
   'capture.live_title': { es: 'Captura en vivo', en: 'Live capture' },
   'capture.sensor': { es: 'Sensor', en: 'Sensor' },
   'capture.add_sensor': { es: '+ Sensor', en: '+ Sensor' },
@@ -1565,7 +1592,7 @@ function applySensorDefaultInterface(sensorSelectId, ifaceSelectId) {
 }
 
 function progressCell(s) {
-  if (!['pcap', 'active_nmap'].includes(s.source_type) || s.progress_percent === null || s.progress_percent === undefined) {
+  if (!['pcap', 'active_nmap', 'active_snmp'].includes(s.source_type) || s.progress_percent === null || s.progress_percent === undefined) {
     return '<span class="muted">—</span>';
   }
   return `<div class="progress-cell">
@@ -1595,6 +1622,7 @@ function renderSessionsTable() {
       <td>
         ${admin && s.status === 'running' && s.source_type === 'live' ? `<button class="action danger" onclick="stopLive(${s.id})">Detener</button>` : ''}
         ${admin && s.status === 'running' && s.source_type === 'active_nmap' ? `<button class="action danger" onclick="stopNmapSession(${s.id})">Detener</button>` : ''}
+        ${admin && s.status === 'running' && s.source_type === 'active_snmp' ? `<button class="action danger" onclick="stopSnmpSession(${s.id})">Detener</button>` : ''}
         ${admin ? `<button class="action secondary" onclick="deleteSession(${s.id})">Borrar</button>` : ''}
       </td>
     </tr>`).join('');
@@ -1612,6 +1640,13 @@ async function stopLive(id) {
 async function stopNmapSession(id) {
   try {
     await api(`/api/discovery/nmap/stop/${id}`, { method: 'POST' });
+    loadSessions();
+  } catch (e) { alert('No se pudo detener: ' + e.message); }
+}
+
+async function stopSnmpSession(id) {
+  try {
+    await api(`/api/discovery/snmp/stop/${id}`, { method: 'POST' });
     loadSessions();
   } catch (e) { alert('No se pudo detener: ' + e.message); }
 }
@@ -1766,6 +1801,67 @@ $('#start-nmap-scan-btn').addEventListener('click', async () => {
     loadDevices();
   } catch (e) {
     status.textContent = `No se pudo iniciar el escaneo: ${e.message}`;
+  } finally {
+    startBtn.disabled = false;
+    stopBtn.classList.add('hidden');
+  }
+});
+
+// Same no-fixed-duration/live-progress shape as nmap's own poller above --
+// SNMP has no per-host progress signal either, so this is just "how many
+// of the target's addresses have been swept so far".
+async function pollSnmpScanProgress(sessionId) {
+  const progressBox = $('#snmp-scan-progress');
+  const fill = $('#snmp-scan-progress-fill');
+  const pct = $('#snmp-scan-progress-pct');
+  const status = $('#snmp-scan-status');
+  progressBox.classList.remove('hidden');
+  for (;;) {
+    const session = await api(`/api/capture/sessions/${sessionId}`);
+    const percent = session.progress_percent == null ? 0 : session.progress_percent;
+    fill.style.width = `${percent}%`;
+    pct.textContent = `${percent}%`;
+    status.textContent = `Consultando -- ${session.packet_count} equipo(s) identificado(s) hasta ahora...`;
+    loadDevices();
+    if (session.status !== 'running') return session;
+    await new Promise(r => setTimeout(r, 1500));
+  }
+}
+
+$('#start-snmp-scan-btn').addEventListener('click', async () => {
+  const target = $('#discovery-snmp-target').value.trim();
+  if (!target) { alert('Indicá una red o host objetivo'); return; }
+  const sensorId = $('#discovery-sensor-select').value;
+  if (!sensorId) { alert('Selecciona un sensor en vivo'); return; }
+  const community = $('#discovery-snmp-community').value.trim() || 'public';
+  const version = $('#discovery-snmp-version').value;
+
+  const startBtn = $('#start-snmp-scan-btn');
+  const stopBtn = $('#stop-snmp-scan-btn');
+  const status = $('#snmp-scan-status');
+  startBtn.disabled = true;
+  stopBtn.classList.remove('hidden');
+  status.textContent = `Consultando ${target}...`;
+  try {
+    const started = await api('/api/discovery/snmp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target, sensor_id: Number(sensorId), community, version }),
+    });
+    stopBtn.onclick = () => stopSnmpSession(started.id);
+    loadSessions();
+    const finished = await pollSnmpScanProgress(started.id);
+    if (finished.status === 'error') {
+      status.textContent = `Error: ${finished.error_message || 'no se pudo completar la consulta'}`;
+    } else if (finished.status === 'stopped') {
+      status.textContent = `Detenido -- ${finished.packet_count} equipo(s) identificado(s) antes de parar. Revisá Inventario.`;
+    } else {
+      status.textContent = `Listo -- ${finished.packet_count} equipo(s) identificado(s). Revisá Inventario y Vulnerabilidades.`;
+    }
+    loadSessions();
+    loadDevices();
+  } catch (e) {
+    status.textContent = `No se pudo iniciar la consulta: ${e.message}`;
   } finally {
     startBtn.disabled = false;
     stopBtn.classList.add('hidden');

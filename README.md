@@ -358,8 +358,36 @@ curl -X POST http://localhost:8000/api/discovery/nmap/stop/42 \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-La opción **SNMP** está planeada para el mismo bloque, pero todavía no implementada (aparece como
-"Próximamente" en el dashboard).
+La opción **SNMP** hace una consulta liviana de verdad: un GET a `sysDescr`/`sysObjectID`/`sysName`
+(MIB-II) por cada IP del objetivo, usando la propia capa SNMP/ASN.1 de Scapy (`app/capture/
+snmp_discovery.py`) -- no una librería SNMP aparte ni los binarios `snmpget`/`snmpwalk` de net-snmp.
+Solo SNMPv1/v2c con community string (por defecto `public`, editable); SNMPv3 queda fuera de
+alcance a propósito, igual que los scripts NSE de Nmap: el modelo de seguridad de SNMPv3 necesita
+un handshake de sesión real que la capa SNMP de Scapy no implementa, y armar eso ahí dejaría de ser
+un "escaneo liviano". La mayoría de las IPs de un barrido simplemente no van a responder -- SNMP
+viene deshabilitado por defecto en la mayoría de los equipos -- así que un `/24` casi en silencio es
+el resultado esperado, no una falla. Requiere rol admin y un sensor **en vivo**; igual que Nmap, sale
+por la interfaz configurada en el sensor (`Sensor.interface`) cuando hay una.
+
+Mismo esquema de **sin tiempo máximo + barra de avance + Detener** que Nmap (`POST
+/api/discovery/snmp/stop/{id}`): como SNMP no tiene una señal de progreso propia como el stdout
+verboso de nmap, el barrido avanza en tandas de IPs (`sr()` de Scapy manda toda la tanda junta y
+espera una ventana de tiempo compartida) y el progreso es simplemente "cuántas IPs de la tanda ya se
+mandaron y esperaron". Cada host que responde entra al inventario con la misma metodología completa
+que el resto de las fuentes: `sysDescr` alimenta el fingerprint de SO (con confianza media, ya que es
+texto libre autoreportado, no un enum), `sysName` pasa por `apply_hostname_hints` (mismo chequeo de
+colisión que DNS/mDNS/NBNS), y `sysObjectID` -- un OID numérico asignado por IANA, no un nombre de
+fabricante -- se guarda solo como evidencia para que un humano lo busque, nunca traducido a
+Device.vendor/model (misma regla que ya aplica a los vendorId numéricos de CIP/BACnet). Por API:
+
+```bash
+curl -X POST http://localhost:8000/api/discovery/snmp \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"target": "192.168.1.0/24", "sensor_id": 1, "community": "public", "version": "v2c"}'
+
+curl -X POST http://localhost:8000/api/discovery/snmp/stop/42 \
+  -H "Authorization: Bearer $TOKEN"
+```
 
 ### Ejecutar el escaneo de vulnerabilidades
 

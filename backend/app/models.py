@@ -128,7 +128,9 @@ class CaptureSession(Base):
     # existing (and NULL) row at a "Default" Sensor per organization.
     sensor_id: Mapped[int | None] = mapped_column(ForeignKey("sensors.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), default="")
-    source_type: Mapped[str] = mapped_column(String(16))  # "live" | "pcap" | "active_pnio_dcp" | "active_nmap"
+    source_type: Mapped[str] = mapped_column(
+        String(16)
+    )  # "live" | "pcap" | "active_pnio_dcp" | "active_nmap" | "active_snmp"
     source: Mapped[str] = mapped_column(String(255))  # interface name or original filename
     bpf_filter: Mapped[str] = mapped_column(String(255), default="")
     status: Mapped[str] = mapped_column(String(16), default="running")  # running|stopped|completed|error

@@ -5,10 +5,17 @@ from app.api.routes_capture import _get_own_session, _get_owned_sensor, _sensor_
 from app.auth.deps import require_admin
 from app.capture.active_discovery import run_profinet_dcp_scan
 from app.capture.nmap_discovery import nmap_scan_manager
+from app.capture.snmp_discovery import expand_targets, snmp_scan_manager
 from app.db import get_db, session_scope
 from app.i18n import message
 from app.models import SENSOR_KIND_LIVE, CaptureSession, Sensor, User
-from app.schemas import CaptureSessionOut, NmapScanRequest, ProfinetDcpScanRequest, capture_session_out
+from app.schemas import (
+    CaptureSessionOut,
+    NmapScanRequest,
+    ProfinetDcpScanRequest,
+    SnmpScanRequest,
+    capture_session_out,
+)
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
 
@@ -105,5 +112,52 @@ def stop_nmap_scan(session_id: int, db: Session = Depends(get_db), user: User = 
     # terminate, but the row can still be reloaded to reflect whatever
     # mark_orphaned_live_sessions_stopped already did to it at startup.
     nmap_scan_manager.stop(session_id)
+    db.refresh(session_obj)
+    return capture_session_out(session_obj, user.locale)
+
+
+@router.post("/snmp", response_model=CaptureSessionOut)
+def start_snmp_scan(
+    payload: SnmpScanRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    sensor = _resolve_live_sensor(db, user, payload.sensor_id)
+
+    # Validated (and the whole target range expanded to a concrete address
+    # list) before the CaptureSession row is even created -- an invalid
+    # CIDR or a target that's absurdly large (see snmp_discovery.
+    # _MAX_TARGETS) should never leave behind a stray "running" session
+    # that in fact never started.
+    try:
+        targets = expand_targets(payload.target)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    session_obj = CaptureSession(
+        organization_id=_sensor_organization_id(db, sensor),
+        sensor_id=sensor.id,
+        name=f"discovery:snmp:{payload.target}",
+        source_type="active_snmp",
+        source=payload.target,
+        status="running",
+    )
+    db.add(session_obj)
+    db.commit()
+    db.refresh(session_obj)
+
+    # No BackgroundTasks here, same reasoning as nmap: no fixed end time,
+    # and needs to stay reachable afterwards for /snmp/stop/{id}.
+    snmp_scan_manager.start(session_obj.id, targets, payload.community, payload.version, sensor.interface)
+    return capture_session_out(session_obj, user.locale)
+
+
+@router.post("/snmp/stop/{session_id}", response_model=CaptureSessionOut)
+def stop_snmp_scan(session_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    session_obj = _get_own_session(db, user, session_id)
+    if session_obj.source_type != "active_snmp":
+        raise HTTPException(status_code=400, detail=message("discovery.not_an_snmp_session", user.locale))
+
+    snmp_scan_manager.stop(session_id)
     db.refresh(session_obj)
     return capture_session_out(session_obj, user.locale)

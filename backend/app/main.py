@@ -16,6 +16,7 @@ from app.api.routes_vulns import router as vulns_router
 from app.auth.seed import seed_default_admin, seed_default_super_admin
 from app.capture.live_capture import live_capture_manager, mark_orphaned_live_sessions_stopped
 from app.capture.nmap_discovery import nmap_scan_manager
+from app.capture.snmp_discovery import snmp_scan_manager
 from app.db import init_db
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -30,6 +31,7 @@ async def lifespan(_: FastAPI):
     yield
     live_capture_manager.stop_all()
     nmap_scan_manager.stop_all()
+    snmp_scan_manager.stop_all()
 
 
 app = FastAPI(

@@ -8,6 +8,7 @@ from app.auth.deps import get_current_user, is_super_admin, require_admin
 from app.capture.live_capture import live_capture_manager
 from app.capture.nmap_discovery import nmap_scan_manager
 from app.capture.pcap_loader import process_pcap_file
+from app.capture.snmp_discovery import snmp_scan_manager
 from app.config import DATA_DIR, DEFAULT_LIVE_CAPTURE_FILTER
 from app.db import get_db, session_scope
 from app.i18n import message
@@ -192,6 +193,8 @@ def delete_session(session_id: int, db: Session = Depends(get_db), user: User = 
         live_capture_manager.stop(session_id)  # no-op if not actually tracked
     elif session_obj.source_type == "active_nmap":
         nmap_scan_manager.stop(session_id)  # no-op if not actually tracked
+    elif session_obj.source_type == "active_snmp":
+        snmp_scan_manager.stop(session_id)  # no-op if not actually tracked
 
     purge_capture_session(db, session_id)
     db.delete(session_obj)
