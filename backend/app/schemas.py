@@ -114,6 +114,91 @@ class FlowOut(BaseModel):
     last_seen: datetime.datetime
 
 
+class TopologyNode(BaseModel):
+    """One Device rendered as a graph node -- see app/topology.py's
+    build_topology(). `icon` is a key the frontend maps to a static SVG
+    (plc/hmi/server/pc/router/switch/other), derived from device_type/
+    device_type_secondary rather than sent as a raw type string, so the
+    frontend never has to duplicate device_classifier.py's own type list."""
+
+    id: int
+    label: str
+    ip: str | None
+    mac: str | None
+    vendor: str | None
+    device_type: str | None
+    device_type_secondary: str | None
+    icon: str
+    is_ot_suspected: bool
+    is_external: bool
+
+
+class TopologyEdge(BaseModel):
+    """One link on the topology graph -- either a human-confirmed
+    NetworkLink (`kind` "confirmed"/"uncertain", `link_id` set, ports
+    filled in from what the human entered) or a live-computed suggestion
+    from Flow (`kind` "suggested", `link_id` null, no real port names --
+    see build_topology() for why a NetworkLink always wins over a
+    suggestion for the same device pair)."""
+
+    source: int
+    target: int
+    kind: str  # "confirmed" | "uncertain" | "suggested"
+    source_port: str | None = None
+    target_port: str | None = None
+    label: str | None = None
+    notes: str | None = None
+    link_id: int | None = None
+
+
+class TopologyOut(BaseModel):
+    nodes: list[TopologyNode]
+    edges: list[TopologyEdge]
+
+
+class NetworkLinkOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    device_a_id: int
+    device_b_id: int
+    source_port: str | None
+    target_port: str | None
+    status: str
+    notes: str | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class NetworkLinkCreateRequest(BaseModel):
+    """Records a human's claim about a real physical link -- see
+    app/models.py's NetworkLink docstring for why this is never something
+    the app infers on its own. device_a_id/device_b_id order doesn't
+    matter (normalized server-side); source_port/target_port follow that
+    same a/b order once normalized, so re-fetching the link after creation
+    is the only reliable way to know which port landed on which side."""
+
+    device_a_id: int
+    device_b_id: int
+    source_port: str | None = Field(default=None, max_length=64)
+    target_port: str | None = Field(default=None, max_length=64)
+    status: Literal["confirmed", "uncertain"] = "confirmed"
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class NetworkLinkUpdateRequest(BaseModel):
+    """Same "always send the full desired state" convention as
+    SensorUpdateRequest -- not a partial patch. Moving a link to a
+    different device pair isn't supported (delete and recreate instead):
+    only what a human might legitimately correct about an existing link
+    (its ports, confirmed-vs-uncertain, notes) is editable here."""
+
+    source_port: str | None = Field(default=None, max_length=64)
+    target_port: str | None = Field(default=None, max_length=64)
+    status: Literal["confirmed", "uncertain"]
+    notes: str | None = Field(default=None, max_length=500)
+
+
 class CaptureSessionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

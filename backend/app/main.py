@@ -11,6 +11,7 @@ from app.api.routes_discovery import router as discovery_router
 from app.api.routes_hierarchy import router as hierarchy_router
 from app.api.routes_inventory import router as inventory_router
 from app.api.routes_organizations import router as organizations_router
+from app.api.routes_topology import router as topology_router
 from app.api.routes_users import router as users_router
 from app.api.routes_vulns import router as vulns_router
 from app.auth.seed import seed_default_admin, seed_default_super_admin
@@ -58,6 +59,7 @@ app.include_router(hierarchy_router)
 app.include_router(capture_router)
 app.include_router(discovery_router)
 app.include_router(inventory_router)
+app.include_router(topology_router)
 app.include_router(vulns_router)
 
 

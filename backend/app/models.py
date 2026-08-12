@@ -369,6 +369,63 @@ class Flow(Base):
         return self.device_b.display_name if self.device_b else None
 
 
+# NetworkLink.status -- LINK_CONFIRMED means a human who knows the real
+# wiring vouched for it; LINK_UNCERTAIN means it's noted but not verified
+# (e.g. "creo que va por acá pero no estoy seguro"). Both are always shown
+# on the topology graph, just styled differently (see app/topology.py) --
+# neither is ever auto-created; both only ever come from
+# POST/PATCH /api/topology/links.
+LINK_CONFIRMED = "confirmed"
+LINK_UNCERTAIN = "uncertain"
+
+
+class NetworkLink(Base):
+    """A human-asserted physical link between two Devices -- "this cable
+    really exists", entered by someone who knows the actual wiring, not
+    something this app ever infers on its own.
+
+    This is deliberately separate from Flow above: Flow is an automatic,
+    passive record of *observed communication* ("these two devices
+    exchanged TCP/UDP traffic") -- it can suggest a link exists, but it's a
+    logical/communication signal, never proof of a physical cable (two
+    devices can talk through several switches with no direct link between
+    them, and two directly-wired devices might never happen to talk during
+    a capture). The topology endpoint (app/topology.py) treats every Flow
+    as a low-confidence, always-on-the-fly "suggested" edge, and always
+    prefers a real NetworkLink over one for the same device pair -- a
+    human's explicit claim about the wiring outranks an inference from
+    traffic, confirmed or not.
+
+    device_a_id/device_b_id are normalized (a.id < b.id) the same way
+    Flow's own device_a/device_b are, so the same physical link is never
+    stored twice depending on which end the user clicked first.
+    """
+
+    __tablename__ = "network_links"
+    __table_args__ = (UniqueConstraint("device_a_id", "device_b_id", name="uq_network_link_pair"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    device_a_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
+    device_b_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
+    # The port on device_a/device_b this link uses, e.g. "Gi0/3" -- free
+    # text (not validated against anything the device itself reported),
+    # since the whole point of this table is recording what a human knows
+    # that the app couldn't observe on its own. Either side may be blank
+    # (a technician might know the link exists without knowing the exact
+    # port on one end).
+    source_port: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    target_port: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default=LINK_CONFIRMED)  # "confirmed" | "uncertain"
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+    device_a: Mapped[Device] = relationship(foreign_keys=[device_a_id])
+    device_b: Mapped[Device] = relationship(foreign_keys=[device_b_id])
+
+
 class VulnerabilityFinding(Base):
     __tablename__ = "vulnerability_findings"
     __table_args__ = (

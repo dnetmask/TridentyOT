@@ -150,6 +150,15 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
     "zones.not_found": {"es": "Zona no encontrada", "en": "Zone not found"},
     "sensors.not_found": {"es": "Sensor no encontrado", "en": "Sensor not found"},
+    "topology.link_not_found": {"es": "Enlace no encontrado", "en": "Link not found"},
+    "topology.cannot_link_device_to_itself": {
+        "es": "Un enlace necesita dos dispositivos distintos",
+        "en": "A link needs two different devices",
+    },
+    "topology.devices_required_same_org": {
+        "es": "Los dos dispositivos deben pertenecer a la misma organización",
+        "en": "Both devices must belong to the same organization",
+    },
 }
 
 

@@ -328,6 +328,26 @@
   .columns-panel input { width: auto; }
   .clickable { cursor: pointer; }
   .device-detail { margin-top: 12px; }
+  .topology-tooltip {
+    position: absolute; pointer-events: none; z-index: 6; display: none;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 10px; font-size: 12px; color: var(--text); white-space: nowrap;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+  }
+  .topology-panel {
+    position: absolute; z-index: 7; width: 220px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; font-size: 12.5px; color: var(--text);
+    box-shadow: 0 10px 26px rgba(0,0,0,0.4);
+  }
+  .topology-panel h3 { margin: 0 0 6px; font-size: 13.5px; }
+  .topology-panel .row-line { color: var(--muted); margin: 3px 0; }
+  .topology-panel label { display: block; font-size: 11px; color: var(--muted); margin: 8px 0 2px; }
+  .topology-panel input, .topology-panel select { width: 100%; box-sizing: border-box; }
+  .topology-panel .actions { display: flex; gap: 6px; margin-top: 10px; }
+  .topology-panel .actions button { flex: 1; padding: 6px; font-size: 11.5px; }
+  .topology-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 4px 0 10px; }
+  .topology-legend .swatch { display: inline-block; width: 22px; height: 0; border-top: 2px solid; margin-right: 5px; vertical-align: middle; }
   .flex-between { display: flex; justify-content: space-between; align-items: center; }
   .status-running { color: var(--accent); }
   .status-completed, .status-stopped { color: var(--muted); }
@@ -739,6 +759,31 @@
     </div>
   </section>
 
+  <section id="tab-topology" class="tab">
+    <div class="card">
+      <div class="flex-between">
+        <h2 data-i18n="topology.title">Topología de red</h2>
+        <label class="admin-only" style="display:inline-flex;align-items:center;gap:6px;margin:0;">
+          <input type="checkbox" id="topology-edit-mode" style="width:auto" />
+          <span data-i18n="topology.edit_mode">Modo edición</span>
+        </label>
+      </div>
+      <div class="topology-legend">
+        <span><span class="swatch" style="border-color:var(--accent)"></span><span data-i18n="topology.legend_confirmed">Confirmado</span></span>
+        <span><span class="swatch" style="border-color:var(--med); border-top-style:dashed;"></span><span data-i18n="topology.legend_uncertain">Dudoso / sin confirmar</span></span>
+        <span><span class="swatch" style="border-color:var(--muted); border-top-style:dotted;"></span><span data-i18n="topology.legend_suggested">Sugerido (tráfico observado)</span></span>
+      </div>
+      <div id="topology-edit-hint" class="muted hidden" style="font-size:12px; margin-bottom:6px;" data-i18n="topology.edit_hint">
+        Modo edición activo: hacé click en un dispositivo y luego en otro para crear un enlace entre ambos.
+      </div>
+      <div id="topology-container" style="position:relative;">
+        <div id="topology-cy" style="width:100%; height:560px; border:1px solid var(--border); border-radius:8px;"></div>
+        <div id="topology-tooltip" class="topology-tooltip"></div>
+        <div id="topology-panel" class="topology-panel hidden"></div>
+      </div>
+    </div>
+  </section>
+
   <section id="tab-flows" class="tab">
     <div class="card">
       <div class="flex-between">
@@ -1040,6 +1085,11 @@
 
 <div id="print-report"></div>
 
+<!-- Vendored locally, not from a CDN: TridentyOT sensors often run on
+     air-gapped/OT networks with no route to the public internet, so
+     every script this dashboard needs has to ship inside the app itself
+     (see backend/app/static/vendor/). MIT-licensed, unmodified. -->
+<script src="/vendor/cytoscape.min.js"></script>
 <script>
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -1139,6 +1189,26 @@ const I18N = {
   'discovery.snmp_target': { es: 'Red u host objetivo', en: 'Target network or host' },
   'discovery.snmp_community': { es: 'Community string', en: 'Community string' },
   'discovery.snmp_version': { es: 'Versión', en: 'Version' },
+  'topology.title': { es: 'Topología de red', en: 'Network topology' },
+  'topology.edit_mode': { es: 'Modo edición', en: 'Edit mode' },
+  'topology.edit_hint': {
+    es: 'Modo edición activo: hacé click en un dispositivo y luego en otro para crear un enlace entre ambos.',
+    en: 'Edit mode is on: click one device, then another, to create a link between them.',
+  },
+  'topology.legend_confirmed': { es: 'Confirmado', en: 'Confirmed' },
+  'topology.legend_uncertain': { es: 'Dudoso / sin confirmar', en: 'Uncertain / unconfirmed' },
+  'topology.legend_suggested': { es: 'Sugerido (tráfico observado)', en: 'Suggested (observed traffic)' },
+  'topology.save_btn': { es: 'Guardar', en: 'Save' },
+  'topology.delete_btn': { es: 'Eliminar', en: 'Delete' },
+  'topology.confirm_btn': { es: 'Confirmar enlace', en: 'Confirm link' },
+  'topology.cancel_btn': { es: 'Cancelar', en: 'Cancel' },
+  'topology.source_port': { es: 'Puerto en este lado', en: 'Port on this side' },
+  'topology.target_port': { es: 'Puerto en el otro lado', en: 'Port on the other side' },
+  'topology.status': { es: 'Estado', en: 'Status' },
+  'topology.notes': { es: 'Notas', en: 'Notes' },
+  'topology.new_link_title': { es: 'Nuevo enlace', en: 'New link' },
+  'topology.edit_link_title': { es: 'Enlace', en: 'Link' },
+  'topology.suggested_link_title': { es: 'Enlace sugerido (sin confirmar)', en: 'Suggested link (unconfirmed)' },
   'capture.live_title': { es: 'Captura en vivo', en: 'Live capture' },
   'capture.sensor': { es: 'Sensor', en: 'Sensor' },
   'capture.add_sensor': { es: '+ Sensor', en: '+ Sensor' },
@@ -1464,6 +1534,7 @@ async function refreshAllData() {
   loadSessions();
   await loadDevices();
   loadFlows();
+  loadTopology();
   loadFindings();
   if (isAdmin()) loadUsers();
   loadSites();
@@ -2341,6 +2412,306 @@ applyColumnVisibility();
 // ---------- Flows tab ----------
 let allFlows = [];
 
+// ---------------------------------------------------------------------
+// Topología: builds a Cytoscape.js graph from GET /api/topology (Devices
+// as nodes, NetworkLink/Flow as edges -- see app/api/routes_topology.py).
+// Node positions are kept in memory across the 15s auto-refresh
+// (topologyPositions) so a user's manual layout survives a background
+// reload instead of re-running the force layout and jumping around under
+// them; a reload is skipped entirely while the edit panel is open, for
+// the same "don't yank the UI out from under an in-progress edit" reason.
+// ---------------------------------------------------------------------
+let topologyCy = null;
+let topologyPositions = {};
+let topologyPendingSourceId = null;
+
+function topologyIconUrl(icon) {
+  return `/vendor/icons/${icon || 'other'}.svg`;
+}
+
+function topologyPanelOpen() {
+  const panel = $('#topology-panel');
+  return !!panel && !panel.classList.contains('hidden');
+}
+
+async function loadTopology() {
+  if (topologyPanelOpen()) return;
+  let data;
+  try {
+    data = await api(`/api/topology${zoneFilterQuery()}`);
+  } catch (e) { return; }
+  renderTopology(data);
+}
+
+function renderTopology(data) {
+  const container = $('#topology-cy');
+  if (!container) return;
+  const hasAllPositions = data.nodes.length > 0 && data.nodes.every(n => topologyPositions[n.id]);
+  const elements = [
+    ...data.nodes.map(n => ({
+      data: { id: String(n.id), ...n },
+      position: topologyPositions[n.id],
+      classes: n.is_ot_suspected ? 'ot-suspected' : '',
+    })),
+    ...data.edges.map((e, i) => ({
+      data: { id: `link-${i}`, ...e, source: String(e.source), target: String(e.target) },
+    })),
+  ];
+
+  // Cytoscape draws to a <canvas>, so it can't pick up the app's own
+  // dark/light theme via plain CSS the way the rest of the dashboard
+  // does -- resolving these custom properties at render time (instead of
+  // hardcoding one theme's hex values) is what keeps node labels legible
+  // and the confirmed/uncertain/suggested colors consistent with the same
+  // severity palette (--accent/--med/--muted/--crit) used everywhere else
+  // in the app, in both themes.
+  const root = getComputedStyle(document.documentElement);
+  const cssVar = (name, fallback) => (root.getPropertyValue(name) || '').trim() || fallback;
+  const textColor = cssVar('--text', '#e6edf7');
+  const mutedColor = cssVar('--muted', '#8ea0c0');
+  const accentColor = cssVar('--accent', '#3ba9ff');
+  const uncertainColor = cssVar('--med', '#d97706');
+  const critColor = cssVar('--crit', '#dc2626');
+
+  if (topologyCy) topologyCy.destroy();
+  topologyCy = cytoscape({
+    container,
+    elements,
+    style: [
+      { selector: 'node', style: {
+          label: 'data(label)', 'text-wrap': 'wrap', 'text-max-width': '90px',
+          'text-valign': 'bottom', 'text-margin-y': 6, color: textColor, 'font-size': 11,
+          width: 42, height: 42, 'background-opacity': 0,
+          'background-fit': 'contain', 'background-clip': 'none',
+          'background-image': (ele) => topologyIconUrl(ele.data('icon')),
+      } },
+      { selector: 'node.ot-suspected', style: { 'border-width': 2.5, 'border-color': critColor, 'border-opacity': 0.85 } },
+      { selector: 'node.topology-pending', style: { 'overlay-color': accentColor, 'overlay-opacity': 0.35, 'overlay-padding': 8 } },
+      { selector: 'edge', style: { 'curve-style': 'bezier', 'font-size': 10 } },
+      { selector: 'edge[kind = "confirmed"]', style: {
+          width: 2.5, 'line-color': accentColor,
+          'source-label': 'data(source_port)', 'target-label': 'data(target_port)',
+          'source-text-offset': 24, 'target-text-offset': 24, color: mutedColor,
+      } },
+      { selector: 'edge[kind = "uncertain"]', style: {
+          width: 2, 'line-color': uncertainColor, 'line-style': 'dashed',
+          'source-label': 'data(source_port)', 'target-label': 'data(target_port)',
+          'source-text-offset': 24, 'target-text-offset': 24, color: mutedColor,
+      } },
+      { selector: 'edge[kind = "suggested"]', style: {
+          width: 1.4, 'line-color': mutedColor, 'line-style': 'dotted',
+          label: 'data(label)', color: mutedColor,
+      } },
+    ],
+    layout: hasAllPositions
+      ? { name: 'preset' }
+      : { name: 'cose', animate: false, nodeRepulsion: () => 9000, idealEdgeLength: () => 100 },
+    wheelSensitivity: 0.25,
+  });
+
+  topologyCy.nodes().forEach(n => { topologyPositions[n.data('id')] = n.position(); });
+  topologyCy.on('dragfree', 'node', evt => { topologyPositions[evt.target.data('id')] = evt.target.position(); });
+  if (topologyPendingSourceId) {
+    const pending = topologyCy.getElementById(topologyPendingSourceId);
+    if (pending.length) pending.addClass('topology-pending');
+    else topologyPendingSourceId = null;
+  }
+  wireTopologyEvents();
+}
+
+function topologyTooltipHtml(nodeData) {
+  const bits = [`<b>${escapeHtml(nodeData.label)}</b>`];
+  // label already falls back to ip/mac server-side when there's no real
+  // hostname (see routes_topology.py's _node()) -- repeating it here would
+  // just show the same string on both lines.
+  if (nodeData.ip && nodeData.ip !== nodeData.label) bits.push(escapeHtml(nodeData.ip));
+  if (nodeData.mac && nodeData.mac !== nodeData.label) bits.push(escapeHtml(nodeData.mac));
+  if (nodeData.vendor) bits.push(escapeHtml(nodeData.vendor));
+  return bits.join('<br>');
+}
+
+function wireTopologyEvents() {
+  const cy = topologyCy;
+  const tooltip = $('#topology-tooltip');
+
+  cy.on('mouseover', 'node', evt => {
+    const node = evt.target;
+    const p = node.renderedPosition();
+    tooltip.innerHTML = topologyTooltipHtml(node.data());
+    tooltip.style.left = `${p.x + 26}px`;
+    tooltip.style.top = `${p.y - 10}px`;
+    tooltip.style.display = 'block';
+  });
+  cy.on('mouseout', 'node', () => { tooltip.style.display = 'none'; });
+
+  cy.on('tap', 'node', evt => {
+    if (!isAdmin() || !$('#topology-edit-mode').checked) return;
+    const node = evt.target;
+    const id = node.data('id');
+    if (topologyPendingSourceId === id) {
+      node.removeClass('topology-pending');
+      topologyPendingSourceId = null;
+      return;
+    }
+    if (topologyPendingSourceId == null) {
+      topologyPendingSourceId = id;
+      node.addClass('topology-pending');
+      return;
+    }
+    const sourceId = topologyPendingSourceId;
+    cy.getElementById(sourceId).removeClass('topology-pending');
+    topologyPendingSourceId = null;
+    openTopologyLinkForm(Number(sourceId), Number(id), null);
+  });
+
+  cy.on('tap', 'edge', evt => {
+    const edge = evt.target;
+    const pos = edge.renderedMidpoint();
+    const data = edge.data();
+    if (data.link_id != null) {
+      openTopologyLinkForm(Number(data.source), Number(data.target), data, pos);
+    } else {
+      openSuggestedLinkPanel(data, pos);
+    }
+  });
+
+  cy.on('tap', evt => { if (evt.target === cy) closeTopologyPanel(); });
+}
+
+function closeTopologyPanel() {
+  const panel = $('#topology-panel');
+  if (panel) panel.classList.add('hidden');
+}
+
+function topologyDeviceLabel(id) {
+  const node = topologyCy.getElementById(String(id));
+  return node.length ? node.data('label') : `#${id}`;
+}
+
+function topologyPositionPanel(panel, pos) {
+  const container = $('#topology-cy');
+  const maxLeft = container.clientWidth - 236;
+  panel.style.left = `${Math.max(0, Math.min(pos.x + 20, maxLeft))}px`;
+  panel.style.top = `${Math.max(0, pos.y - 20)}px`;
+}
+
+function openTopologyLinkForm(deviceAId, deviceBId, existing, renderedPos) {
+  const panel = $('#topology-panel');
+  const pos = renderedPos || topologyCy.getElementById(String(deviceBId)).renderedPosition();
+  const admin = isAdmin();
+  const statusVal = existing ? existing.status : 'confirmed';
+  const sourcePort = existing ? (existing.source_port || '') : '';
+  const targetPort = existing ? (existing.target_port || '') : '';
+  const notes = existing ? (existing.notes || '') : '';
+
+  const statusLabelKey = statusVal === 'confirmed' ? 'topology.legend_confirmed' : 'topology.legend_uncertain';
+  panel.innerHTML = `
+    <h3>${escapeHtml(i18nText(existing ? 'topology.edit_link_title' : 'topology.new_link_title'))}</h3>
+    <div class="row-line">${escapeHtml(topologyDeviceLabel(deviceAId))} &harr; ${escapeHtml(topologyDeviceLabel(deviceBId))}</div>
+    ${admin ? `
+      <label>${escapeHtml(i18nText('topology.source_port'))}</label>
+      <input id="topology-form-source-port" value="${escapeHtml(sourcePort)}" />
+      <label>${escapeHtml(i18nText('topology.target_port'))}</label>
+      <input id="topology-form-target-port" value="${escapeHtml(targetPort)}" />
+      <label>${escapeHtml(i18nText('topology.status'))}</label>
+      <select id="topology-form-status">
+        <option value="confirmed" ${statusVal === 'confirmed' ? 'selected' : ''}>${escapeHtml(i18nText('topology.legend_confirmed'))}</option>
+        <option value="uncertain" ${statusVal === 'uncertain' ? 'selected' : ''}>${escapeHtml(i18nText('topology.legend_uncertain'))}</option>
+      </select>
+      <label>${escapeHtml(i18nText('topology.notes'))}</label>
+      <input id="topology-form-notes" value="${escapeHtml(notes)}" />
+      <div class="actions">
+        <button onclick="saveTopologyLink(${deviceAId}, ${deviceBId}${existing ? `, ${existing.link_id}` : ''})">${escapeHtml(i18nText('topology.save_btn'))}</button>
+        ${existing ? `<button onclick="deleteTopologyLink(${existing.link_id})">${escapeHtml(i18nText('topology.delete_btn'))}</button>` : ''}
+        <button onclick="closeTopologyPanel()">${escapeHtml(i18nText('topology.cancel_btn'))}</button>
+      </div>
+    ` : `
+      <div class="row-line">${escapeHtml(i18nText(statusLabelKey))}</div>
+      ${(sourcePort || targetPort) ? `<div class="row-line">${escapeHtml(sourcePort || '--')} / ${escapeHtml(targetPort || '--')}</div>` : ''}
+      ${notes ? `<div class="row-line">${escapeHtml(notes)}</div>` : ''}
+    `}
+  `;
+  topologyPositionPanel(panel, pos);
+  panel.classList.remove('hidden');
+}
+
+function openSuggestedLinkPanel(edgeData, pos) {
+  const panel = $('#topology-panel');
+  const admin = isAdmin();
+  panel.innerHTML = `
+    <h3>${escapeHtml(i18nText('topology.suggested_link_title'))}</h3>
+    <div class="row-line">${escapeHtml(topologyDeviceLabel(edgeData.source))} &harr; ${escapeHtml(topologyDeviceLabel(edgeData.target))}</div>
+    <div class="row-line">${escapeHtml(edgeData.label || '')}</div>
+    ${admin ? `
+      <div class="actions">
+        <button onclick="confirmSuggestedLink(${edgeData.source}, ${edgeData.target})">${escapeHtml(i18nText('topology.confirm_btn'))}</button>
+        <button onclick="closeTopologyPanel()">${escapeHtml(i18nText('topology.cancel_btn'))}</button>
+      </div>
+    ` : ''}
+  `;
+  topologyPositionPanel(panel, pos);
+  panel.classList.remove('hidden');
+}
+
+async function saveTopologyLink(deviceAId, deviceBId, linkId) {
+  const body = {
+    device_a_id: deviceAId,
+    device_b_id: deviceBId,
+    source_port: $('#topology-form-source-port').value.trim() || null,
+    target_port: $('#topology-form-target-port').value.trim() || null,
+    status: $('#topology-form-status').value,
+    notes: $('#topology-form-notes').value.trim() || null,
+  };
+  try {
+    if (linkId) {
+      await api(`/api/topology/links/${linkId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_port: body.source_port, target_port: body.target_port,
+          status: body.status, notes: body.notes,
+        }),
+      });
+    } else {
+      await api('/api/topology/links', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+    }
+    closeTopologyPanel();
+    loadTopology();
+  } catch (e) { alert('No se pudo guardar el enlace: ' + e.message); }
+}
+
+async function confirmSuggestedLink(deviceAId, deviceBId) {
+  try {
+    await api('/api/topology/links', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_a_id: deviceAId, device_b_id: deviceBId, status: 'confirmed' }),
+    });
+    closeTopologyPanel();
+    loadTopology();
+  } catch (e) { alert('No se pudo confirmar el enlace: ' + e.message); }
+}
+
+async function deleteTopologyLink(linkId) {
+  if (!confirm('¿Eliminar este enlace?')) return;
+  try {
+    await api(`/api/topology/links/${linkId}`, { method: 'DELETE' });
+    closeTopologyPanel();
+    loadTopology();
+  } catch (e) { alert('No se pudo eliminar: ' + e.message); }
+}
+
+$('#topology-edit-mode').addEventListener('change', () => {
+  const editing = $('#topology-edit-mode').checked;
+  if (!editing && topologyPendingSourceId && topologyCy) {
+    topologyCy.getElementById(topologyPendingSourceId).removeClass('topology-pending');
+    topologyPendingSourceId = null;
+  }
+  $('#topology-edit-hint').classList.toggle('hidden', !editing);
+});
+
 async function loadFlows() {
   allFlows = await api(`/api/inventory/flows${zoneFilterQuery()}`);
   renderFlowsTable();
@@ -2763,15 +3134,20 @@ const ZONE_LEAVES = [
   { tab: 'capture', label: 'Captura' },
   { tab: 'discovery', label: 'Descubrimiento activo' },
   { tab: 'inventory', label: 'Inventario' },
+  { tab: 'topology', label: 'Topología' },
   { tab: 'flows', label: 'Flujos' },
   { tab: 'vulns', label: 'Vulnerabilidades' },
 ];
 // Which Zona leaves are grouped under each flyout heading -- Inventario/
-// Flujos/Vulnerabilidades are read-only analysis (Monitor); Captura and
-// Descubrimiento activo are where you actively act on the network (start/
-// stop a capture, or send a discovery probe), so both live in Configure --
-// Descubrimiento right below Captura, since it's the same kind of action.
-const ZONE_MONITOR_TABS = ['inventory', 'flows', 'vulns'];
+// Topología/Flujos/Vulnerabilidades are read-only analysis (Monitor);
+// Topología's own editing (confirmar/dibujar/borrar enlaces) is gated to
+// admins *inside* the tab, the same way Inventario already lets an admin
+// edit a device's tipo/fabricante while a viewer just reads it -- it
+// belongs here, not in Configure. Captura and Descubrimiento activo are
+// where you actively act on the network (start/stop a capture, or send a
+// discovery probe), so both live in Configure -- Descubrimiento right
+// below Captura, since it's the same kind of action.
+const ZONE_MONITOR_TABS = ['inventory', 'topology', 'flows', 'vulns'];
 const ZONE_CONFIGURE_TABS = ['capture', 'discovery'];
 // Reportes lives one level up from the Zona leaves, at the Sitio itself --
 // unlike Captura/Inventario/Flujos/Vulnerabilidades it's not pretending to

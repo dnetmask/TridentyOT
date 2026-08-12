@@ -389,6 +389,55 @@ curl -X POST http://localhost:8000/api/discovery/snmp/stop/42 \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+### Topología de red
+
+La pestaña **Topología** dibuja un grafo de la red (`GET /api/topology`) con los mismos
+dispositivos que ya aparecen en Inventario -- cada uno con un ícono según su `device_type`
+(PLC/HMI/servidor/PC/router/switch), renderizado con [Cytoscape.js](https://js.cytoscape.org/)
+(vendorizado localmente en `backend/app/static/vendor/`, sin CDN: un sensor OT suele correr en una
+red aislada sin salida a internet).
+
+Es importante entender qué tipo de "enlace" es cada uno, porque la topología mostrada combina dos
+cosas de naturaleza distinta:
+
+- **Enlaces sugeridos** (línea punteada gris, sin puertos): se calculan al vuelo desde `Flow` (quién
+  habló con quién) -- es un grafo *lógico* de comunicación observada, nunca una prueba de que existe
+  un cable físico entre esos dos equipos (dos dispositivos pueden hablar a través de varios switches
+  intermedios sin estar conectados directamente). No se guardan en la base -- se recalculan en cada
+  consulta.
+- **Enlaces humanos** (`NetworkLink`, tabla `network_links`): una afirmación explícita de alguien que
+  conoce el cableado real -- **confirmado** (línea sólida azul) o **dudoso/sin confirmar** (línea
+  punteada naranja), ambos con los puertos de cada lado si se conocen. Un enlace humano para un par
+  de dispositivos siempre pisa al enlace sugerido por Flow para ese mismo par -- una afirmación
+  humana sobre el cableado vale más que una inferencia a partir de tráfico observado.
+
+Por qué no hay descubrimiento 100% automático de la topología física todavía: eso requiere caminar
+(walk, no un GET fijo) las tablas de vecinos CDP-MIB/LLDP-MIB y la BRIDGE-MIB de cada switch por
+SNMP -- lo que hoy hace `snmp_discovery.py` es un GET liviano de 3 OIDs puntuales, no un walk de
+tablas. Mientras esa pieza no exista, la Topología combina lo que sí se puede inferir hoy (Flow) con
+la posibilidad de que un humano complete/corrija el resto a mano, directamente sobre el grafo.
+
+**Uso desde el dashboard** (rol admin): activar "Modo edición", hacer click en un dispositivo y
+luego en otro para crear un enlace nuevo (se abre un formulario con puerto de cada lado, estado y
+notas); hacer click en un enlace sugerido para "Confirmarlo" (lo convierte en un enlace humano real);
+hacer click en un enlace humano existente para editarlo o borrarlo. Un visualizador ve el mismo grafo
+pero sin esas acciones. Por API:
+
+```bash
+curl http://localhost:8000/api/topology \
+  -H "Authorization: Bearer $TOKEN"
+
+curl -X POST http://localhost:8000/api/topology/links \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"device_a_id": 10, "device_b_id": 42, "source_port": "Gi0/3", "target_port": "eth0", "status": "confirmed"}'
+
+curl -X PATCH http://localhost:8000/api/topology/links/7 \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"source_port": "Gi0/3", "target_port": "eth0", "status": "uncertain", "notes": "revisar en sitio"}'
+
+curl -X DELETE http://localhost:8000/api/topology/links/7 -H "Authorization: Bearer $TOKEN"
+```
+
 ### Ejecutar el escaneo de vulnerabilidades
 
 ```bash
@@ -558,3 +607,9 @@ un doble (mock) del cliente HTTP para no depender de la disponibilidad de intern
   cantidad de protocolos servidos) y puede devolver confianza baja o quedar sin clasificar.
   Resolverlo con certeza requiere una consulta activa (SNMP `sysDescr`, WMI), que es una pieza
   posterior y separada del motor pasivo (ver hoja de ruta, Bloque 1).
+- La pestaña **Topología** todavía no descubre la topología física (puerto a puerto) de forma
+  automática -- eso necesita caminar las tablas de vecinos CDP-MIB/LLDP-MIB y la BRIDGE-MIB de cada
+  switch por SNMP, y `snmp_discovery.py` hoy solo hace un GET liviano de OIDs puntuales, no un walk
+  de tablas. Hasta que exista esa pieza, los enlaces sugeridos vienen únicamente de `Flow` (tráfico
+  observado, un grafo lógico, no una prueba de cableado) y el resto depende de que alguien confirme
+  o dibuje el enlace real a mano.
