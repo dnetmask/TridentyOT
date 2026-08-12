@@ -2438,7 +2438,7 @@ async function loadTopology() {
   if (topologyPanelOpen()) return;
   let data;
   try {
-    data = await api(`/api/topology${zoneFilterQuery()}`);
+    data = await api(`/api/topology${topologyScopeQuery()}`);
   } catch (e) { return; }
   renderTopology(data);
 }
@@ -2446,10 +2446,38 @@ async function loadTopology() {
 function renderTopology(data) {
   const container = $('#topology-cy');
   if (!container) return;
-  const hasAllPositions = data.nodes.length > 0 && data.nodes.every(n => topologyPositions[n.id]);
+
+  // Grouping by Zona only makes sense once a view actually spans more
+  // than one (a Sitio-wide request via selectSiteTopology/site_id) -- a
+  // single-Zona view has nothing to group, so it renders exactly as
+  // before. Each Zona becomes a labeled compound "box" (a real Cytoscape
+  // parent node, not a visual trick) with its own devices nested inside
+  // as children; a device with no zone_id (never captured) just floats
+  // outside every box rather than being forced into one.
+  const zoneIds = [...new Set(data.nodes.map(n => n.zone_id).filter(id => id != null))];
+  const groupByZone = zoneIds.length > 1;
+  // Cached positions come from whatever view was rendered last, which may
+  // have had no parent/child structure at all (or a different one) -- reusing
+  // them verbatim via a 'preset' layout would place children at their old
+  // flat coordinates with no regard for their Zona box, leaving them to
+  // float outside it while Cytoscape auto-fits each box around wherever its
+  // real children ended up. A grouped view always needs a fresh cose pass so
+  // the compound boxes actually end up positioned around their children.
+  const hasAllPositions = !groupByZone && data.nodes.length > 0 && data.nodes.every(n => topologyPositions[n.id]);
+  const zoneParents = groupByZone
+    ? zoneIds.map(zid => {
+        const sample = data.nodes.find(n => n.zone_id === zid);
+        return { data: { id: `zone-${zid}`, label: (sample && sample.zone_name) || `Zona ${zid}` } };
+      })
+    : [];
+
   const elements = [
+    ...zoneParents,
     ...data.nodes.map(n => ({
-      data: { id: String(n.id), ...n },
+      data: {
+        id: String(n.id), ...n,
+        ...(groupByZone && n.zone_id != null ? { parent: `zone-${n.zone_id}` } : {}),
+      },
       position: topologyPositions[n.id],
       classes: n.is_ot_suspected ? 'ot-suspected' : '',
     })),
@@ -2485,6 +2513,17 @@ function renderTopology(data) {
           'background-fit': 'contain', 'background-clip': 'none',
           'background-image': (ele) => topologyIconUrl(ele.data('icon')),
       } },
+      // ':parent' is Cytoscape's own pseudo-selector for a compound node
+      // (one that has children) -- i.e. the Zona "box" itself, never a
+      // device. Its size/position are derived from its children
+      // automatically; this only styles how the box and its label look.
+      { selector: ':parent', style: {
+          'background-image': 'none', // else it inherits 'node's device-icon mapper below
+          'background-opacity': 0.07, 'background-color': accentColor,
+          'border-width': 1.5, 'border-color': mutedColor, 'border-style': 'dashed',
+          label: 'data(label)', 'text-valign': 'top', 'text-halign': 'center',
+          'font-size': 12, 'font-weight': 600, color: textColor, 'padding': '18px',
+      } },
       { selector: 'node.ot-suspected', style: { 'border-width': 2.5, 'border-color': critColor, 'border-opacity': 0.85 } },
       { selector: 'node.topology-pending', style: { 'overlay-color': accentColor, 'overlay-opacity': 0.35, 'overlay-padding': 8 } },
       { selector: 'edge', style: { 'curve-style': 'bezier', 'font-size': 10 } },
@@ -2503,8 +2542,20 @@ function renderTopology(data) {
           label: 'data(label)', color: mutedColor,
       } },
     ],
+    // 'cose' is a force layout -- it has no real notion of "these two boxes
+    // must not overlap", so with only a handful of devices per Zona its
+    // compound boxes routinely end up overlapping regardless of how hard the
+    // repulsion/nesting forces are tuned (a known limitation of the core
+    // algorithm, not a config problem). 'grid' instead places top-level
+    // nodes -- Zona boxes included -- into non-overlapping cells and lays
+    // out each compound's own children within its cell, which is exactly
+    // the guarantee a grouped view needs; a single-Zona view has no
+    // compound structure to protect, so it keeps the force layout that
+    // reads better for a handful of freely-connected devices.
     layout: hasAllPositions
       ? { name: 'preset' }
+      : groupByZone
+      ? { name: 'grid', condense: false, avoidOverlap: true, avoidOverlapPadding: 40 }
       : { name: 'cose', animate: false, nodeRepulsion: () => 9000, idealEdgeLength: () => 100 },
     wheelSensitivity: 0.25,
   });
@@ -3173,6 +3224,18 @@ function zoneFilterQuery() {
   return selectedZoneId != null ? `?zone_id=${selectedZoneId}` : '';
 }
 
+// Topología is the one ZONE_LEAVES tab that's also reachable at the Sitio
+// level (selectSiteTopology, mirroring selectSiteLeaf's Reportes flyout,
+// but actually filtering by site_id -- unlike Reportes, which is
+// deliberately org-wide, see SITE_LEAVES's own comment). selectedSiteId
+// is otherwise cosmetic (breadcrumb/rail highlighting only, per
+// selectSiteLeaf) -- this is the only place it becomes a real filter.
+function topologyScopeQuery() {
+  if (selectedZoneId != null) return `?zone_id=${selectedZoneId}`;
+  if (selectedSiteId != null) return `?site_id=${selectedSiteId}`;
+  return '';
+}
+
 // The organization whose Sitio/Zona rail is on screen: the caller's own
 // for admin/viewer, or whichever one Super Admin picked in the switcher.
 function currentOrgId() {
@@ -3404,6 +3467,16 @@ function renderSidebarRail() {
   const addZoneHtml = (admin && currentSiteId != null)
     ? `<button type="button" class="rail-add" onclick="openCreateZone(${currentSiteId})">+ Zona</button>` : '';
 
+  // A Sitio-level leaf, same as Reportes below -- unlike Reportes (always
+  // org-wide by design, see SITE_LEAVES), this one actually filters by
+  // site_id: it's the union of every Zona under this Sitio, the "objetivo
+  // final" the Zona-scoped Topología views build up to.
+  const siteTopologyHtml = currentSiteId != null ? `
+    <button type="button" class="rail-item${openFlyoutKey === 'site-topology' ? ' open' : ''}${activeRailKey === 'site-topology' ? ' active' : ''}" onclick="toggleFlyout('site-topology')">
+      <span class="rail-item-label">Topología del Sitio</span>
+      <span class="rail-item-chevron">›</span>
+    </button>` : '';
+
   const reportsHtml = currentSiteId != null ? `
     <button type="button" class="rail-item${openFlyoutKey === 'reports' ? ' open' : ''}${activeRailKey === 'reports' ? ' active' : ''}" onclick="toggleFlyout('reports')">
       <span class="rail-item-label">Reportes</span>
@@ -3423,6 +3496,7 @@ function renderSidebarRail() {
       ${zoneRowsHtml}
       ${emptyZonesHtml}
       ${addZoneHtml}
+      ${siteTopologyHtml}
       ${reportsHtml}
       ${orgAdminHtml}
     </div>`;
@@ -3446,6 +3520,7 @@ function renderFlyoutPanel() {
   if (openFlyoutKey === 'org-switcher') panel.innerHTML = buildOrgSwitcherFlyout();
   else if (openFlyoutKey === 'site-switcher') panel.innerHTML = buildSiteSwitcherFlyout();
   else if (openFlyoutKey === 'org-admin') panel.innerHTML = buildOrgAdminFlyout();
+  else if (openFlyoutKey === 'site-topology') panel.innerHTML = buildSiteTopologyFlyout();
   else if (openFlyoutKey === 'reports') panel.innerHTML = buildReportsFlyout();
   else if (openFlyoutKey.startsWith('zone-')) panel.innerHTML = buildZoneFlyout(Number(openFlyoutKey.slice(5)));
   else panel.innerHTML = '';
@@ -3584,6 +3659,16 @@ function buildZoneFlyout(zoneId) {
     ${admin ? `<button type="button" class="flyout-link" onclick="renameZone(${zone.id})">✎ Renombrar zona</button>` : ''}`;
 }
 
+function buildSiteTopologyFlyout() {
+  return `
+    <div class="flyout-header">
+      <div class="flyout-title">Topología del Sitio</div>
+      <button type="button" class="flyout-close" onclick="closeFlyout()">×</button>
+    </div>
+    <div class="flyout-section-title">Monitor</div>
+    <button type="button" class="flyout-link" onclick="selectSiteTopology(${currentSiteId})">Todas las Zonas unificadas</button>`;
+}
+
 function buildReportsFlyout() {
   return `
     <div class="flyout-header">
@@ -3678,6 +3763,7 @@ function selectZoneLeaf(zoneId, tabName) {
   // happened to load.
   loadSessions();
   loadDevices();
+  loadTopology();
   loadFlows();
   loadFindings();
   renderSidebarRail();
@@ -3713,6 +3799,36 @@ function selectSiteLeaf(siteId, tabName) {
   loadDevices();
   loadFlows();
   loadFindings();
+  renderSidebarRail();
+}
+
+function selectSiteTopology(siteId) {
+  const site = allSites.find(s => s.id === siteId);
+  const orgName = site
+    ? (isSuperAdmin() ? (allOrganizations.find(o => o.id === site.organization_id) || {}).name : currentUser.organization_name)
+    : null;
+
+  activateTab('topology'); // resets selectedZoneId/selectedSiteId -- set the latter back below
+  selectedSiteId = siteId;
+  selectedLeafTab = 'topology';
+  activeRailKey = 'site-topology';
+
+  const breadcrumb = $('#zone-breadcrumb');
+  const path = $('#zone-breadcrumb-path');
+  const note = $('#zone-breadcrumb-note');
+  if (site && breadcrumb && path) {
+    const leafLabel = (ZONE_LEAVES.find(l => l.tab === 'topology') || {}).label || 'Topología';
+    path.innerHTML = `<b>${escapeHtml(orgName || '—')}</b> › <b>${escapeHtml(site.name)}</b> › ${escapeHtml(leafLabel)}`;
+    // Unlike a Zona's own breadcrumb note ("filtrado por esta Zona") or
+    // Reportes' ("toda la organización"), this is neither -- it's every
+    // Zona under just this one Sitio, unified into a single graph (see
+    // topologyScopeQuery()'s site_id branch).
+    if (note) note.textContent = 'todas las Zonas de este Sitio, unificadas';
+    breadcrumb.classList.remove('hidden');
+  }
+  // selectedZoneId is already null here (activateTab reset it) --
+  // loadTopology() picks up selectedSiteId via topologyScopeQuery().
+  loadTopology();
   renderSidebarRail();
 }
 

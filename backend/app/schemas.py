@@ -115,11 +115,20 @@ class FlowOut(BaseModel):
 
 
 class TopologyNode(BaseModel):
-    """One Device rendered as a graph node -- see app/topology.py's
-    build_topology(). `icon` is a key the frontend maps to a static SVG
+    """One Device rendered as a graph node -- see app/api/routes_topology.py's
+    get_topology(). `icon` is a key the frontend maps to a static SVG
     (plc/hmi/server/pc/router/switch/other), derived from device_type/
     device_type_secondary rather than sent as a raw type string, so the
-    frontend never has to duplicate device_classifier.py's own type list."""
+    frontend never has to duplicate device_classifier.py's own type list.
+
+    zone_id/zone_name identify whichever Zona first captured this device
+    (same attribution Device.capture_session_id already carries elsewhere --
+    see Flow's own device_a_name for the same pattern). Null for a device
+    with no capture_session_id at all. The frontend only actually uses
+    these when a request spans more than one Zona (a Sitio-wide view, via
+    site_id): that's when it draws one compound "box" per Zona and nests
+    each device inside its own -- a single-Zona view has nothing to group,
+    so the fields are simply ignored there."""
 
     id: int
     label: str
@@ -131,6 +140,8 @@ class TopologyNode(BaseModel):
     icon: str
     is_ot_suspected: bool
     is_external: bool
+    zone_id: int | None = None
+    zone_name: str | None = None
 
 
 class TopologyEdge(BaseModel):

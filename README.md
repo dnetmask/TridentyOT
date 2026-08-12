@@ -438,6 +438,21 @@ curl -X PATCH http://localhost:8000/api/topology/links/7 \
 curl -X DELETE http://localhost:8000/api/topology/links/7 -H "Authorization: Bearer $TOKEN"
 ```
 
+**Topología del Sitio (todas las Zonas unificadas):** además de la Topología por Zona (la que se ve
+al entrar a una Zona puntual), el panel lateral tiene una entrada "Topología del Sitio" a nivel de
+Sitio -- "Todas las Zonas unificadas" -- que llama al mismo endpoint con `?site_id=X` en vez de
+`?zone_id=X`. Es la unión de los dispositivos y enlaces de todas las Zonas de ese Sitio, calculada
+por el mismo `GET /api/topology` sin ningún paso extra de "unificación": un enlace humano entre
+dispositivos de dos Zonas distintas, invisible en la vista de cualquiera de esas Zonas por separado
+(sale del alcance de ambas), sí aparece aquí. Cuando la vista abarca más de una Zona, cada nodo trae
+además `zone_id`/`zone_name` (a qué Zona pertenece el dispositivo que primero lo capturó) y el
+frontend dibuja una caja compuesta de Cytoscape.js por Zona para agruparlos visualmente -- una vista
+de una sola Zona no tiene nada que agrupar y se ve exactamente igual que antes.
+
+```bash
+curl "http://localhost:8000/api/topology?site_id=3" -H "Authorization: Bearer $TOKEN"
+```
+
 ### Ejecutar el escaneo de vulnerabilidades
 
 ```bash

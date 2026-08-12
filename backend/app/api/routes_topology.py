@@ -16,7 +16,7 @@ from app.auth.deps import get_current_user, is_super_admin, require_admin
 from app.db import get_db
 from app.fingerprint.device_classifier import HMI, NETWORK_DEVICE, PLC, ROUTER_NAT, SERVER, WORKSTATION
 from app.i18n import message
-from app.models import Device, Flow, NetworkLink, User
+from app.models import CaptureSession, Device, Flow, NetworkLink, Sensor, User, Zone
 from app.schemas import (
     NetworkLinkCreateRequest,
     NetworkLinkOut,
@@ -38,7 +38,31 @@ def _icon_key(device: Device) -> str:
     return _ICON_BY_DEVICE_TYPE.get(device_type, "other")
 
 
-def _node(device: Device) -> TopologyNode:
+def _zone_by_capture_session_id(db: Session, devices: list[Device]) -> dict[int, tuple[int, str]]:
+    """Bulk lookup, not one query per device: maps each distinct
+    capture_session_id among `devices` to the Zona that first captured it
+    (via Sensor -- same attribution CaptureSession.sensor_id already
+    carries elsewhere). Computed unconditionally regardless of scope --
+    it's one cheap query either way, and it's simpler than special-casing
+    "only bother when the request spans more than one Zona". The frontend
+    is the one that decides whether zone_id/zone_name are worth acting on
+    (grouping devices into a per-Zona box only makes sense for a Sitio-wide
+    view that actually spans more than one -- see TopologyNode's docstring)."""
+    session_ids = {d.capture_session_id for d in devices if d.capture_session_id is not None}
+    if not session_ids:
+        return {}
+    rows = (
+        db.query(CaptureSession.id, Zone.id, Zone.name)
+        .join(Sensor, CaptureSession.sensor_id == Sensor.id)
+        .join(Zone, Sensor.zone_id == Zone.id)
+        .filter(CaptureSession.id.in_(session_ids))
+        .all()
+    )
+    return {row[0]: (row[1], row[2]) for row in rows}
+
+
+def _node(device: Device, zone_by_session_id: dict[int, tuple[int, str]]) -> TopologyNode:
+    zone_id, zone_name = zone_by_session_id.get(device.capture_session_id, (None, None))
     return TopologyNode(
         id=device.id,
         label=device.display_name or device.ip or device.mac or f"device-{device.id}",
@@ -50,6 +74,8 @@ def _node(device: Device) -> TopologyNode:
         icon=_icon_key(device),
         is_ot_suspected=device.is_ot_suspected,
         is_external=device.is_external,
+        zone_id=zone_id,
+        zone_name=zone_name,
     )
 
 
@@ -84,7 +110,8 @@ def get_topology(
     device_query = _filter_by_zone_or_site(device_query, Device, zone_id, site_id)
     devices = device_query.all()
     device_ids = {d.id for d in devices}
-    nodes = [_node(d) for d in devices]
+    zone_by_session_id = _zone_by_capture_session_id(db, devices)
+    nodes = [_node(d, zone_by_session_id) for d in devices]
 
     link_query = db.query(NetworkLink)
     if not is_super_admin(user):

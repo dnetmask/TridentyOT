@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.auth import ROLE_SUPER_ADMIN
 from app.auth.security import hash_password
-from app.models import Device, Flow, Organization, Site, User, Zone
+from app.models import CaptureSession, Device, Flow, Organization, Sensor, Site, User, Zone
 
 
 def _make_device(db_session, org_id, **overrides):
@@ -18,6 +18,26 @@ def _make_device(db_session, org_id, **overrides):
     db_session.commit()
     db_session.refresh(device)
     return device
+
+
+def _make_device_in_zone(db_session, org_id, site_id, zone_name, **overrides):
+    """Same as _make_device, but actually attributed to a real Zona (via a
+    Sensor + CaptureSession) instead of capture_session_id=None -- needed
+    to test zone_id/zone_name attribution and site_id's multi-Zona union,
+    neither of which a capture_session_id=None device can exercise."""
+    zone = Zone(site_id=site_id, name=zone_name)
+    db_session.add(zone)
+    db_session.flush()
+    sensor = Sensor(zone_id=zone.id, name=f"Sensor {zone_name}")
+    db_session.add(sensor)
+    db_session.flush()
+    capture_session = CaptureSession(
+        organization_id=org_id, sensor_id=sensor.id, source_type="pcap", source="test.pcap", status="completed",
+    )
+    db_session.add(capture_session)
+    db_session.flush()
+    device = _make_device(db_session, org_id, capture_session_id=capture_session.id, **overrides)
+    return device, zone
 
 
 def _make_flow(db_session, device_a, device_b, protocol="modbus", port=502):
@@ -240,3 +260,58 @@ def test_topology_scopes_devices_by_organization(client, db_session, org_id):
     resp = client.get("/api/topology")
     assert resp.status_code == 200
     assert len(resp.json()["nodes"]) == 1
+
+
+def _default_site_id(db_session, org_id):
+    site = db_session.query(Site).filter(Site.organization_id == org_id).order_by(Site.id.asc()).first()
+    return site.id
+
+
+def test_topology_node_carries_its_zone_attribution(client, db_session, org_id):
+    site_id = _default_site_id(db_session, org_id)
+    device, zone = _make_device_in_zone(db_session, org_id, site_id, "Linea 1", ip="10.0.1.10")
+
+    resp = client.get("/api/topology")
+    assert resp.status_code == 200
+    node = next(n for n in resp.json()["nodes"] if n["id"] == device.id)
+    assert node["zone_id"] == zone.id
+    assert node["zone_name"] == "Linea 1"
+
+
+def test_topology_node_has_no_zone_when_never_captured(client, db_session, org_id):
+    device = _make_device(db_session, org_id, ip="10.0.1.20")
+    resp = client.get("/api/topology")
+    node = next(n for n in resp.json()["nodes"] if n["id"] == device.id)
+    assert node["zone_id"] is None
+    assert node["zone_name"] is None
+
+
+def test_topology_site_id_unifies_every_zone_under_it(client, db_session, org_id):
+    """The whole point of site_id: a Sitio's topology is the union of all
+    of its Zonas' devices (and any manual link between them), computed by
+    the same endpoint with no separate "unify" step -- see the design
+    discussion this followed."""
+    site_id = _default_site_id(db_session, org_id)
+    device_a, zone_a = _make_device_in_zone(db_session, org_id, site_id, "Linea 1", ip="10.0.1.10")
+    device_b, zone_b = _make_device_in_zone(db_session, org_id, site_id, "Linea 2", ip="10.0.1.20")
+    link_resp = client.post(
+        "/api/topology/links",
+        json={"device_a_id": device_a.id, "device_b_id": device_b.id, "status": "confirmed"},
+    )
+    assert link_resp.status_code == 200, link_resp.text
+
+    # Filtering by just Linea 1's own zone_id never sees Linea 2's device,
+    # and the cross-zone link is dropped too (see get_topology's own
+    # "don't show an edge to a node that isn't drawn" rule).
+    zone_scoped = client.get(f"/api/topology?zone_id={zone_a.id}").json()
+    assert [n["id"] for n in zone_scoped["nodes"]] == [device_a.id]
+    assert zone_scoped["edges"] == []
+
+    site_scoped = client.get(f"/api/topology?site_id={site_id}").json()
+    node_ids = {n["id"] for n in site_scoped["nodes"]}
+    assert device_a.id in node_ids and device_b.id in node_ids
+    zone_ids_by_device = {n["id"]: n["zone_id"] for n in site_scoped["nodes"]}
+    assert zone_ids_by_device[device_a.id] == zone_a.id
+    assert zone_ids_by_device[device_b.id] == zone_b.id
+    assert len(site_scoped["edges"]) == 1
+    assert site_scoped["edges"][0]["kind"] == "confirmed"
