@@ -4,10 +4,11 @@ from sqlalchemy.orm import Session
 from app.api.routes_capture import _get_owned_sensor, _sensor_organization_id
 from app.auth.deps import require_admin
 from app.capture.active_discovery import run_profinet_dcp_scan
+from app.capture.nmap_discovery import run_nmap_scan
 from app.db import get_db, session_scope
 from app.i18n import message
 from app.models import SENSOR_KIND_LIVE, CaptureSession, Sensor, User
-from app.schemas import CaptureSessionOut, ProfinetDcpScanRequest, capture_session_out
+from app.schemas import CaptureSessionOut, NmapScanRequest, ProfinetDcpScanRequest, capture_session_out
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
 
@@ -54,4 +55,37 @@ def start_profinet_dcp_scan(
     background_tasks.add_task(
         _run_profinet_dcp_background, session_obj.id, payload.interface, payload.duration_seconds
     )
+    return capture_session_out(session_obj, user.locale)
+
+
+def _run_nmap_background(capture_session_id: int, target: str, duration_seconds: float) -> None:
+    with session_scope() as db:
+        capture_session = db.get(CaptureSession, capture_session_id)
+        if capture_session is None:
+            return
+        run_nmap_scan(db, target, duration_seconds, capture_session)
+
+
+@router.post("/nmap", response_model=CaptureSessionOut)
+def start_nmap_scan(
+    payload: NmapScanRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    sensor = _resolve_live_sensor(db, user, payload.sensor_id)
+
+    session_obj = CaptureSession(
+        organization_id=_sensor_organization_id(db, sensor),
+        sensor_id=sensor.id,
+        name=f"discovery:nmap:{payload.target}",
+        source_type="active_nmap",
+        source=payload.target,
+        status="running",
+    )
+    db.add(session_obj)
+    db.commit()
+    db.refresh(session_obj)
+
+    background_tasks.add_task(_run_nmap_background, session_obj.id, payload.target, payload.duration_seconds)
     return capture_session_out(session_obj, user.locale)

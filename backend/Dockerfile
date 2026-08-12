@@ -15,10 +15,13 @@ WORKDIR /app
 # libpcap0.8: runtime library scapy/libpcap-based tools link against.
 # tcpdump: handy for debugging capture issues from inside the container.
 # curl: used by the compose healthcheck.
+# nmap: active discovery's port/service/OS scan (app/capture/nmap_discovery.py)
+# shells out to the real nmap binary rather than a Python wrapper around it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpcap0.8 \
         tcpdump \
         curl \
+        nmap \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

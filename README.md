@@ -307,8 +307,29 @@ curl -X POST http://localhost:8000/api/discovery/profinet-dcp \
   -d '{"interface": "eth0", "sensor_id": 1, "duration_seconds": 5}'
 ```
 
-Las opciones **Nmap** y **SNMP** están planeadas para el mismo bloque, pero todavía no
-implementadas (aparecen como "Próximamente" en el dashboard).
+La opción **Nmap** hace un escaneo liviano de verdad (invoca el binario `nmap`, sin envoltorio
+Python de por medio -- no aporta nada llamarlo directo y parsear su XML): puertos comunes (`-F`,
+~100), detección de servicio/versión barata (`-sV --version-light`) y una pasada de sistema
+operativo (`-O`). Deliberadamente **sin** scripts NSE ni escaneo agresivo -- hay casos documentados
+de scripts NSE de ICS dejando un PLC real en estado de falla, así que quedan fuera por diseño, no
+por límite técnico. Cada host que responde entra al inventario igual que uno pasivo (mismo
+`get_or_create_device`/`upsert_protocol`/`apply_os_guess`), y el banner producto/versión que nmap
+identifica alimenta la misma búsqueda en NVD que ya usa la captura pasiva
+(`vuln.rules.extract_banner_product_version`) -- ese es el objetivo real de esta opción: no solo
+inventariar, sino darle a Vulnerabilidades algo que buscar cuando la captura pasiva todavía no vio
+suficiente tráfico del servicio como para tener su banner. Requiere rol admin, un sensor **en
+vivo**, y un objetivo (host o red/CIDR pequeña -- no está pensado para barrer rangos grandes: el
+tiempo máximo de escaneo es un límite duro de 300 segundos, y si se alcanza sin terminar, la sesión
+queda en error en vez de devolver resultados parciales). Por API:
+
+```bash
+curl -X POST http://localhost:8000/api/discovery/nmap \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"target": "192.168.1.0/24", "sensor_id": 1, "duration_seconds": 60}'
+```
+
+La opción **SNMP** está planeada para el mismo bloque, pero todavía no implementada (aparece como
+"Próximamente" en el dashboard).
 
 ### Ejecutar el escaneo de vulnerabilidades
 
