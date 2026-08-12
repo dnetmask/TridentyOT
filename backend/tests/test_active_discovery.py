@@ -44,7 +44,7 @@ def _send_fake_identify_response(name: str, delay: float = 0.3) -> None:
 def test_profinet_dcp_scan_discovers_a_responding_device(client, db_session):
     from app.models import Sensor
 
-    sensor = db_session.query(Sensor).filter(Sensor.name == "Default").one()
+    sensor = db_session.query(Sensor).filter(Sensor.name == "Sensor interno").one()
 
     _send_fake_identify_response("plc-line-1")
     resp = client.post(
@@ -71,7 +71,7 @@ def test_profinet_dcp_scan_discovers_a_responding_device(client, db_session):
 def test_profinet_dcp_scan_with_no_replies_creates_no_devices(client, db_session):
     from app.models import Sensor
 
-    sensor = db_session.query(Sensor).filter(Sensor.name == "Default").one()
+    sensor = db_session.query(Sensor).filter(Sensor.name == "Sensor interno").one()
 
     resp = client.post(
         "/api/discovery/profinet-dcp",
@@ -103,7 +103,7 @@ def test_profinet_dcp_scan_rejects_an_external_sensor(client):
 def test_profinet_dcp_scan_requires_admin(client, make_client, db_session):
     from app.models import Sensor
 
-    sensor = db_session.query(Sensor).filter(Sensor.name == "Default").one()
+    sensor = db_session.query(Sensor).filter(Sensor.name == "Sensor interno").one()
     client.post("/api/users", json={"username": "viewer-disc", "password": "secret1", "role": "viewer"})
     viewer = make_client("viewer-disc", "secret1")
 
@@ -146,7 +146,7 @@ def test_profinet_dcp_scan_rejects_another_organizations_sensor(client, db_sessi
 def test_profinet_dcp_scan_duration_is_bounded(client, db_session):
     from app.models import Sensor
 
-    sensor = db_session.query(Sensor).filter(Sensor.name == "Default").one()
+    sensor = db_session.query(Sensor).filter(Sensor.name == "Sensor interno").one()
 
     too_long = client.post(
         "/api/discovery/profinet-dcp",

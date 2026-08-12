@@ -322,6 +322,7 @@ class SensorOut(BaseModel):
     name: str
     description: str | None
     kind: str
+    interface: str | None
     last_seen_at: datetime.datetime | None
     created_at: datetime.datetime
 
@@ -331,6 +332,19 @@ class SensorCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
     kind: Literal["live", "external"] = "live"
+    # The physical NIC this Sensor listens on/transmits from for live
+    # capture and active discovery -- optional at creation (Captura/
+    # Descubrimiento still let you pick one ad hoc), but setting it here
+    # (or later via PATCH) lets those pre-select it instead of asking every
+    # time. Not validated against GET /api/capture/interfaces -- see
+    # update_sensor's docstring.
+    interface: str | None = None
+
+
+class SensorUpdateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    interface: str | None = None
 
 
 # ---------------------------------------------------------------------------

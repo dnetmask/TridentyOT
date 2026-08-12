@@ -102,6 +102,11 @@ class Sensor(Base):
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     kind: Mapped[str] = mapped_column(String(16), default=SENSOR_KIND_LIVE)
+    # The physical NIC (e.g. "eth0") this Sensor listens on for live
+    # capture and transmits/listens on for active discovery -- NULL until
+    # an admin sets it (see routes_hierarchy.update_sensor), in which case
+    # Captura/Descubrimiento activo still ask for one ad hoc every time.
+    interface: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Set once this sensor actually runs as its own remote enrollment
     # target (see docs, "Sensor remoto") -- NULL until that lands.
     enrollment_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)

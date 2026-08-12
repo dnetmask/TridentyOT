@@ -4,10 +4,11 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_current_user, is_super_admin, require_admin
 from app.db import get_db
 from app.i18n import message
-from app.models import Sensor, Site, User, Zone
+from app.models import SENSOR_KIND_LIVE, Sensor, Site, User, Zone
 from app.schemas import (
     SensorCreateRequest,
     SensorOut,
+    SensorUpdateRequest,
     SiteCreateRequest,
     SiteOut,
     SiteUpdateRequest,
@@ -15,6 +16,12 @@ from app.schemas import (
     ZoneOut,
     ZoneUpdateRequest,
 )
+
+# Every Zona gets one of these the moment it's created, so Captura/
+# Descubrimiento activo always have at least one Sensor to select --
+# nothing to configure before a Zona is usable. Admins can still rename it,
+# add more, or set its physical interface (see update_sensor below).
+DEFAULT_SENSOR_NAME = "Sensor interno"
 
 router = APIRouter(prefix="/api", tags=["hierarchy"])
 
@@ -113,6 +120,8 @@ def create_zone(payload: ZoneCreateRequest, db: Session = Depends(get_db), user:
         security_level=payload.security_level,
     )
     db.add(zone)
+    db.flush()  # zone.id is needed for the default Sensor below
+    db.add(Sensor(zone_id=zone.id, name=DEFAULT_SENSOR_NAME, kind=SENSOR_KIND_LIVE))
     db.commit()
     db.refresh(zone)
     return zone
@@ -172,8 +181,42 @@ def create_sensor(payload: SensorCreateRequest, db: Session = Depends(get_db), u
         name=payload.name,
         description=payload.description,
         kind=payload.kind,
+        interface=payload.interface,
     )
     db.add(sensor)
+    db.commit()
+    db.refresh(sensor)
+    return sensor
+
+
+def _get_owned_sensor(db: Session, user: User, sensor_id: int) -> Sensor:
+    query = db.query(Sensor).filter(Sensor.id == sensor_id)
+    if not is_super_admin(user):
+        query = (
+            query.join(Zone, Sensor.zone_id == Zone.id)
+            .join(Site, Zone.site_id == Site.id)
+            .filter(Site.organization_id == user.organization_id)
+        )
+    sensor = query.one_or_none()
+    if sensor is None:
+        raise HTTPException(status_code=404, detail=message("sensors.not_found", user.locale))
+    return sensor
+
+
+@router.patch("/sensors/{sensor_id}", response_model=SensorOut)
+def update_sensor(
+    sensor_id: int, payload: SensorUpdateRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)
+):
+    sensor = _get_owned_sensor(db, user, sensor_id)  # 404s unless the sensor is the caller's (or caller is super_admin)
+    sensor.name = payload.name
+    sensor.description = payload.description
+    # Not user.locale-sensitive, and deliberately not validated against
+    # GET /api/capture/interfaces here: that list is specific to whichever
+    # host this API process happens to be running on right now, which may
+    # not be the host a remote Sensor eventually runs on (see docs, "Sensor
+    # remoto") -- the frontend still only offers that list in its own
+    # dropdown, this just doesn't hard-block a name outside it.
+    sensor.interface = payload.interface
     db.commit()
     db.refresh(sensor)
     return sensor

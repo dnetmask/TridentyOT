@@ -485,7 +485,7 @@
           <tr>
             <th id="home-breakdown-col-label">Sitio</th>
             <th data-i18n="home.breakdown_col_devices">Dispositivos</th>
-            <th data-i18n="home.breakdown_col_ot">Sospechosos de OT</th>
+            <th data-i18n="home.breakdown_col_ot">Dispositivos OT</th>
             <th data-i18n="home.breakdown_col_findings">Hallazgos</th>
           </tr>
         </thead>
@@ -502,6 +502,7 @@
           <select id="capture-sensor-select" onchange="updateCaptureSensorKindUI()"></select>
         </div>
         <div id="capture-sensor-kind-badge" class="muted" style="align-self:center; font-size:12.5px;"></div>
+        <button type="button" class="action secondary" onclick="openEditSensor(Number($('#capture-sensor-select').value))" title="Editar sensor" data-i18n="capture.edit_sensor">✎ Sensor</button>
         <button type="button" class="action secondary" onclick="openCreateSensor(selectedZoneId)" data-i18n="capture.add_sensor">+ Sensor</button>
       </div>
     </div>
@@ -587,8 +588,9 @@
       <div class="row">
         <div>
           <label data-i18n="capture.sensor">Sensor</label>
-          <select id="discovery-sensor-select"></select>
+          <select id="discovery-sensor-select" onchange="applySensorDefaultInterface('discovery-sensor-select', 'discovery-iface-select')"></select>
         </div>
+        <button type="button" class="action secondary" onclick="openEditSensor(Number($('#discovery-sensor-select').value))" title="Editar sensor" data-i18n="capture.edit_sensor">✎ Sensor</button>
         <div>
           <label data-i18n="capture.interface">Interfaz de red</label>
           <select id="discovery-iface-select"><option value="">(cargando...)</option></select>
@@ -928,7 +930,7 @@
 
   <section id="tab-create-sensor" class="tab admin-only">
     <div class="card">
-      <h2 data-i18n="infra.create_sensor_title">Crear sensor</h2>
+      <h2 id="create-sensor-title">Crear sensor</h2>
       <div class="row">
         <div>
           <label data-i18n="infra.sensor_zone">Zona</label>
@@ -949,8 +951,16 @@
             <option value="external" data-i18n="infra.sensor_kind_external">Externo (solo pcap)</option>
           </select>
         </div>
+        <div>
+          <label data-i18n="infra.sensor_interface">Interfaz física</label>
+          <select id="new-sensor-interface"><option value="">(sin definir)</option></select>
+        </div>
         <button class="action" id="create-sensor-btn" data-i18n="infra.create_btn">Crear</button>
       </div>
+      <p class="muted" style="margin-top:10px; font-size:12px;" data-i18n="infra.sensor_interface_hint">
+        Opcional: fijar la interfaz hace que Captura y Descubrimiento activo la preseleccionen
+        automáticamente al elegir este sensor, en vez de pedirla cada vez.
+      </p>
       <div id="create-sensor-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
     </div>
   </section>
@@ -1062,7 +1072,7 @@ const I18N = {
   'login.submit': { es: 'Entrar', en: 'Sign in' },
   'common.clear_filters': { es: 'Limpiar filtros', en: 'Clear filters' },
   'home.breakdown_col_devices': { es: 'Dispositivos', en: 'Devices' },
-  'home.breakdown_col_ot': { es: 'Sospechosos de OT', en: 'Suspected OT' },
+  'home.breakdown_col_ot': { es: 'Dispositivos OT', en: 'OT devices' },
   'home.breakdown_col_findings': { es: 'Hallazgos', en: 'Findings' },
   'nav.discovery': { es: 'Descubrimiento activo', en: 'Active discovery' },
   'discovery.intro': {
@@ -1090,6 +1100,7 @@ const I18N = {
   'capture.live_title': { es: 'Captura en vivo', en: 'Live capture' },
   'capture.sensor': { es: 'Sensor', en: 'Sensor' },
   'capture.add_sensor': { es: '+ Sensor', en: '+ Sensor' },
+  'capture.edit_sensor': { es: '✎ Sensor', en: '✎ Sensor' },
   'capture.pcap_sensor_hint': { es: 'Se asocia al sensor seleccionado arriba.', en: 'Attributed to the sensor selected above.' },
   'capture.external_title': { es: 'Sensor externo', en: 'External sensor' },
   'capture.external_hint': {
@@ -1195,6 +1206,13 @@ const I18N = {
   'infra.sensor_kind': { es: 'Tipo', en: 'Kind' },
   'infra.sensor_kind_live': { es: 'En vivo', en: 'Live' },
   'infra.sensor_kind_external': { es: 'Externo (solo pcap)', en: 'External (pcap only)' },
+  'infra.sensor_interface': { es: 'Interfaz física', en: 'Physical interface' },
+  'infra.sensor_interface_hint': {
+    es: 'Opcional: fijar la interfaz hace que Captura y Descubrimiento activo la preseleccionen automáticamente al elegir este sensor, en vez de pedirla cada vez.',
+    en: 'Optional: setting the interface makes Captura and Active discovery pre-select it automatically once this sensor is chosen, instead of asking for it every time.',
+  },
+  'infra.edit_sensor_title': { es: 'Editar sensor', en: 'Edit sensor' },
+  'infra.save_btn': { es: 'Guardar', en: 'Save' },
   'infra.sensors_title': { es: 'Sensores', en: 'Sensors' },
   'orgs.create_title': { es: 'Crear organización', en: 'Create organization' },
   'orgs.name': { es: 'Nombre', en: 'Name' },
@@ -1496,12 +1514,38 @@ function sevBadge(sev) {
 // ---------- Capture tab ----------
 async function loadInterfaces() {
   const selects = [$('#iface-select'), $('#discovery-iface-select')].filter(Boolean);
+  const sensorIfaceSelect = $('#new-sensor-interface');
   try {
     const data = await api('/api/capture/interfaces');
     const optionsHtml = data.interfaces.map(i => `<option value="${i}">${i}</option>`).join('') || '<option value="">(ninguna disponible)</option>';
     selects.forEach(sel => { sel.innerHTML = optionsHtml; });
+    // A Sensor's own interface is optional (see SensorCreateRequest/
+    // SensorUpdateRequest) -- unlike the other two selects, this one
+    // always needs a "not set" choice up front.
+    if (sensorIfaceSelect) sensorIfaceSelect.innerHTML = '<option value="">(sin definir)</option>' + optionsHtml;
   } catch (e) {
     selects.forEach(sel => { sel.innerHTML = '<option value="">(no se pudo listar interfaces)</option>'; });
+    if (sensorIfaceSelect) sensorIfaceSelect.innerHTML = '<option value="">(no se pudo listar interfaces)</option>';
+    return;
+  }
+  // Re-apply now in case this resolved after populateCaptureSensorSelect/
+  // populateDiscoverySensorSelect already ran with no options yet to
+  // match a Sensor's saved interface against.
+  applySensorDefaultInterface('capture-sensor-select', 'iface-select');
+  applySensorDefaultInterface('discovery-sensor-select', 'discovery-iface-select');
+}
+
+// A Sensor with a saved .interface (see SensorOut) pre-selects it in the
+// given interface <select> once that Sensor is chosen, instead of asking
+// for the same interface again every time -- still overridable, since
+// it's a real <select> option, not a locked field.
+function applySensorDefaultInterface(sensorSelectId, ifaceSelectId) {
+  const sensorSelect = $('#' + sensorSelectId);
+  const ifaceSelect = $('#' + ifaceSelectId);
+  if (!sensorSelect || !ifaceSelect) return;
+  const sensor = allSensors.find(s => String(s.id) === sensorSelect.value);
+  if (sensor && sensor.interface && [...ifaceSelect.options].some(o => o.value === sensor.interface)) {
+    ifaceSelect.value = sensor.interface;
   }
 }
 
@@ -2285,7 +2329,7 @@ function renderReportsTab() {
 
   $('#reports-stats').innerHTML = `
     <div class="stat-tile"><div class="stat-num">${totalDevices}</div><div class="stat-label">Dispositivos</div></div>
-    <div class="stat-tile"><div class="stat-num ot">${otDevices}</div><div class="stat-label">Sospechosos de OT</div></div>
+    <div class="stat-tile"><div class="stat-num ot">${otDevices}</div><div class="stat-label">Dispositivos OT</div></div>
     <div class="stat-tile"><div class="stat-num">${allFindings.length}</div><div class="stat-label">Hallazgos de vulnerabilidades</div></div>
     <div class="stat-tile"><div class="stat-num">${allSessions.length}</div><div class="stat-label">Sesiones de captura</div></div>
     <div class="stat-tile"><div class="stat-num">${totalPackets}</div><div class="stat-label">Paquetes capturados</div></div>
@@ -2656,6 +2700,7 @@ function populateDiscoverySensorSelect() {
       }).join('')
     : '<option value="">(sin sensores en vivo)</option>';
   if (previous && sensors.some(s => String(s.id) === previous)) select.value = previous;
+  applySensorDefaultInterface('discovery-sensor-select', 'discovery-iface-select');
 }
 
 // Toggles the "Captura en vivo" card vs. the "Sensor externo" notice based
@@ -2674,6 +2719,7 @@ function updateCaptureSensorKindUI() {
   liveCard.classList.toggle('hidden', isExternal);
   externalCard.classList.toggle('hidden', !isExternal);
   if (badge) badge.textContent = sensor ? (SENSOR_KIND_LABELS[sensor.kind] || sensor.kind) : '';
+  applySensorDefaultInterface('capture-sensor-select', 'iface-select');
 }
 
 async function loadOrganizations() {
@@ -2905,7 +2951,7 @@ function renderHomeSummary(rows) {
 
   $('#home-stats').innerHTML = `
     <div class="stat-tile"><div class="stat-num">${totalDevices}</div><div class="stat-label">Dispositivos</div></div>
-    <div class="stat-tile"><div class="stat-num ot">${otDevices}</div><div class="stat-label">Sospechosos de OT</div></div>
+    <div class="stat-tile"><div class="stat-num ot">${otDevices}</div><div class="stat-label">Dispositivos OT</div></div>
     <div class="stat-tile"><div class="stat-num">${totalFindings}</div><div class="stat-label">Hallazgos de vulnerabilidades</div></div>
   `;
 
@@ -3120,10 +3166,55 @@ function openCreateZone(siteId) {
   if (select) select.value = String(siteId);
 }
 
+// Looks up an I18N dict entry directly (applyTranslations() only walks
+// [data-i18n] elements already in the DOM) -- for text a JS-driven form
+// swaps depending on state, like create-sensor's title/button switching
+// between "crear" and "editar" a Sensor.
+function i18nText(key) {
+  const entry = I18N[key];
+  if (!entry) return key;
+  return entry[currentLocale()] || entry.es;
+}
+
+// null while creating a new Sensor, or the id of the one being edited --
+// see openEditSensor and the create-sensor-btn handler below.
+let editingSensorId = null;
+
 function openCreateSensor(zoneId) {
+  editingSensorId = null;
   activateTab('create-sensor');
   const select = $('#new-sensor-zone');
-  if (select) select.value = String(zoneId);
+  if (select) { select.value = String(zoneId); select.disabled = false; }
+  $('#new-sensor-name').value = '';
+  $('#new-sensor-description').value = '';
+  $('#new-sensor-kind').value = 'live';
+  $('#new-sensor-kind').disabled = false;
+  $('#new-sensor-interface').value = '';
+  $('#create-sensor-title').textContent = i18nText('infra.create_sensor_title');
+  $('#create-sensor-btn').textContent = i18nText('infra.create_btn');
+  $('#create-sensor-error').textContent = '';
+}
+
+// A Sensor's Zona and kind aren't editable here (moving it to a different
+// Zona would silently reattribute its whole capture history; changing
+// kind between live/external mid-life is a bigger semantic change than
+// this quick form should invite) -- only name, description, and the
+// physical interface a live Sensor listens on.
+function openEditSensor(sensorId) {
+  const sensor = allSensors.find(s => s.id === sensorId);
+  if (!sensor) return;
+  editingSensorId = sensorId;
+  activateTab('create-sensor');
+  const zoneSelect = $('#new-sensor-zone');
+  if (zoneSelect) { zoneSelect.value = String(sensor.zone_id); zoneSelect.disabled = true; }
+  $('#new-sensor-name').value = sensor.name;
+  $('#new-sensor-description').value = sensor.description || '';
+  $('#new-sensor-kind').value = sensor.kind;
+  $('#new-sensor-kind').disabled = true;
+  $('#new-sensor-interface').value = sensor.interface || '';
+  $('#create-sensor-title').textContent = i18nText('infra.edit_sensor_title');
+  $('#create-sensor-btn').textContent = i18nText('infra.save_btn');
+  $('#create-sensor-error').textContent = '';
 }
 
 function openCreateOrg() {
@@ -3181,19 +3272,29 @@ $('#create-zone-btn').addEventListener('click', async () => {
 });
 
 $('#create-sensor-btn').addEventListener('click', async () => {
-  const zone_id = Number($('#new-sensor-zone').value);
   const name = $('#new-sensor-name').value.trim();
   const description = $('#new-sensor-description').value.trim();
-  const kind = $('#new-sensor-kind').value;
+  const interfaceName = $('#new-sensor-interface').value;
   $('#create-sensor-error').textContent = '';
   try {
-    await api('/api/sensors', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ zone_id, name, description: description || null, kind }),
-    });
-    $('#new-sensor-name').value = '';
-    $('#new-sensor-description').value = '';
+    if (editingSensorId != null) {
+      await api(`/api/sensors/${editingSensorId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description: description || null, interface: interfaceName || null }),
+      });
+      editingSensorId = null;
+    } else {
+      const zone_id = Number($('#new-sensor-zone').value);
+      const kind = $('#new-sensor-kind').value;
+      await api('/api/sensors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zone_id, name, description: description || null, kind, interface: interfaceName || null }),
+      });
+      $('#new-sensor-name').value = '';
+      $('#new-sensor-description').value = '';
+    }
     loadSensors();
   } catch (e) { $('#create-sensor-error').textContent = e.message; }
 });

@@ -181,23 +181,26 @@ def test_external_sensor_accepts_a_pcap_upload(client, tmp_path):
         assert row.sensor_id == sensor["id"]
 
 
-def test_live_capture_auto_pick_skips_an_external_sensor(client):
+def test_live_capture_auto_pick_skips_an_external_sensor(client, db_session):
     """The seeded organization already has exactly one sensor -- the
-    "Default" one db.py's startup migration creates, kind=live. Adding an
-    external sensor alongside it shouldn't make live-capture auto-pick
-    ambiguous: it doesn't count as a second live candidate."""
-    site = client.post("/api/sites", json={"name": "Planta Mixta"}).json()
-    zone = client.post("/api/zones", json={"site_id": site["id"], "name": "Zona mixta"}).json()
-    client.post("/api/sensors", json={"zone_id": zone["id"], "name": "Sensor externo", "kind": "external"})
+    "Sensor interno" one db.py's startup migration creates, kind=live.
+    Adding an external sensor alongside it (in the same Zona, so this
+    doesn't also pick up the "Sensor interno" that creating a *new* Zona
+    would auto-provision -- see routes_hierarchy.create_zone) shouldn't
+    make live-capture auto-pick ambiguous: it doesn't count as a second
+    live candidate."""
+    from app.models import Sensor
+
+    default_sensor = db_session.query(Sensor).filter(Sensor.name == "Sensor interno").one()
+    client.post("/api/sensors", json={"zone_id": default_sensor.zone_id, "name": "Sensor externo", "kind": "external"})
 
     resp = client.post("/api/capture/live/start", json={"interface": "lo"})
     assert resp.status_code == 200, resp.text
     try:
         from app.db import SessionLocal
-        from app.models import CaptureSession, Sensor
+        from app.models import CaptureSession
 
         with SessionLocal() as db:
-            default_sensor = db.query(Sensor).filter(Sensor.name == "Default").one()
             row = db.get(CaptureSession, resp.json()["id"])
             assert row.sensor_id == default_sensor.id
     finally:

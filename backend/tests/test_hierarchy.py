@@ -159,12 +159,17 @@ def test_admin_creates_and_lists_own_sites_zones_sensors(client):
     assert sensor["zone_id"] == zone["id"]
     assert sensor["kind"] == "live"
 
-    # The seeded organization already has a migration-backfilled "Default"
-    # site/zone/sensor (see db.py's _ensure_default_site_zone_sensor_and_
-    # backfill) -- listing includes it alongside what this test just made.
+    # The seeded organization already has a migration-backfilled "Sensor
+    # interno" site/zone/sensor (see db.py's _ensure_default_site_zone_
+    # sensor_and_backfill) -- listing includes it alongside what this test
+    # just made. Also, create_zone itself auto-provisions its own "Sensor
+    # interno" (see routes_hierarchy.create_zone), so this zone has that
+    # one plus the "Sensor línea 1" this test created on top of it.
     assert site["id"] in {s["id"] for s in client.get("/api/sites").json()}
     assert {z["id"] for z in client.get(f"/api/zones?site_id={site['id']}").json()} == {zone["id"]}
-    assert {s["id"] for s in client.get(f"/api/sensors?zone_id={zone['id']}").json()} == {sensor["id"]}
+    zone_sensors = client.get(f"/api/sensors?zone_id={zone['id']}").json()
+    assert sensor["id"] in {s["id"] for s in zone_sensors}
+    assert any(s["name"] == "Sensor interno" for s in zone_sensors)
 
 
 def test_zone_accepts_an_iec_62443_security_level_when_given(client):
@@ -313,3 +318,84 @@ def test_super_admin_can_create_a_site_for_any_organization(client, db_session):
     created = super_admin.post("/api/sites", json={"name": "Segunda sede", "organization_id": org_id})
     assert created.status_code == 201
     assert created.json()["organization_id"] == org_id
+
+
+# ---------------------------------------------------------------------------
+# Sensors -- default provisioning and editing (name/description/interface)
+# ---------------------------------------------------------------------------
+
+
+def test_creating_a_zone_auto_provisions_a_sensor_interno(client):
+    """So Captura/Descubrimiento activo always have at least one Sensor to
+    select right away -- see routes_hierarchy.create_zone."""
+    site = client.post("/api/sites", json={"name": "Planta Bogotá"}).json()
+    zone = client.post("/api/zones", json={"site_id": site["id"], "name": "Línea 1"}).json()
+
+    sensors = client.get(f"/api/sensors?zone_id={zone['id']}").json()
+    assert len(sensors) == 1
+    assert sensors[0]["name"] == "Sensor interno"
+    assert sensors[0]["kind"] == "live"
+    assert sensors[0]["interface"] is None
+
+
+def test_admin_can_edit_a_sensors_name_description_and_interface(client):
+    site = client.post("/api/sites", json={"name": "Planta Bogotá"}).json()
+    zone = client.post("/api/zones", json={"site_id": site["id"], "name": "Línea 1"}).json()
+    sensor = client.get(f"/api/sensors?zone_id={zone['id']}").json()[0]
+
+    resp = client.patch(
+        f"/api/sensors/{sensor['id']}",
+        json={"name": "Sensor renombrado", "description": "eth0 del gabinete 3", "interface": "eth0"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["name"] == "Sensor renombrado"
+    assert body["description"] == "eth0 del gabinete 3"
+    assert body["interface"] == "eth0"
+
+    # Clearing it back out (e.g. the physical NIC changed) is a normal PATCH too.
+    resp = client.patch(f"/api/sensors/{sensor['id']}", json={"name": "Sensor renombrado", "interface": None})
+    assert resp.json()["interface"] is None
+
+
+def test_viewer_cannot_edit_a_sensor(client, make_client):
+    site = client.post("/api/sites", json={"name": "Planta Bogotá"}).json()
+    zone = client.post("/api/zones", json={"site_id": site["id"], "name": "Línea 1"}).json()
+    sensor = client.get(f"/api/sensors?zone_id={zone['id']}").json()[0]
+    client.post("/api/users", json={"username": "viewer-sensor", "password": "secret1", "role": "viewer"})
+    viewer = make_client("viewer-sensor", "secret1")
+
+    resp = viewer.patch(f"/api/sensors/{sensor['id']}", json={"name": "Intrusión", "interface": "eth0"})
+    assert resp.status_code == 403
+
+
+def test_admin_cannot_edit_another_organizations_sensor(db_session):
+    super_admin = _make_super_admin_client(db_session)
+    org_b = super_admin.post(
+        "/api/organizations",
+        json={"name": "Org B", "slug": "org-b", "admin_username": "org-b-admin", "admin_password": "secret123"},
+    ).json()
+    admin_b = _login("org-b-admin", "secret123")
+    site_b = admin_b.post("/api/sites", json={"name": "Sede B"}).json()
+    zone_b = admin_b.post("/api/zones", json={"site_id": site_b["id"], "name": "Zona B"}).json()
+    sensor_b = admin_b.get(f"/api/sensors?zone_id={zone_b['id']}").json()[0]
+
+    from app.auth.security import hash_password
+    from app.models import Organization, User
+
+    org_a = Organization(name="Org A", slug="org-a")
+    db_session.add(org_a)
+    db_session.flush()
+    salt, password_hash = hash_password("secret123")
+    db_session.add(
+        User(organization_id=org_a.id, username="org-a-admin", password_salt=salt, password_hash=password_hash, role="admin")
+    )
+    db_session.commit()
+    admin_a = _login("org-a-admin", "secret123")
+
+    assert admin_a.patch(f"/api/sensors/{sensor_b['id']}", json={"name": "Intrusión"}).status_code == 404
+    assert org_b["organization"]["id"] != org_a.id  # sanity: genuinely two different orgs
+
+
+def test_editing_an_unknown_sensor_404s(client):
+    assert client.patch("/api/sensors/999999", json={"name": "X"}).status_code == 404

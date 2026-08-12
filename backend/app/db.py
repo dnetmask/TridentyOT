@@ -291,7 +291,8 @@ def _ensure_default_site_zone_sensor_and_backfill() -> None:
     before the Organization -> Site -> Zone -> Sensor hierarchy existed,
     _add_missing_columns() above just added as NULL. This is the
     hierarchy-specific follow-up: for every Organization that doesn't
-    already have one, create a "Default" Site/Zone/Sensor -- exactly like
+    already have one, create a "Default" Site/Zone and a "Sensor interno"
+    Sensor -- exactly like
     _ensure_default_organization_and_backfill does for Organization itself
     -- and point every NULL sensor_id belonging to that organization at its
     default Sensor. Idempotent: a no-op once nothing is left to backfill.
@@ -316,7 +317,7 @@ def _ensure_default_site_zone_sensor_and_backfill() -> None:
 
             sensor = session.query(Sensor).filter(Sensor.zone_id == zone.id).order_by(Sensor.id.asc()).first()
             if sensor is None:
-                sensor = Sensor(zone_id=zone.id, name="Default")
+                sensor = Sensor(zone_id=zone.id, name="Sensor interno")
                 session.add(sensor)
                 session.flush()
                 logger.info("Migrating schema: created default sensor (id=%s) for zone %d", sensor.id, zone.id)
