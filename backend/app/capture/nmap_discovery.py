@@ -60,12 +60,16 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.db import session_scope
+from app.fingerprint.identity_detect import IdentityHint
 from app.fingerprint.os_fingerprint import OsGuess
 from app.fingerprint.protocol_detect import classify
+from app.i18n import bilingual, encode_i18n
 from app.inventory.inventory_service import (
     IngestCache,
     apply_device_type_guess,
     apply_gateway_detection,
+    apply_hostname_hints,
+    apply_identity_hints,
     apply_os_guess,
     get_or_create_device,
     upsert_protocol,
@@ -159,7 +163,16 @@ def _parse_hosts(xml_text: str) -> list[dict[str, Any]]:
         if osmatch_el is not None:
             os_match = {"name": osmatch_el.get("name"), "accuracy": float(osmatch_el.get("accuracy", 0))}
 
-        hosts.append({"ip": ip, "mac": mac, "ports": ports, "os_match": os_match})
+        # nmap does a reverse-DNS (PTR) lookup by default (nothing in
+        # _NMAP_ARGS disables it with -n) and reports whatever it resolved
+        # here -- the same class of hint packet_processor.py's own DNS/mDNS
+        # extraction feeds into apply_hostname_hints, so it goes through
+        # that same multi-claimant-collision check rather than being
+        # trusted outright.
+        hostname_el = host_el.find("hostnames/hostname")
+        hostname = hostname_el.get("name") if hostname_el is not None else None
+
+        hosts.append({"ip": ip, "mac": mac, "ports": ports, "os_match": os_match, "hostname": hostname})
     return hosts
 
 
@@ -184,6 +197,9 @@ def _ingest_nmap_host(
         )
         apply_os_guess(device, guess)
 
+    if host["ip"] and host["hostname"]:
+        apply_hostname_hints(session, [(host["ip"], host["hostname"])], organization_id)
+
     for port_info in host["ports"]:
         proto_info = classify(port_info["port"])
         product, version = port_info["product"], port_info["version"]
@@ -192,14 +208,37 @@ def _ingest_nmap_host(
             session, device, proto_info, port_info["port"], port_info["protocol"], "server",
             banner=banner, capture_session_id=capture_session_id, cache=cache,
         )
+        # nmap's -sV already parsed the HTTP Server banner into `product`/
+        # `version` directly -- no need to re-parse raw response bytes the
+        # way the passive extract_http_identity does. Same "vendor := the
+        # server banner text" convention that extractor uses for passively
+        # observed HTTP traffic, so an HTTP(S) service found only via nmap
+        # gets the same treatment as one found via passive capture.
+        if proto_info.protocol in ("http", "http-alt", "https") and banner:
+            apply_identity_hints(
+                session,
+                device,
+                [
+                    IdentityHint(
+                        vendor=banner,
+                        evidence=encode_i18n(
+                            bilingual(
+                                es=f'nmap -sV, puerto {port_info["port"]}: encabezado/banner de servicio "{banner}"',
+                                en=f'nmap -sV, port {port_info["port"]}: service header/banner "{banner}"',
+                            )
+                        ),
+                    )
+                ],
+            )
 
     apply_device_type_guess(session, device)
 
 
 class _NmapScanWorker:
-    def __init__(self, capture_session_id: int, target: str) -> None:
+    def __init__(self, capture_session_id: int, target: str, interface: str | None = None) -> None:
         self.capture_session_id = capture_session_id
         self.target = target
+        self.interface = interface
         self.total_targets = _estimate_target_count(target)
         self._xml_path = Path(tempfile.gettempdir()) / f"tridentyot-nmap-{capture_session_id}.xml"
         self._stop_requested = False
@@ -228,9 +267,19 @@ class _NmapScanWorker:
             self._finish("stopped")
             return
 
+        # -e <interface>: without this nmap picks whatever interface the
+        # OS routing table would use, not the one the sensor is configured
+        # with (Sensor.interface) -- on a host with more than one NIC (e.g.
+        # a management NIC plus one on the OT segment) that can send the
+        # scan out the wrong side, and it's also required for MAC/ARP
+        # discovery to work at all: nmap only does that when the target is
+        # layer-2 reachable from the interface it actually scans out of.
+        args = list(_NMAP_ARGS)
+        if self.interface:
+            args += ["-e", self.interface]
         try:
             self._process = subprocess.Popen(
-                ["nmap", *_NMAP_ARGS, "-oX", str(self._xml_path), self.target],
+                ["nmap", *args, "-oX", str(self._xml_path), self.target],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
             )
         except Exception as exc:
@@ -314,8 +363,8 @@ class NmapScanManager:
         self._workers: dict[int, _NmapScanWorker] = {}
         self._lock = threading.Lock()
 
-    def start(self, capture_session_id: int, target: str) -> None:
-        worker = _NmapScanWorker(capture_session_id, target)
+    def start(self, capture_session_id: int, target: str, interface: str | None = None) -> None:
+        worker = _NmapScanWorker(capture_session_id, target, interface)
         with self._lock:
             self._workers[capture_session_id] = worker
         worker.start()

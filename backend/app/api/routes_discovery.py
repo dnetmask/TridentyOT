@@ -82,7 +82,14 @@ def start_nmap_scan(
     # end time and needs to be reachable afterwards for /nmap/stop/{id} --
     # nmap_scan_manager tracks the running subprocess by session id the
     # same way live_capture_manager tracks a running sniffer.
-    nmap_scan_manager.start(session_obj.id, payload.target)
+    #
+    # sensor.interface (see Sensor model / PATCH /api/sensors/{id}) is the
+    # whole point of letting a sensor's physical interface be edited: on a
+    # host with more than one NIC, nmap must go out the one actually
+    # connected to the OT segment being scanned, both to reach the right
+    # network at all and because MAC/ARP discovery only works when the
+    # target is layer-2 reachable from that interface.
+    nmap_scan_manager.start(session_obj.id, payload.target, sensor.interface)
     return capture_session_out(session_obj, user.locale)
 
 

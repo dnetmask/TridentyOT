@@ -156,6 +156,14 @@ backend/
 - Para **captura en vivo**: privilegios de captura raw (root, o `CAP_NET_RAW`/`CAP_NET_ADMIN` en
   Linux vía `setcap` sobre el intérprete de Python) y libpcap instalado en el sistema.
 - Para **análisis de archivos .pcap**: ningún privilegio especial.
+- Para **descubrimiento activo con Nmap**: el binario `nmap` instalado, y esos mismos privilegios
+  de raw socket -- pero sobre el binario `nmap` en sí, no sobre Python: `app/capture/
+  nmap_discovery.py` lo invoca como proceso hijo separado (`subprocess.Popen(["nmap", ...])`), así
+  que darle `setcap`/root solo al intérprete de Python (como en "Captura en vivo sin Docker" más
+  abajo) no le da ningún privilegio a ese proceso hijo. Sin privilegios reales, nmap sigue
+  funcionando pero degradado y sin avisar en el dashboard: sin descubrimiento por ARP (nunca hay
+  MAC), sin `-O` (nunca hay sistema operativo), y el escaneo de puertos cae de SYN a conexión TCP
+  completa.
 
 ## Instalación y ejecución
 
@@ -317,8 +325,18 @@ por límite técnico. Cada host que responde entra al inventario igual que uno p
 identifica alimenta la misma búsqueda en NVD que ya usa la captura pasiva
 (`vuln.rules.extract_banner_product_version`) -- ese es el objetivo real de esta opción: no solo
 inventariar, sino darle a Vulnerabilidades algo que buscar cuando la captura pasiva todavía no vio
-suficiente tráfico del servicio como para tener su banner. Requiere rol admin y un sensor **en
-vivo**.
+suficiente tráfico del servicio como para tener su banner. El nombre por DNS reverso que nmap
+resuelve por su cuenta (`<hostnames>` en su XML) y el banner de un servicio HTTP(S) detectado
+también se procesan igual que sus equivalentes pasivos (`apply_hostname_hints`/
+`apply_identity_hints`), no solo el puerto/versión/SO. Requiere rol admin y un sensor **en vivo**.
+
+El escaneo sale por la interfaz física configurada en ese sensor (`Sensor.interface`, editable
+desde **Infraestructura** o `PATCH /api/sensors/{id}`) vía `nmap -e <interfaz>` -- importante en un
+host con más de una NIC, porque nmap solo puede resolver la **MAC** de un equipo por ARP cuando el
+objetivo es alcanzable en capa 2 desde la interfaz por la que sale el escaneo. Sin eso (o corriendo
+en la red *bridge* por defecto de Docker, que solo ve la NIC virtual del contenedor -- ver
+"Captura en vivo dentro de Docker" más arriba, la misma limitación aplica acá) los dispositivos
+igual se inventarían por puertos/servicios/SO, pero sin MAC ni fabricante derivado de ella.
 
 No tiene un tiempo máximo fijo -- corre hasta que nmap termina solo o hasta que se lo detiene a
 mano (botón **Detener**, o `POST /api/discovery/nmap/stop/{id}`). Mientras corre, una barra de

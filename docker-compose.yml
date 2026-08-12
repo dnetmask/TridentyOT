@@ -53,8 +53,9 @@ services:
       # README, admin/admin unless overridden).
       TRIDENTYOT_SUPER_ADMIN_USERNAME: ${TRIDENTYOT_SUPER_ADMIN_USERNAME:-}
       TRIDENTYOT_SUPER_ADMIN_PASSWORD: ${TRIDENTYOT_SUPER_ADMIN_PASSWORD:-}
-    # Needed only for *live* packet capture (raw sockets), not for
-    # uploading/analyzing .pcap files. Harmless to leave on otherwise.
+    # Needed only for *live* packet capture and the nmap-based active
+    # discovery (both use raw sockets), not for uploading/analyzing .pcap
+    # files. Harmless to leave on otherwise.
     cap_add:
       - NET_RAW
       - NET_ADMIN
@@ -68,6 +69,14 @@ services:
     #
     # network_mode: host replaces container-level port publishing, so the
     # `ports:` mapping above must be removed when you enable it.
+    #
+    # This same limitation applies to nmap's active discovery
+    # (app/capture/nmap_discovery.py), not just passive capture: nmap can
+    # only resolve a target's MAC address via ARP when it's layer-2
+    # reachable from the interface it scans out of. In the default bridge
+    # network that interface is the container's own virtual NIC, never the
+    # real OT segment, so nmap-discovered devices will show ports/services
+    # but never a MAC -- host networking is required for that too.
 
 volumes:
   tridentyot_data:

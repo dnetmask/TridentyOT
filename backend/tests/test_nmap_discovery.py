@@ -190,6 +190,108 @@ def test_nmap_scan_requires_a_target(client, db_session):
     assert resp.status_code == 422
 
 
+def test_parse_hosts_extracts_mac_and_hostname_from_nmap_xml():
+    """Unit-level check of the XML parsing itself (no real nmap run) --
+    both fields are read straight from nmap's own output, they just used
+    to be silently dropped: mac was already wired to get_or_create_device,
+    but the <hostnames> block (nmap's own reverse-DNS/PTR result) wasn't
+    even being read."""
+    xml_text = """<?xml version="1.0"?>
+<nmaprun>
+<host>
+<status state="up"/>
+<address addr="10.1.1.5" addrtype="ipv4"/>
+<address addr="AA:BB:CC:DD:EE:FF" addrtype="mac"/>
+<hostnames><hostname name="plc1.local" type="PTR"/></hostnames>
+<ports><port protocol="tcp" portid="502"><state state="open"/><service name="modbus"/></port></ports>
+</host>
+</nmaprun>"""
+    hosts = nmap_discovery._parse_hosts(xml_text)
+    assert len(hosts) == 1
+    assert hosts[0]["ip"] == "10.1.1.5"
+    assert hosts[0]["mac"] == "AA:BB:CC:DD:EE:FF"
+    assert hosts[0]["hostname"] == "plc1.local"
+
+
+def test_ingest_nmap_host_applies_hostname_and_http_banner_identity_hints(client, db_session):
+    """_ingest_nmap_host must run nmap-discovered hosts through the same
+    apply_hostname_hints/apply_identity_hints machinery passive capture
+    uses, not just get_or_create_device/upsert_protocol/apply_os_guess --
+    otherwise a device found only via nmap ends up with just open ports,
+    none of the hostname/vendor enrichment a passively-observed one gets."""
+    from app.models import CaptureSession, Device, Sensor, Site, Zone
+
+    sensor = db_session.query(Sensor).filter(Sensor.name == "Sensor interno").one()
+    zone = db_session.get(Zone, sensor.zone_id)
+    site = db_session.get(Site, zone.site_id)
+
+    capture_session = CaptureSession(
+        organization_id=site.organization_id,
+        sensor_id=sensor.id,
+        name="test:nmap",
+        source_type="active_nmap",
+        source="10.9.9.9",
+        status="running",
+    )
+    db_session.add(capture_session)
+    db_session.commit()
+    db_session.refresh(capture_session)
+
+    host = {
+        "ip": "10.9.9.9",
+        "mac": None,
+        "ports": [{"port": 80, "protocol": "tcp", "product": "Apache", "version": "2.4.41"}],
+        "os_match": None,
+        "hostname": "plc-test.local",
+    }
+    nmap_discovery._ingest_nmap_host(
+        db_session, host, site.organization_id, capture_session.id, nmap_discovery.IngestCache()
+    )
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "10.9.9.9").one()
+    assert device.hostname == "plc-test.local"
+    assert device.vendor == "Apache/2.4.41"
+
+
+def test_nmap_scan_passes_the_sensors_interface_to_the_nmap_command(client, db_session, monkeypatch):
+    """Sensor.interface exists precisely so a host with more than one NIC
+    can be told which one to scan out of -- and MAC/ARP discovery only
+    works when nmap goes out an interface that's actually layer-2 adjacent
+    to the target. Verifies the built command actually includes -e
+    <interface> rather than silently ignoring the sensor's configured
+    value."""
+    from app.models import Sensor
+
+    captured = {}
+
+    class _FakeProcess:
+        def __init__(self, args, **kwargs):
+            captured["args"] = args
+            self.stdout = iter([])
+
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(nmap_discovery.subprocess, "Popen", _FakeProcess)
+
+    sensor = db_session.query(Sensor).filter(Sensor.name == "Sensor interno").one()
+    sensor.interface = "eth3"
+    db_session.commit()
+
+    resp = client.post("/api/discovery/nmap", json={"target": "127.0.0.1", "sensor_id": sensor.id})
+    assert resp.status_code == 200, resp.text
+    session_id = resp.json()["id"]
+
+    finished = _wait_until_done(client, session_id)
+    assert finished["status"] == "completed", finished
+    assert "-e" in captured["args"], captured["args"]
+    assert captured["args"][captured["args"].index("-e") + 1] == "eth3"
+
+
 def test_stopping_a_non_nmap_session_is_rejected(client, tmp_path):
     from scapy.layers.inet import IP, TCP
     from scapy.layers.l2 import Ether
