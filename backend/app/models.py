@@ -232,9 +232,10 @@ class Device(Base):
 
     is_ot_suspected: Mapped[bool] = mapped_column(default=False)
 
-    # The capture session that *first* discovered this device -- used to
-    # remove it when that session is deleted, provided no other session's
-    # protocols/flows still reference it (see inventory_service.purge_capture_session).
+    # The capture session that *most recently* confirmed this device (see
+    # inventory_service.get_or_create_device) -- also used to remove it when
+    # that session is deleted, provided no other session's protocols/flows
+    # still reference it (see inventory_service.purge_capture_session).
     capture_session_id: Mapped[int | None] = mapped_column(
         ForeignKey("capture_sessions.id"), nullable=True, index=True
     )

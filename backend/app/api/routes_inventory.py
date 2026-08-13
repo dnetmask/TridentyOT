@@ -23,11 +23,13 @@ router = APIRouter(prefix="/api/inventory", tags=["inventory"])
 
 def _filter_by_zone_or_site(query, model, zone_id: int | None, site_id: int | None):
     """Scopes `query` (already joined/filterable on `model.capture_session_id`)
-    to whichever Sensor first discovered each row -- see Device.capture_session_id's
-    docstring. Not a perfect signal (a device could genuinely be seen from more
-    than one Zona/Sitio), but it's the only attribution the current schema
-    tracks, and matches what a user expects when they captured on a specific
-    Sensor: "this showed up in Línea 1" rather than "somewhere in the org"."""
+    to whichever Sensor most recently confirmed each row -- see
+    Device.capture_session_id's docstring. Not a perfect signal (a device
+    could genuinely be seen from more than one Zona/Sitio at once, in which
+    case it only ever shows in whichever was captured last), but it's the
+    only attribution the current schema tracks, and matches what a user
+    expects when they captured on a specific Sensor: "this showed up in
+    Línea 1" rather than "somewhere in the org"."""
     if zone_id is not None:
         return query.join(CaptureSession, model.capture_session_id == CaptureSession.id).join(
             Sensor, CaptureSession.sensor_id == Sensor.id

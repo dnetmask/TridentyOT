@@ -3,7 +3,7 @@ from scapy.layers.l2 import Ether
 from scapy.utils import wrpcap
 
 from app.capture.live_capture import mark_orphaned_live_sessions_stopped
-from app.models import CaptureSession, utcnow
+from app.models import CaptureSession, Sensor, Site, Zone, utcnow
 
 
 def test_delete_session_removes_it(client, tmp_path):
@@ -145,3 +145,78 @@ def test_orphaned_live_sessions_are_swept_to_stopped_on_startup(db_session):
     assert orphaned.status == "stopped"
     assert orphaned.error_message is not None
     assert still_running_pcap.status == "running"  # untouched: not a live session
+
+
+def _make_zone_sensor(db_session, org_id, zone_name):
+    zone = Zone(site_id=db_session.query(Site).filter(Site.organization_id == org_id).first().id, name=zone_name)
+    db_session.add(zone)
+    db_session.flush()
+    sensor = Sensor(zone_id=zone.id, name=f"Sensor {zone_name}")
+    db_session.add(sensor)
+    db_session.commit()
+    db_session.refresh(zone)
+    db_session.refresh(sensor)
+    return zone, sensor
+
+
+def test_device_and_flow_reattributed_when_re_captured_in_a_different_zone(client, db_session, org_id):
+    """Regression test for a real-world report: the exact same capture
+    (same devices/conversation) re-uploaded into a second Zona showed
+    nothing in that Zona's Inventario/Flujos/Topología, even though the
+    upload itself completed successfully -- because a device/flow already
+    known to the organization stayed pinned to whichever Zona's Sensor
+    first observed it (see get_or_create_device/upsert_flow), and
+    _filter_by_zone_or_site inner-joins through that single attribution.
+    Re-observing it from a second Zona's Sensor must move it there."""
+    envasado_zone, envasado_sensor = _make_zone_sensor(db_session, org_id, "Envasado")
+
+    syn = Ether() / IP(src="10.0.9.5", dst="10.0.9.100", ttl=64) / TCP(
+        sport=41000, dport=502, flags="S", window=1024
+    )
+
+    def _upload(sensor_id):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as d:
+            pcap_path = Path(d) / "cap.pcap"
+            wrpcap(str(pcap_path), [syn])
+            with open(pcap_path, "rb") as f:
+                resp = client.post(
+                    "/api/capture/pcap",
+                    files={"file": ("cap.pcap", f, "application/vnd.tcpdump.pcap")},
+                    data={"sensor_id": sensor_id},
+                )
+        assert resp.status_code == 200, resp.text
+
+    # First capture, on the org's default "Default" Zona/Sensor (seeded by
+    # init_db's backfill -- see db.py).
+    default_zone_id = db_session.query(Zone).filter(Zone.name == "Default").one().id
+    default_sensor_id = db_session.query(Sensor).filter(Sensor.zone_id == default_zone_id).one().id
+    _upload(default_sensor_id)
+
+    devices_default = client.get(f"/api/inventory/devices?zone_id={default_zone_id}").json()
+    assert {d["ip"] for d in devices_default} == {"10.0.9.5", "10.0.9.100"}
+    assert client.get(f"/api/inventory/devices?zone_id={envasado_zone.id}").json() == []
+    flows_default = client.get(f"/api/inventory/flows?zone_id={default_zone_id}").json()
+    assert len(flows_default) == 1
+    assert client.get(f"/api/inventory/flows?zone_id={envasado_zone.id}").json() == []
+
+    # Same exact capture, re-uploaded on Envasado's Sensor -- the reported
+    # scenario. Both devices and the flow between them must now show up
+    # under Envasado...
+    _upload(envasado_sensor.id)
+
+    devices_envasado = client.get(f"/api/inventory/devices?zone_id={envasado_zone.id}").json()
+    assert {d["ip"] for d in devices_envasado} == {"10.0.9.5", "10.0.9.100"}
+    flows_envasado = client.get(f"/api/inventory/flows?zone_id={envasado_zone.id}").json()
+    assert len(flows_envasado) == 1
+
+    # ...and, since a single Device/Flow row only ever tracks its most
+    # recent Sensor (a documented limitation, not a many-to-many audit
+    # trail), no longer under Default.
+    assert client.get(f"/api/inventory/devices?zone_id={default_zone_id}").json() == []
+    assert client.get(f"/api/inventory/flows?zone_id={default_zone_id}").json() == []
+
+    # Org-wide (Reportes-style, no zone_id) visibility is unaffected either way.
+    assert {d["ip"] for d in client.get("/api/inventory/devices").json()} == {"10.0.9.5", "10.0.9.100"}

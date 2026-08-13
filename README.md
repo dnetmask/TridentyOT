@@ -661,9 +661,11 @@ un doble (mock) del cliente HTTP para no depender de la disponibilidad de intern
   cantidad de protocolos servidos) y puede devolver confianza baja o quedar sin clasificar.
   Resolverlo con certeza requiere una consulta activa (SNMP `sysDescr`, WMI), que es una pieza
   posterior y separada del motor pasivo (ver hoja de ruta, Bloque 1).
-- La pestaña **Topología** todavía no descubre la topología física (puerto a puerto) de forma
-  automática -- eso necesita caminar las tablas de vecinos CDP-MIB/LLDP-MIB y la BRIDGE-MIB de cada
-  switch por SNMP, y `snmp_discovery.py` hoy solo hace un GET liviano de OIDs puntuales, no un walk
-  de tablas. Hasta que exista esa pieza, los enlaces sugeridos vienen únicamente de `Flow` (tráfico
-  observado, un grafo lógico, no una prueba de cableado) y el resto depende de que alguien confirme
-  o dibuje el enlace real a mano.
+- Un `Device`/`Flow`/`DeviceProtocol` solo guarda **un** `capture_session_id` -- el de la captura que
+  más recientemente lo confirmó (ver `inventory_service.get_or_create_device`/`upsert_flow`/
+  `upsert_protocol`), y de ahí sale a qué Zona/Sitio pertenece en cualquier vista filtrada
+  (`_filter_by_zone_or_site`). Un dispositivo real, alcanzable simultáneamente desde el Sensor de dos
+  Zonas distintas, solo aparece en la que lo capturó por última vez -- no en ambas a la vez. No hay
+  hoy una tabla de auditoría muchos-a-muchos que recuerde cada Zona que alguna vez lo vio; la vista
+  **Reportes** (sin filtro de Zona/Sitio) es la única que siempre lo muestra, sin importar cuál lo
+  capturó más recientemente.

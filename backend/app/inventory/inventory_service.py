@@ -166,6 +166,21 @@ def get_or_create_device(
         if device.vendor is None:
             device.vendor = lookup_vendor(device.mac)
         device.last_seen = now
+        # Re-attributes to whichever capture last confirmed this device,
+        # not just whichever one first discovered it -- devices are matched
+        # by (organization_id, mac/ip) alone, with no notion of Zona, so the
+        # *same* device re-observed by a different Sensor (a second capture
+        # on a different Zona, e.g. the same pcap re-uploaded elsewhere, or
+        # a device genuinely reachable from two SPAN ports) used to stay
+        # permanently pinned to its very first Zona -- invisible in every
+        # Inventario/Flujos/Topología view scoped to any other Zona/Sitio
+        # (see _filter_by_zone_or_site), even though Reportes' org-wide,
+        # unfiltered view showed it fine. Keeping the most recent capture
+        # is the only one-FK approximation of "where does this show up
+        # right now" the schema supports; a device truly live in two Zonas
+        # at once will only ever show in whichever was captured last.
+        if capture_session_id is not None:
+            device.capture_session_id = capture_session_id
 
     if cache is not None:
         # Mirrors the two lookup queries above exactly: a device with an ip
@@ -427,6 +442,11 @@ def upsert_protocol(
         existing.last_seen = now
         if banner and not existing.banner:
             existing.banner = banner
+        # See get_or_create_device's matching comment: re-attribute to the
+        # capture that most recently confirmed this, not just whichever one
+        # first saw it, so it doesn't stay invisible in every other Zona/Sitio.
+        if capture_session_id is not None:
+            existing.capture_session_id = capture_session_id
 
     if proto_info.category == "OT":
         device.is_ot_suspected = True
@@ -485,6 +505,11 @@ def upsert_flow(
     else:
         existing.packet_count += 1
         existing.last_seen = now
+        # See get_or_create_device's matching comment: re-attribute to the
+        # capture that most recently confirmed this, not just whichever one
+        # first saw it, so it doesn't stay invisible in every other Zona/Sitio.
+        if capture_session_id is not None:
+            existing.capture_session_id = capture_session_id
 
     if cache is not None:
         cache.flows[key] = existing
@@ -720,17 +745,20 @@ def ingest_packet_record(
 def purge_capture_session(session: Session, capture_session_id: int) -> None:
     """Removes everything a capture session contributed to the shared
     inventory when it's deleted: its own DeviceProtocol/Flow rows, and any
-    Device it first discovered that -- after removing those rows -- no
-    other session's protocols/flows still reference, so a device seen by
+    Device it most recently confirmed that -- after removing those rows --
+    no other session's protocols/flows still reference, so a device seen by
     more than one capture survives deleting just one of them. A removed
     device's vulnerability findings go with it.
 
-    A device/protocol/flow is attributed to whichever session *first*
-    observed it; a later session re-observing the exact same protocol/flow
-    only bumps its packet count rather than re-attributing it, so deleting
-    that first session also removes evidence a later session merely
-    corroborated. This is a deliberate simplification -- full multi-session
-    provenance would need a many-to-many audit trail this app doesn't keep.
+    A device/protocol/flow is attributed to whichever session *most
+    recently* re-observed it (see get_or_create_device/upsert_protocol/
+    upsert_flow); deleting an older session that a later one has since
+    reconfirmed leaves that evidence alone, but deleting the current
+    (most recent) owner still removes it outright even if an older session
+    also saw the exact same thing -- there's no many-to-many audit trail
+    keeping every session that ever touched a row, only the latest one.
+    This is a deliberate simplification -- full multi-session provenance
+    would need that audit trail, which this app doesn't keep.
     """
     session.query(DeviceProtocol).filter(DeviceProtocol.capture_session_id == capture_session_id).delete(
         synchronize_session=False
