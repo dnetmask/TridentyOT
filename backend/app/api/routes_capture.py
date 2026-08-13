@@ -101,11 +101,15 @@ def list_interfaces(_user: User = Depends(get_current_user)):
 def list_sessions(
     zone_id: int | None = None,
     site_id: int | None = None,
+    organization_id: int | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     query = db.query(CaptureSession)
-    if not is_super_admin(user):
+    if is_super_admin(user):
+        if organization_id is not None:
+            query = query.filter(CaptureSession.organization_id == organization_id)
+    else:
         query = query.filter(CaptureSession.organization_id == user.organization_id)
     if zone_id is not None:
         query = query.join(Sensor, CaptureSession.sensor_id == Sensor.id).filter(Sensor.zone_id == zone_id)

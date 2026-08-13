@@ -193,3 +193,54 @@ def test_super_admin_sees_devices_and_sessions_across_every_organization(client,
     assert len(super_admin.get("/api/inventory/devices").json()) == 4
     assert len(super_admin.get("/api/capture/sessions").json()) == 2
     assert len(super_admin.get("/api/users").json()) >= 3  # org A admin, org B admin, super_admin itself
+
+
+def test_super_admin_can_filter_devices_sessions_and_findings_by_organization_id(
+    client, db_session, org_id, tmp_path
+):
+    """Regression test: a super admin browsing a specific organization (e.g.
+    a brand-new one with zero data) must see only that organization's rows
+    when passing organization_id -- not every organization's, which is what
+    list_devices/list_sessions/list_findings used to return before they
+    learned about the organization_id query param (they only ever filtered
+    for non-super-admin callers, same as this file's already-existing
+    test_super_admin_sees_devices_and_sessions_across_every_organization
+    covers for the *unfiltered* case)."""
+    _upload_pcap_as(client, tmp_path)  # 2 devices in org_id, session named "telnet.pcap"
+    own_findings = client.post("/api/vuln/scan", json={"use_nvd": False}).json()
+    assert own_findings  # telnet (port 23) trips the insecure-protocol rule
+
+    other = _make_other_org_client(db_session)
+    other_org_id = db_session.query(User).filter(User.username == "other-admin").one().organization_id
+    _upload_pcap_as(other, tmp_path, filename="other.pcap")  # 2 more devices, in other_org_id
+    other_findings = other.post("/api/vuln/scan", json={"use_nvd": False}).json()
+    assert other_findings
+
+    super_admin = _make_super_admin_client(db_session)
+
+    own_devices = super_admin.get(f"/api/inventory/devices?organization_id={org_id}").json()
+    other_devices = super_admin.get(f"/api/inventory/devices?organization_id={other_org_id}").json()
+    assert len(own_devices) == 2
+    assert len(other_devices) == 2
+    assert {d["id"] for d in own_devices}.isdisjoint({d["id"] for d in other_devices})
+
+    own_sessions = super_admin.get(f"/api/capture/sessions?organization_id={org_id}").json()
+    other_sessions = super_admin.get(f"/api/capture/sessions?organization_id={other_org_id}").json()
+    assert [s["name"] for s in own_sessions] == ["telnet.pcap"]
+    assert [s["name"] for s in other_sessions] == ["other.pcap"]
+
+    own_finding_devices = {f["device_id"] for f in super_admin.get(f"/api/vuln/findings?organization_id={org_id}").json()}
+    other_finding_devices = {
+        f["device_id"] for f in super_admin.get(f"/api/vuln/findings?organization_id={other_org_id}").json()
+    }
+    assert own_finding_devices and own_finding_devices <= {d["id"] for d in own_devices}
+    assert other_finding_devices and other_finding_devices <= {d["id"] for d in other_devices}
+
+    # A brand-new, still-empty organization must show up as empty, not as
+    # "every organization" (the reported bug).
+    empty_org = Organization(name="Empty Org", slug="empty-org")
+    db_session.add(empty_org)
+    db_session.commit()
+    assert super_admin.get(f"/api/inventory/devices?organization_id={empty_org.id}").json() == []
+    assert super_admin.get(f"/api/capture/sessions?organization_id={empty_org.id}").json() == []
+    assert super_admin.get(f"/api/vuln/findings?organization_id={empty_org.id}").json() == []

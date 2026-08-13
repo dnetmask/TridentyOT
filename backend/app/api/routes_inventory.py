@@ -51,11 +51,15 @@ def list_devices(
     hide_external: bool = False,
     zone_id: int | None = None,
     site_id: int | None = None,
+    organization_id: int | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     query = db.query(Device).options(joinedload(Device.protocols))
-    if not is_super_admin(user):
+    if is_super_admin(user):
+        if organization_id is not None:
+            query = query.filter(Device.organization_id == organization_id)
+    else:
         query = query.filter(Device.organization_id == user.organization_id)
     if ot_only:
         query = query.filter(Device.is_ot_suspected.is_(True))

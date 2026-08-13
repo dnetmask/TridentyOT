@@ -2276,7 +2276,12 @@ let allDevices = [];
 let allSwitchDevices = [];
 
 async function loadSwitchTopologyDevices() {
-  allSwitchDevices = await api('/api/inventory/devices');
+  // Org-wide (see allSwitchDevices' own comment), but still needs
+  // organization_id for a super admin -- otherwise "org-wide" leaks into
+  // "every organization", same bug as zoneFilterQuery's.
+  const orgId = currentOrgId();
+  const query = isSuperAdmin() && orgId != null ? `?organization_id=${orgId}` : '';
+  allSwitchDevices = await api(`/api/inventory/devices${query}`);
   renderSwitchTopologySelect();
 }
 
@@ -3542,9 +3547,18 @@ function escapeHtml(text) {
 // (selectZoneLeaf sets selectedZoneId) via the backend's zone_id filter --
 // unfiltered (whole organization) when no Zona is selected, e.g. right
 // after login or while looking at Reportes (deliberately org-wide, see
-// SITE_LEAVES).
+// SITE_LEAVES). A super admin has no organization_id of their own, so
+// without organization_id here "org-wide" would silently mean
+// "every organization" instead of whichever one they're currently
+// looking at (currentOrgId() / selectedOrgId) -- a regular admin/viewer
+// is already pinned server-side to their own org regardless of this
+// param.
 function zoneFilterQuery() {
-  return selectedZoneId != null ? `?zone_id=${selectedZoneId}` : '';
+  const params = [];
+  if (selectedZoneId != null) params.push(`zone_id=${selectedZoneId}`);
+  const orgId = currentOrgId();
+  if (isSuperAdmin() && orgId != null) params.push(`organization_id=${orgId}`);
+  return params.length ? `?${params.join('&')}` : '';
 }
 
 // Topología is the one ZONE_LEAVES tab that's also reachable at the Sitio

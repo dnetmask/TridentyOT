@@ -17,6 +17,7 @@ def list_findings(
     device_id: int | None = None,
     zone_id: int | None = None,
     site_id: int | None = None,
+    organization_id: int | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -25,7 +26,10 @@ def list_findings(
         .join(Device, VulnerabilityFinding.device_id == Device.id)
         .options(joinedload(VulnerabilityFinding.device))
     )
-    if not is_super_admin(user):
+    if is_super_admin(user):
+        if organization_id is not None:
+            query = query.filter(Device.organization_id == organization_id)
+    else:
         query = query.filter(Device.organization_id == user.organization_id)
     if severity:
         query = query.filter(VulnerabilityFinding.severity == severity)
