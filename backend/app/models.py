@@ -379,22 +379,29 @@ LINK_CONFIRMED = "confirmed"
 LINK_UNCERTAIN = "uncertain"
 
 
-class NetworkLink(Base):
-    """A human-asserted physical link between two Devices -- "this cable
-    really exists", entered by someone who knows the actual wiring, not
-    something this app ever infers on its own.
+LINK_SOURCE_MANUAL = "manual"
+LINK_SOURCE_MAC_TABLE = "mac_table"
+LINK_SOURCE_CDP = "cdp"
+LINK_SOURCE_LLDP = "lldp"
 
-    This is deliberately separate from Flow above: Flow is an automatic,
-    passive record of *observed communication* ("these two devices
-    exchanged TCP/UDP traffic") -- it can suggest a link exists, but it's a
-    logical/communication signal, never proof of a physical cable (two
-    devices can talk through several switches with no direct link between
-    them, and two directly-wired devices might never happen to talk during
-    a capture). The topology endpoint (app/topology.py) treats every Flow
-    as a low-confidence, always-on-the-fly "suggested" edge, and always
-    prefers a real NetworkLink over one for the same device pair -- a
-    human's explicit claim about the wiring outranks an inference from
-    traffic, confirmed or not.
+
+class NetworkLink(Base):
+    """A physical link between two Devices -- "this cable really exists".
+
+    Never inferred from Flow (see routes_topology.py's module docstring:
+    who-talked-to-whom is not proof of a direct cable). `source` records
+    *how* this row came to exist:
+      - "manual": a human entered it directly on the topology graph.
+      - "mac_table"/"cdp"/"lldp": derived from real switch-reported data
+        (a MAC address table, or a CDP/LLDP neighbor announcement) -- see
+        app/topology_from_switch.py, fed by either an SNMP walk or a
+        manually pasted/uploaded table (app/switch_table_parsers.py).
+    A "manual" row always wins: re-running a walk/import that would derive
+    a link for the same device pair skips it entirely if a human already
+    asserted something there, same principle as NetworkLink always
+    outranking a Flow inference used to. A non-manual row *can* be
+    refreshed by a newer walk/import for the same pair (ports/status may
+    have changed since).
 
     device_a_id/device_b_id are normalized (a.id < b.id) the same way
     Flow's own device_a/device_b are, so the same physical link is never
@@ -417,6 +424,11 @@ class NetworkLink(Base):
     source_port: Mapped[str | None] = mapped_column(String(64), nullable=True)
     target_port: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default=LINK_CONFIRMED)  # "confirmed" | "uncertain"
+    # See LINK_SOURCE_* above. Defaults to "manual" so the additive-column
+    # backfill (app/db.py's _add_missing_columns) gives every pre-existing
+    # row the value that's actually true for it -- every one was entered
+    # by hand before this column existed.
+    source: Mapped[str] = mapped_column(String(20), default=LINK_SOURCE_MANUAL)
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
@@ -424,6 +436,89 @@ class NetworkLink(Base):
 
     device_a: Mapped[Device] = relationship(foreign_keys=[device_a_id])
     device_b: Mapped[Device] = relationship(foreign_keys=[device_b_id])
+
+
+class SwitchTableImport(Base):
+    """One switch-reported table (MAC address table / ARP table / CDP-LLDP
+    neighbors) that got turned into topology data -- either walked live via
+    SNMP or pasted/uploaded by a human (app/switch_table_parsers.py parses
+    the raw text into the child rows below; app/topology_from_switch.py
+    turns those into NetworkLink rows / Device enrichment).
+
+    `raw_text` is kept even for a successful parse -- if a parser turns out
+    to have a bug, this is what lets it be re-run later without asking the
+    user to paste the same table again."""
+
+    __tablename__ = "switch_table_imports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)  # the switch itself
+    table_type: Mapped[str] = mapped_column(String(16))  # "mac_table" | "arp" | "neighbors"
+    source: Mapped[str] = mapped_column(String(16))  # "snmp" | "manual_paste"
+    # "cisco" | "siemens_scalance" for a manual paste (selects which CLI
+    # dialect app/switch_table_parsers.py parses it as); "unknown" for a
+    # live SNMP walk, which reads the same standard MIBs regardless of who
+    # made the switch.
+    vendor: Mapped[str] = mapped_column(String(24))
+    raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    imported_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
+
+
+class SwitchMacTableEntry(Base):
+    """One row of a switch's MAC address table: this MAC was learned on
+    this interface. A port that shows up here with more than one MAC is
+    the classic sign of an uplink to another switch, not a single
+    directly-attached device -- see apply_mac_table() in
+    app/topology_from_switch.py, which is the thing that actually acts on
+    that (a single-MAC port becomes a NetworkLink; a multi-MAC one is
+    reported as a suspected uplink instead, never guessed at)."""
+
+    __tablename__ = "switch_mac_table_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    switch_table_import_id: Mapped[int] = mapped_column(ForeignKey("switch_table_imports.id"), index=True)
+    mac: Mapped[str] = mapped_column(String(17), index=True)
+    interface_name: Mapped[str] = mapped_column(String(64))
+    vlan: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+
+class SwitchArpEntry(Base):
+    """One row of a switch's ARP table (IP <-> MAC). Only ever used to
+    backfill a Device's missing ip/mac -- see apply_arp_table() -- never to
+    create a NetworkLink; an ARP entry says nothing about physical
+    adjacency, only about an IP-to-MAC binding the switch happened to
+    observe."""
+
+    __tablename__ = "switch_arp_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    switch_table_import_id: Mapped[int] = mapped_column(ForeignKey("switch_table_imports.id"), index=True)
+    ip: Mapped[str] = mapped_column(String(45), index=True)
+    mac: Mapped[str] = mapped_column(String(17), index=True)
+
+
+class SwitchNeighborEntry(Base):
+    """One CDP or LLDP neighbor a switch announced about itself: "my port
+    local_port connects to remote_device_name's remote_port". This is the
+    strongest signal this app has for a real physical link -- the switch
+    is asserting its own direct neighbor, not something inferred -- see
+    apply_neighbor_table(). A neighbor that can't be matched to an existing
+    Device is reported as unresolved rather than auto-created: a CDP/LLDP
+    announcement is good evidence a *link* exists, but not enough on its
+    own to invent a whole new Device record for the other end."""
+
+    __tablename__ = "switch_neighbor_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    switch_table_import_id: Mapped[int] = mapped_column(ForeignKey("switch_table_imports.id"), index=True)
+    protocol: Mapped[str] = mapped_column(String(8))  # "cdp" | "lldp"
+    local_port: Mapped[str] = mapped_column(String(64))
+    remote_device_name: Mapped[str] = mapped_column(String(255))
+    remote_port: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    remote_mgmt_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    remote_platform: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class VulnerabilityFinding(Base):

@@ -239,3 +239,134 @@ def test_stopping_a_non_snmp_session_is_rejected(client, tmp_path):
 
     resp = client.post(f"/api/discovery/snmp/stop/{session['id']}")
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------
+# Table walk (_SnmpWalkWorker / POST /api/discovery/snmp/switch-walk) --
+# see snmp_discovery.py's module docstring, second half.
+# ---------------------------------------------------------------------
+
+
+def _run_fake_snmp_walk_agent(sock, table, replies):
+    """Plays a toy switch answering GETNEXT (not GET): `table` is a dict of
+    oid string -> ASN1 value, walked in numeric OID order the same way a
+    real agent would -- an OID with nothing configured after it in the
+    combined tree (including subtrees this fake agent has nothing at all
+    in) simply gets no reply, same as a real device's endOfMibView."""
+    sorted_oids = sorted(table.keys(), key=lambda o: [int(x) for x in o.split(".")])
+
+    def _next_oid(requested):
+        parts = [int(x) for x in requested.split(".")]
+        for oid in sorted_oids:
+            if [int(x) for x in oid.split(".")] > parts:
+                return oid
+        return None
+
+    for _ in range(replies):
+        try:
+            data, addr = sock.recvfrom(4096)
+        except OSError:
+            return
+        request = SNMP(data)
+        requested_oid = request.PDU.varbindlist[0].oid.val
+        next_oid = _next_oid(requested_oid)
+        if next_oid is None:
+            continue  # no reply -- exactly what lets the walk's caller time out and move on
+        from scapy.asn1.asn1 import ASN1_OID
+
+        varbind = SNMPvarbind(oid=ASN1_OID(next_oid), value=table[next_oid])
+        response = SNMP(community=request.community, PDU=SNMPresponse(id=request.PDU.id, varbindlist=[varbind]))
+        sock.sendto(bytes(response), addr)
+
+
+def test_snmp_switch_walk_creates_a_link_from_a_single_mac_port(client, db_session, org_id, monkeypatch):
+    """End-to-end: a switch with one MAC address table entry, on a port
+    that matches an existing Device's MAC, should come out the other end
+    as a NetworkLink -- same outcome POST /api/discovery/switch-tables/import
+    produces for a pasted table, just fed by a live walk instead."""
+    from scapy.asn1.asn1 import ASN1_INTEGER, ASN1_STRING
+
+    from app.models import Device, NetworkLink, Sensor
+
+    # Nothing else in this test's fake agent answers at all (no ARP, no
+    # LLDP columns) -- keep those walks' per-row timeout short so the test
+    # doesn't sit through several full 2s waits for subtrees with no data.
+    monkeypatch.setattr(snmp_discovery, "_PER_CHUNK_TIMEOUT_SECONDS", 0.3)
+
+    plc_mac = "00:11:22:33:44:55"
+    plc = Device(organization_id=org_id, mac=plc_mac, ip="10.0.1.10")
+    db_session.add(plc)
+    db_session.commit()
+
+    mac_bytes = bytes(int(b, 16) for b in plc_mac.split(":"))
+    fdb_oid = snmp_discovery._OID_DOT1D_TP_FDB_PORT + "." + ".".join(str(b) for b in mac_bytes)
+    ifindex_oid = snmp_discovery._OID_DOT1D_BASE_PORT_IFINDEX + ".1"
+    ifdescr_oid = snmp_discovery._OID_IF_DESCR + ".100"
+    table = {
+        fdb_oid: ASN1_INTEGER(1),
+        ifindex_oid: ASN1_INTEGER(100),
+        ifdescr_oid: ASN1_STRING(b"Gi0/1"),
+    }
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("127.0.0.1", 161))
+    threading.Thread(target=_run_fake_snmp_walk_agent, args=(sock, table, 50), daemon=True).start()
+
+    try:
+        sensor = db_session.query(Sensor).filter(Sensor.name == "Sensor interno").one()
+        resp = client.post(
+            "/api/discovery/snmp/switch-walk",
+            json={"targets": ["127.0.0.1"], "sensor_id": sensor.id, "community": "public", "version": "v2c"},
+        )
+        assert resp.status_code == 200, resp.text
+        session = resp.json()
+        assert session["source_type"] == "active_snmp_walk"
+
+        finished = _wait_until_done(client, session["id"], timeout=30)
+        assert finished["status"] == "completed", finished
+
+        switches = [d for d in client.get("/api/inventory/devices").json() if d["ip"] == "127.0.0.1"]
+        assert len(switches) == 1, switches
+        switch_id = switches[0]["id"]
+
+        link = db_session.query(NetworkLink).one()
+        assert {link.device_a_id, link.device_b_id} == {switch_id, plc.id}
+        assert link.source == "mac_table"
+        assert "Gi0/1" in (link.source_port, link.target_port)
+    finally:
+        sock.close()
+
+
+def test_snmp_switch_walk_can_be_stopped(client, db_session, monkeypatch):
+    def _slow_sr(packets, **kwargs):
+        time.sleep(1.0)
+        return [], packets
+
+    monkeypatch.setattr(snmp_discovery, "sr", _slow_sr)
+    from app.models import Sensor
+
+    sensor = db_session.query(Sensor).filter(Sensor.name == "Sensor interno").one()
+    resp = client.post(
+        "/api/discovery/snmp/switch-walk",
+        json={"targets": ["127.0.0.1", "127.0.0.2"], "sensor_id": sensor.id},
+    )
+    assert resp.status_code == 200, resp.text
+    session_id = resp.json()["id"]
+    time.sleep(0.3)
+
+    stop_resp = client.post(f"/api/discovery/snmp/switch-walk/stop/{session_id}")
+    assert stop_resp.status_code == 200, stop_resp.text
+
+    finished = _wait_until_done(client, session_id, timeout=20)
+    assert finished["status"] == "stopped", finished
+
+
+def test_stopping_a_non_walk_session_is_rejected(client, db_session):
+    from app.models import Sensor
+
+    sensor = db_session.query(Sensor).filter(Sensor.name == "Sensor interno").one()
+    resp = client.post("/api/discovery/snmp", json={"target": "127.0.0.3", "sensor_id": sensor.id})
+    session_id = resp.json()["id"]
+
+    stop_resp = client.post(f"/api/discovery/snmp/switch-walk/stop/{session_id}")
+    assert stop_resp.status_code == 400

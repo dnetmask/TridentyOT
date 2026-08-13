@@ -406,15 +406,56 @@ pueden hablar a través de varios switches intermedios sin estar conectados dire
 ambas cosas en el mismo dibujo termina mostrando enlaces que no existen. Mientras no haya una fuente
 confiable de adyacencia física real, un dispositivo sin `NetworkLink` sale suelto, sin ninguna línea.
 
-Por qué no hay descubrimiento automático de la topología física todavía: hoy no hay ninguna fuente de
-datos que confirme adyacencia real. CDP/LLDP sólo se leen para identificar el equipo (Device ID/System
-Name, Platform, versión) -- no se extraen los TLVs de puerto (Port ID/Chassis ID) que harían falta
-para saber a qué puerto físico está conectado cada vecino, y el pipeline de captura tampoco sabe por
-qué interfaz entró cada paquete. SNMP (`snmp_discovery.py`) hoy es un GET puntual de 3 OIDs
-(sysDescr/sysObjectID/sysName), no un walk de tablas -- falta caminar (walk, no un GET fijo) BRIDGE-MIB
-(`dot1dTpFdbTable`/`dot1dBasePortIfIndex`, la tabla MAC-a-puerto de un switch) o CDP-MIB/LLDP-MIB. Y no
-existe ninguna captura de tablas MAC. Hasta que exista alguna de esas piezas, la Topología es
-enteramente lo que un humano confirme/corrija a mano sobre el grafo.
+#### Enlaces reales desde un switch (tabla MAC, ARP, CDP/LLDP)
+
+Además de un enlace 100% manual, un `NetworkLink` puede venir de datos que el propio switch reporta --
+nunca de tráfico observado. `NetworkLink.source` guarda de dónde salió cada uno: `manual` (un humano lo
+creó en el grafo), `mac_table` (una interfaz con exactamente una MAC en la tabla de direcciones del
+switch), `cdp`/`lldp` (el switch anunció directamente su vecino y el puerto de cada lado -- la evidencia
+más fuerte que existe, porque lo dice el propio equipo). Un enlace `manual` nunca se pisa por un walk o
+import posterior para el mismo par de dispositivos; uno derivado (`mac_table`/`cdp`/`lldp`) sí se
+actualiza si un hallazgo más nuevo trae datos distintos. Una interfaz con **más de una MAC** en su tabla
+es la señal clásica de un uplink a otro switch -- se reporta como "uplink sospechoso" pero nunca se
+dibuja un enlace ahí, porque la tabla MAC sola no dice a qué otro switch va (eso es lo que resuelve
+CDP/LLDP). Un vecino CDP/LLDP que no coincide con ningún Device del inventario tampoco crea un Device
+nuevo -- queda listado como "vecino sin identificar" para crear ese switch a mano y reimportar.
+
+Esto se controla desde **Descubrimiento activo → Topología por switch**: elegí un switch ya visto en
+Inventario o creá uno manual (`POST /api/inventory/devices` -- opcionalmente atribuido a un Sensor/Zona
+vía `sensor_id`, igual que cualquier otro dispositivo de descubrimiento activo; sin eso, el switch no
+tiene `capture_session_id` y por lo tanto no aparece en ninguna vista de Topología por Zona/Sitio, solo
+en una consulta sin filtrar). Después:
+
+- **Vía SNMP** (`POST /api/discovery/snmp/switch-walk`): camina (GETNEXT, no un GET puntual)
+  BRIDGE-MIB (`dot1dTpFdbTable`/`dot1dBasePortIfIndex`/`ifDescr`, la tabla MAC-a-puerto), IP-MIB
+  (`ipNetToMediaTable`, la tabla ARP del switch) y LLDP-MIB (`lldpRemTable`) en los switches indicados
+  (una lista explícita de IPs, nunca un CIDR completo -- un walk son varios paquetes por equipo, no uno
+  solo como el sweep de `POST /api/discovery/snmp`). Solo SNMPv1/v2c, misma limitación que el sweep
+  liviano (scapy no implementa el handshake de sesión de SNMPv3 -- ver docstring de
+  `snmp_discovery.py`). **CDP no se camina por SNMP** -- CDP-MIB codifica la dirección del vecino en un
+  formato que necesita calibrarse contra un equipo real; un switch Cisco con CDP sigue entrando por la
+  vía manual.
+- **Import manual** (`POST /api/discovery/switch-tables/import`): pegás la salida de
+  `show mac address-table` / `show arp` / `show cdp neighbors detail` (o el `show lldp neighbors
+  detail` equivalente) directo de la CLI. Compatible con **Cisco** (parseo completo, basado en el
+  formato real de IOS) y **Siemens Scalance** (mejor esfuerzo: no hay una muestra real de un equipo
+  todavía para calibrar el formato exacto -- se ajusta en cuanto se prueba contra uno real, el texto
+  crudo queda guardado en `SwitchTableImport.raw_text` justo para eso). Devuelve un resumen: filas
+  leídas, enlaces creados/actualizados, uplinks sospechosos, vecinos sin identificar.
+
+```bash
+curl -X POST http://localhost:8000/api/inventory/devices \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"custom_name": "switch-linea-1", "ip": "10.0.1.2", "device_type_secondary": "switch_l2", "sensor_id": 3}'
+
+curl -X POST http://localhost:8000/api/discovery/switch-tables/import \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"device_id": 12, "table_type": "mac_table", "vendor": "cisco", "raw_text": "Vlan Mac Address Type Ports\n1 0011.2233.4455 DYNAMIC Gi0/1\n"}'
+
+curl -X POST http://localhost:8000/api/discovery/snmp/switch-walk \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"targets": ["10.0.1.2"], "sensor_id": 3, "community": "public", "version": "v2c"}'
+```
 
 **Uso desde el dashboard** (rol admin): activar "Modo edición", hacer click en un dispositivo y
 luego en otro para crear un enlace nuevo (se abre un formulario con puerto de cada lado, estado y

@@ -94,6 +94,39 @@ class DeviceUpdateRequest(BaseModel):
     ) = None
 
 
+class DeviceCreateRequest(BaseModel):
+    """Registers a Device nobody's sensor has actually captured yet --
+    typically a switch that's about to be the target of an SNMP walk or a
+    manual MAC/ARP/CDP-LLDP table import (routes_discovery.py).
+
+    sensor_id is optional but matters a lot if set: a Device's Zona/Sitio
+    attribution is entirely derived from its capture_session_id -> Sensor
+    -> Zone chain (see Device.capture_session_id's own docstring) -- there
+    is no direct zone_id column. Passing sensor_id creates a lightweight
+    CaptureSession for that Sensor purely to carry this attribution (the
+    exact same mechanism active discovery already uses -- an nmap/SNMP
+    sweep's own CaptureSession is what makes ITS devices show up correctly
+    scoped in Inventario/Topología, not something special about them).
+    Omitting it leaves the Device with no capture_session_id at all: still
+    valid, but invisible to any Zona- or Sitio-scoped view (including
+    Topología del Sitio) since neither can attribute it anywhere -- only
+    an unscoped, whole-organization query would ever see it."""
+
+    mac: str | None = Field(default=None, max_length=17)
+    ip: str | None = Field(default=None, max_length=45)
+    custom_name: str | None = Field(default=None, max_length=255)
+    device_type: Literal["plc", "hmi", "server", "workstation", "network_device", "other"] = "network_device"
+    device_type_secondary: (
+        Literal["switch_l2", "switch_l3", "firewall", "access_point", "router_nat", "transport_controller"] | None
+    ) = None
+    sensor_id: int | None = None
+    # Only used (and required) when the caller is a super_admin, who has no
+    # organization of their own to default to -- ignored for an admin,
+    # whose device always belongs to their own organization. Same pattern
+    # as SiteCreateRequest.organization_id.
+    organization_id: int | None = None
+
+
 class FlowOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -145,10 +178,12 @@ class TopologyNode(BaseModel):
 
 
 class TopologyEdge(BaseModel):
-    """One link on the topology graph -- today always a human-confirmed
-    NetworkLink (`kind` "confirmed"/"uncertain", `link_id` set, ports
-    filled in from what the human entered). Deliberately never derived from
-    Flow -- see routes_topology.py's module docstring for why."""
+    """One link on the topology graph -- always a NetworkLink (`kind`
+    "confirmed"/"uncertain", `link_id` set). Deliberately never derived from
+    Flow -- see routes_topology.py's module docstring for why. `link_source`
+    is NetworkLink.source (manual vs. mac_table/cdp/lldp) -- see that
+    model's docstring; not to be confused with this field's own `source`
+    (the graph's edge-endpoint id, an unrelated pre-existing name)."""
 
     source: int
     target: int
@@ -158,6 +193,7 @@ class TopologyEdge(BaseModel):
     label: str | None = None
     notes: str | None = None
     link_id: int | None = None
+    link_source: str | None = None
 
 
 class TopologyOut(BaseModel):
@@ -174,6 +210,7 @@ class NetworkLinkOut(BaseModel):
     source_port: str | None
     target_port: str | None
     status: str
+    source: str  # "manual" | "mac_table" | "cdp" | "lldp" -- see NetworkLink's docstring
     notes: str | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -278,6 +315,49 @@ class SnmpScanRequest(BaseModel):
     sensor_id: int
     community: str = Field(default="public", min_length=1, max_length=255)
     version: Literal["v1", "v2c"] = "v2c"
+
+
+class SnmpSwitchWalkRequest(BaseModel):
+    """Walks BRIDGE-MIB/IP-MIB/CDP-MIB/LLDP-MIB on one or more specific
+    switches -- see app/capture/snmp_discovery.py's _SnmpWalkWorker. Unlike
+    SnmpScanRequest's `target` (a CIDR/host meant for a broad sweep),
+    `targets` is a short explicit list: a table walk means several
+    round-trips per host, so this is meant for "these particular switches",
+    never a whole subnet. Same v1/v2c-only limitation as the sweep, for the
+    same reason (see that module's docstring) -- a switch that needs SNMPv3
+    only reaches this feature via the manual table import instead."""
+
+    targets: list[str] = Field(min_length=1, max_length=64)
+    sensor_id: int
+    community: str = Field(default="public", min_length=1, max_length=255)
+    version: Literal["v1", "v2c"] = "v2c"
+
+
+class SwitchTableImportRequest(BaseModel):
+    """A manually pasted/uploaded switch table -- see
+    app/switch_table_parsers.py for what `vendor` selects and
+    app/topology_from_switch.py for what happens to the parsed rows
+    (mac_table/neighbors can create or refresh a NetworkLink; arp only
+    ever enriches Device.ip)."""
+
+    device_id: int
+    table_type: Literal["mac_table", "arp", "neighbors"]
+    vendor: Literal["cisco", "siemens_scalance"]
+    raw_text: str = Field(min_length=1)
+
+
+class SwitchTableImportOut(BaseModel):
+    """Summary of what applying a SwitchTableImport actually did -- the
+    parsed row count plus the derived effects, since the import itself
+    doesn't map 1:1 to links (a multi-MAC port produces a suspected uplink,
+    not a link; an unmatched CDP/LLDP neighbor produces neither)."""
+
+    import_id: int
+    entries_parsed: int
+    links_created_or_updated: int = 0
+    devices_enriched: int = 0  # arp only -- Device.ip/mac filled in, never a link
+    suspected_uplinks: list[dict] = []
+    unresolved_neighbors: list[dict] = []
 
 
 class ScanRequest(BaseModel):

@@ -2,20 +2,35 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.routes_capture import _get_own_session, _get_owned_sensor, _sensor_organization_id
+from app.api.routes_inventory import _get_own_device
 from app.auth.deps import require_admin
 from app.capture.active_discovery import run_profinet_dcp_scan
 from app.capture.nmap_discovery import nmap_scan_manager
-from app.capture.snmp_discovery import expand_targets, snmp_scan_manager
+from app.capture.snmp_discovery import expand_targets, snmp_scan_manager, snmp_walk_manager
 from app.db import get_db, session_scope
 from app.i18n import message
-from app.models import SENSOR_KIND_LIVE, CaptureSession, Sensor, User
+from app.models import (
+    SENSOR_KIND_LIVE,
+    CaptureSession,
+    Sensor,
+    SwitchArpEntry,
+    SwitchMacTableEntry,
+    SwitchNeighborEntry,
+    SwitchTableImport,
+    User,
+)
 from app.schemas import (
     CaptureSessionOut,
     NmapScanRequest,
     ProfinetDcpScanRequest,
     SnmpScanRequest,
+    SnmpSwitchWalkRequest,
+    SwitchTableImportOut,
+    SwitchTableImportRequest,
     capture_session_out,
 )
+from app.switch_table_parsers import parse_switch_table
+from app.topology_from_switch import apply_arp_table, apply_mac_table, apply_neighbor_table
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
 
@@ -161,3 +176,95 @@ def stop_snmp_scan(session_id: int, db: Session = Depends(get_db), user: User = 
     snmp_scan_manager.stop(session_id)
     db.refresh(session_obj)
     return capture_session_out(session_obj, user.locale)
+
+
+@router.post("/snmp/switch-walk", response_model=CaptureSessionOut)
+def start_snmp_switch_walk(
+    payload: SnmpSwitchWalkRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """Walks BRIDGE-MIB/IP-MIB/CDP-MIB/LLDP-MIB on each of `targets` (a
+    short explicit list of switch IPs, never a CIDR -- see
+    SnmpSwitchWalkRequest's docstring) and turns whatever it gets back into
+    topology data via app/topology_from_switch.py, the same functions the
+    manual import endpoint below calls. Progress is "switches walked so
+    far" against len(targets), the same repurposing of
+    CaptureSession.bytes_processed/total_bytes nmap already does for its
+    own target count."""
+    sensor = _resolve_live_sensor(db, user, payload.sensor_id)
+
+    session_obj = CaptureSession(
+        organization_id=_sensor_organization_id(db, sensor),
+        sensor_id=sensor.id,
+        name=f"discovery:snmp-switch-walk:{','.join(payload.targets)}",
+        source_type="active_snmp_walk",
+        source=",".join(payload.targets),
+        status="running",
+    )
+    db.add(session_obj)
+    db.commit()
+    db.refresh(session_obj)
+
+    snmp_walk_manager.start(session_obj.id, payload.targets, payload.community, payload.version)
+    return capture_session_out(session_obj, user.locale)
+
+
+@router.post("/snmp/switch-walk/stop/{session_id}", response_model=CaptureSessionOut)
+def stop_snmp_switch_walk(session_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    session_obj = _get_own_session(db, user, session_id)
+    if session_obj.source_type != "active_snmp_walk":
+        raise HTTPException(status_code=400, detail=message("discovery.not_an_snmp_walk_session", user.locale))
+
+    snmp_walk_manager.stop(session_id)
+    db.refresh(session_obj)
+    return capture_session_out(session_obj, user.locale)
+
+
+@router.post("/switch-tables/import", response_model=SwitchTableImportOut)
+def import_switch_table(
+    payload: SwitchTableImportRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """The manual counterpart to the SNMP walk above -- same
+    app/topology_from_switch.py apply_*() functions, fed by a human's
+    paste instead of a live walk. See app/switch_table_parsers.py for what
+    `vendor` selects."""
+    switch = _get_own_device(db, user, payload.device_id)
+    try:
+        parsed_rows = parse_switch_table(payload.vendor, payload.table_type, payload.raw_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    table_import = SwitchTableImport(
+        organization_id=switch.organization_id,
+        device_id=switch.id,
+        table_type=payload.table_type,
+        source="manual_paste",
+        vendor=payload.vendor,
+        raw_text=payload.raw_text,
+        imported_by_user_id=user.id,
+    )
+    db.add(table_import)
+    db.flush()  # need table_import.id before creating the child rows below
+
+    result: dict = {}
+    if payload.table_type == "mac_table":
+        entries = [SwitchMacTableEntry(switch_table_import_id=table_import.id, **row) for row in parsed_rows]
+        db.add_all(entries)
+        db.flush()
+        result = apply_mac_table(db, switch, entries)
+    elif payload.table_type == "arp":
+        entries = [SwitchArpEntry(switch_table_import_id=table_import.id, **row) for row in parsed_rows]
+        db.add_all(entries)
+        db.flush()
+        result = apply_arp_table(db, switch.organization_id, entries)
+    else:  # "neighbors"
+        entries = [SwitchNeighborEntry(switch_table_import_id=table_import.id, **row) for row in parsed_rows]
+        db.add_all(entries)
+        db.flush()
+        result = apply_neighbor_table(db, switch, entries)
+
+    db.commit()
+    return SwitchTableImportOut(import_id=table_import.id, entries_parsed=len(parsed_rows), **result)

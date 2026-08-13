@@ -90,6 +90,7 @@ def _manual_edge(link: NetworkLink) -> TopologyEdge:
         kind=link.status,
         source_port=link.source_port,
         target_port=link.target_port,
+        link_source=link.source,
         notes=link.notes,
         link_id=link.id,
     )

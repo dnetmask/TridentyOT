@@ -696,6 +696,99 @@
       </div>
       <div id="snmp-scan-status" class="muted" style="margin-top:10px;"></div>
     </div>
+
+    <div class="card admin-only" id="discovery-switch-topology-card">
+      <h2 data-i18n="discovery.switch_topology_title">Topología por switch</h2>
+      <p class="muted" style="margin:0 0 10px; font-size:12.5px;" data-i18n="discovery.switch_topology_hint">
+        Construye enlaces reales a partir de lo que el propio switch reporta -- tabla de
+        direcciones MAC, ARP y vecinos CDP/LLDP -- nunca desde tráfico observado. Elegí un switch
+        del inventario o creá uno manual, y después escaneálo por SNMP o pegá la salida de su CLI.
+      </p>
+      <div class="row">
+        <div>
+          <label data-i18n="discovery.switch_select">Switch</label>
+          <select id="switch-topology-device-select"><option value="">(ninguno)</option></select>
+        </div>
+        <button type="button" class="action secondary" onclick="toggleNewSwitchForm()" data-i18n="discovery.new_switch_btn">+ Switch manual</button>
+      </div>
+
+      <div id="new-switch-form" class="hidden" style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
+        <div class="row">
+          <div>
+            <label data-i18n="discovery.new_switch_name">Nombre</label>
+            <input id="new-switch-name" placeholder="switch-linea-1" />
+          </div>
+          <div>
+            <label data-i18n="discovery.new_switch_ip">IP</label>
+            <input id="new-switch-ip" placeholder="192.168.1.2" />
+          </div>
+          <div>
+            <label data-i18n="discovery.new_switch_mac">MAC</label>
+            <input id="new-switch-mac" placeholder="00:11:22:33:44:55" />
+          </div>
+          <div>
+            <label data-i18n="discovery.new_switch_type">Tipo</label>
+            <select id="new-switch-type">
+              <option value="switch_l2">Switch L2</option>
+              <option value="switch_l3">Switch L3</option>
+              <option value="firewall">Firewall</option>
+            </select>
+          </div>
+          <button type="button" class="action" onclick="createManualSwitch()" data-i18n="discovery.new_switch_save">Crear</button>
+        </div>
+      </div>
+
+      <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
+        <h3 style="margin:0 0 8px; font-size:13.5px;" data-i18n="discovery.switch_walk_title">Escanear vía SNMP</h3>
+        <div class="row">
+          <div>
+            <label data-i18n="discovery.snmp_community">Community string</label>
+            <input id="switch-walk-community" value="public" style="width:110px" />
+          </div>
+          <div>
+            <label data-i18n="discovery.snmp_version">Versión</label>
+            <select id="switch-walk-version" style="width:80px">
+              <option value="v2c" selected>v2c</option>
+              <option value="v1">v1</option>
+            </select>
+          </div>
+          <button class="action" id="start-switch-walk-btn" data-i18n="discovery.start_scan">Escanear ahora</button>
+          <button class="action danger hidden" id="stop-switch-walk-btn" data-i18n="discovery.stop_scan">Detener</button>
+        </div>
+        <div id="switch-walk-progress" class="hidden" style="margin-top:10px;">
+          <div class="progress-cell">
+            <div class="progress-track"><div class="progress-fill" id="switch-walk-progress-fill" style="width:0%"></div></div>
+            <span class="progress-pct" id="switch-walk-progress-pct">0%</span>
+          </div>
+        </div>
+        <div id="switch-walk-status" class="muted" style="margin-top:10px;"></div>
+      </div>
+
+      <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
+        <h3 style="margin:0 0 8px; font-size:13.5px;" data-i18n="discovery.switch_import_title">Importar tabla manualmente</h3>
+        <div class="row">
+          <div>
+            <label data-i18n="discovery.switch_import_vendor">Fabricante</label>
+            <select id="switch-import-vendor">
+              <option value="cisco">Cisco</option>
+              <option value="siemens_scalance">Siemens Scalance</option>
+            </select>
+          </div>
+          <div>
+            <label data-i18n="discovery.switch_import_table_type">Tabla</label>
+            <select id="switch-import-table-type">
+              <option value="mac_table" data-i18n="discovery.table_type_mac">Direcciones MAC</option>
+              <option value="arp" data-i18n="discovery.table_type_arp">ARP</option>
+              <option value="neighbors" data-i18n="discovery.table_type_neighbors">Vecinos CDP/LLDP</option>
+            </select>
+          </div>
+        </div>
+        <label style="margin-top:8px; display:block;" data-i18n="discovery.switch_import_paste">Pegá la salida del comando (ej. "show mac address-table", "show arp", "show cdp neighbors detail")</label>
+        <textarea id="switch-import-text" rows="6" style="width:100%; font-family:monospace; font-size:12px;"></textarea>
+        <button class="action" id="switch-import-btn" style="margin-top:8px;" data-i18n="discovery.switch_import_btn">Importar</button>
+        <div id="switch-import-status" class="muted" style="margin-top:10px;"></div>
+      </div>
+    </div>
   </section>
 
   <section id="tab-inventory" class="tab">
@@ -1188,6 +1281,30 @@ const I18N = {
   'discovery.snmp_target': { es: 'Red u host objetivo', en: 'Target network or host' },
   'discovery.snmp_community': { es: 'Community string', en: 'Community string' },
   'discovery.snmp_version': { es: 'Versión', en: 'Version' },
+  'discovery.switch_topology_title': { es: 'Topología por switch', en: 'Switch-based topology' },
+  'discovery.switch_topology_hint': {
+    es: 'Construye enlaces reales a partir de lo que el propio switch reporta -- tabla de direcciones MAC, ARP y vecinos CDP/LLDP -- nunca desde tráfico observado. Elegí un switch del inventario o creá uno manual, y después escaneálo por SNMP o pegá la salida de su CLI.',
+    en: 'Builds real links from what the switch itself reports -- MAC address table, ARP and CDP/LLDP neighbors -- never from observed traffic. Pick a switch from inventory or create one manually, then either scan it via SNMP or paste its CLI output.',
+  },
+  'discovery.switch_select': { es: 'Switch', en: 'Switch' },
+  'discovery.new_switch_btn': { es: '+ Switch manual', en: '+ Manual switch' },
+  'discovery.new_switch_name': { es: 'Nombre', en: 'Name' },
+  'discovery.new_switch_ip': { es: 'IP', en: 'IP' },
+  'discovery.new_switch_mac': { es: 'MAC', en: 'MAC' },
+  'discovery.new_switch_type': { es: 'Tipo', en: 'Type' },
+  'discovery.new_switch_save': { es: 'Crear', en: 'Create' },
+  'discovery.switch_walk_title': { es: 'Escanear vía SNMP', en: 'Scan via SNMP' },
+  'discovery.switch_import_title': { es: 'Importar tabla manualmente', en: 'Import table manually' },
+  'discovery.switch_import_vendor': { es: 'Fabricante', en: 'Vendor' },
+  'discovery.switch_import_table_type': { es: 'Tabla', en: 'Table' },
+  'discovery.table_type_mac': { es: 'Direcciones MAC', en: 'MAC addresses' },
+  'discovery.table_type_arp': { es: 'ARP', en: 'ARP' },
+  'discovery.table_type_neighbors': { es: 'Vecinos CDP/LLDP', en: 'CDP/LLDP neighbors' },
+  'discovery.switch_import_paste': {
+    es: 'Pegá la salida del comando (ej. "show mac address-table", "show arp", "show cdp neighbors detail")',
+    en: 'Paste the command output (e.g. "show mac address-table", "show arp", "show cdp neighbors detail")',
+  },
+  'discovery.switch_import_btn': { es: 'Importar', en: 'Import' },
   'topology.title': { es: 'Topología de red', en: 'Network topology' },
   'topology.edit_mode': { es: 'Modo edición', en: 'Edit mode' },
   'topology.edit_hint': {
@@ -1529,6 +1646,7 @@ async function bootstrapAfterLogin() {
 async function refreshAllData() {
   loadSessions();
   await loadDevices();
+  loadSwitchTopologyDevices();
   loadFlows();
   loadTopology();
   loadFindings();
@@ -1935,6 +2053,169 @@ $('#start-snmp-scan-btn').addEventListener('click', async () => {
   }
 });
 
+// ---------- Topología por switch (tabla MAC/ARP/CDP-LLDP -> NetworkLink) ----------
+// See app/topology_from_switch.py: this never touches Flow, only a
+// switch's own reported tables -- same "real evidence, not communication
+// patterns" rule the rest of Topología follows.
+function renderSwitchTopologySelect() {
+  const select = $('#switch-topology-device-select');
+  if (!select) return;
+  const previous = select.value;
+  const switches = allSwitchDevices.filter(d => d.display_device_type === 'network_device');
+  select.innerHTML = '<option value="">(ninguno)</option>' + switches.map(d =>
+    `<option value="${d.id}">${escapeHtml(d.display_name || d.ip || d.mac || ('#' + d.id))}</option>`
+  ).join('');
+  if (switches.some(d => String(d.id) === previous)) select.value = previous;
+}
+
+function toggleNewSwitchForm() {
+  $('#new-switch-form').classList.toggle('hidden');
+}
+
+async function createManualSwitch() {
+  const name = $('#new-switch-name').value.trim();
+  const ip = $('#new-switch-ip').value.trim();
+  const mac = $('#new-switch-mac').value.trim();
+  const deviceTypeSecondary = $('#new-switch-type').value;
+  if (!name && !ip && !mac) { alert('Indicá al menos un nombre, IP o MAC'); return; }
+  // Attributed to whichever Sensor/Zona this Descubrimiento activo tab is
+  // currently scoped to -- without this the switch would have no
+  // capture_session_id at all and stay invisible in every Zona/Sitio-
+  // scoped Topología view (see DeviceCreateRequest's own docstring).
+  const sensorId = $('#discovery-sensor-select').value;
+  try {
+    const device = await api('/api/inventory/devices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        custom_name: name || null, ip: ip || null, mac: mac || null,
+        device_type: 'network_device', device_type_secondary: deviceTypeSecondary,
+        sensor_id: sensorId ? Number(sensorId) : null,
+      }),
+    });
+    $('#new-switch-name').value = ''; $('#new-switch-ip').value = ''; $('#new-switch-mac').value = '';
+    $('#new-switch-form').classList.add('hidden');
+    await loadSwitchTopologyDevices();
+    $('#switch-topology-device-select').value = String(device.id);
+  } catch (e) { alert('No se pudo crear el switch: ' + e.message); }
+}
+
+function selectedSwitchDevice() {
+  const id = Number($('#switch-topology-device-select').value);
+  return id ? allSwitchDevices.find(d => d.id === id) : null;
+}
+
+async function pollSwitchWalkProgress(sessionId) {
+  const progressBox = $('#switch-walk-progress');
+  const fill = $('#switch-walk-progress-fill');
+  const pct = $('#switch-walk-progress-pct');
+  const status = $('#switch-walk-status');
+  progressBox.classList.remove('hidden');
+  for (;;) {
+    const session = await api(`/api/capture/sessions/${sessionId}`);
+    const percent = session.progress_percent == null ? 0 : session.progress_percent;
+    fill.style.width = `${percent}%`;
+    pct.textContent = `${percent}%`;
+    status.textContent = `Escaneando -- ${session.packet_count} switch(es) recorrido(s) hasta ahora...`;
+    if (session.status !== 'running') return session;
+    await new Promise(r => setTimeout(r, 1500));
+  }
+}
+
+$('#start-switch-walk-btn').addEventListener('click', async () => {
+  const device = selectedSwitchDevice();
+  if (!device || !device.ip) { alert('Elegí un switch con IP conocida'); return; }
+  const sensorId = $('#discovery-sensor-select').value;
+  if (!sensorId) { alert('Selecciona un sensor en vivo'); return; }
+  const community = $('#switch-walk-community').value.trim() || 'public';
+  const version = $('#switch-walk-version').value;
+
+  const startBtn = $('#start-switch-walk-btn');
+  const stopBtn = $('#stop-switch-walk-btn');
+  const status = $('#switch-walk-status');
+  startBtn.disabled = true;
+  stopBtn.classList.remove('hidden');
+  status.textContent = `Escaneando ${device.ip}...`;
+  try {
+    const started = await api('/api/discovery/snmp/switch-walk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targets: [device.ip], sensor_id: Number(sensorId), community, version }),
+    });
+    stopBtn.onclick = () => stopSwitchWalkSession(started.id);
+    loadSessions();
+    const finished = await pollSwitchWalkProgress(started.id);
+    if (finished.status === 'error') {
+      status.textContent = `Error: ${finished.error_message || 'no se pudo completar el walk'}`;
+    } else if (finished.status === 'stopped') {
+      status.textContent = 'Detenido antes de terminar. Revisá Topología por lo que ya se alcanzó a procesar.';
+    } else {
+      status.textContent = 'Listo -- revisá Topología para ver los enlaces detectados.';
+    }
+    loadSessions();
+    loadDevices();
+    loadSwitchTopologyDevices();
+    loadTopology();
+  } catch (e) {
+    status.textContent = `No se pudo iniciar el walk: ${e.message}`;
+  } finally {
+    startBtn.disabled = false;
+    stopBtn.classList.add('hidden');
+  }
+});
+
+async function stopSwitchWalkSession(id) {
+  try {
+    await api(`/api/discovery/snmp/switch-walk/stop/${id}`, { method: 'POST' });
+    loadSessions();
+  } catch (e) { alert('No se pudo detener: ' + e.message); }
+}
+
+function switchImportResultHtml(result) {
+  const bits = [`${result.entries_parsed} fila(s) leída(s)`];
+  if (result.links_created_or_updated) bits.push(`${result.links_created_or_updated} enlace(s) creado(s)/actualizado(s)`);
+  if (result.devices_enriched) bits.push(`${result.devices_enriched} dispositivo(s) enriquecido(s) (IP/MAC)`);
+  let html = `<div>${escapeHtml(bits.join(' -- '))}</div>`;
+  if (result.suspected_uplinks && result.suspected_uplinks.length) {
+    html += `<div style="margin-top:6px;">Uplinks sospechosos (múltiples MAC en el mismo puerto, sin enlace creado):<ul style="margin:4px 0 0 18px;">` +
+      result.suspected_uplinks.map(u => `<li>${escapeHtml(u.interface)} -- ${u.mac_count} MACs</li>`).join('') + `</ul></div>`;
+  }
+  if (result.unresolved_neighbors && result.unresolved_neighbors.length) {
+    html += `<div style="margin-top:6px;">Vecinos sin identificar en el inventario (creá el switch manualmente y reimportá):<ul style="margin:4px 0 0 18px;">` +
+      result.unresolved_neighbors.map(n => `<li>${escapeHtml(n.remote_device_name)} (${escapeHtml(n.local_port || '?')} -> ${escapeHtml(n.remote_port || '?')})</li>`).join('') + `</ul></div>`;
+  }
+  return html;
+}
+
+$('#switch-import-btn').addEventListener('click', async () => {
+  const device = selectedSwitchDevice();
+  if (!device) { alert('Elegí un switch del inventario'); return; }
+  const vendor = $('#switch-import-vendor').value;
+  const tableType = $('#switch-import-table-type').value;
+  const rawText = $('#switch-import-text').value;
+  if (!rawText.trim()) { alert('Pegá el texto a importar'); return; }
+
+  const btn = $('#switch-import-btn');
+  const status = $('#switch-import-status');
+  btn.disabled = true;
+  status.textContent = 'Importando...';
+  try {
+    const result = await api('/api/discovery/switch-tables/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: device.id, table_type: tableType, vendor, raw_text: rawText }),
+    });
+    status.innerHTML = switchImportResultHtml(result);
+    loadDevices();
+    loadSwitchTopologyDevices();
+    loadTopology();
+  } catch (e) {
+    status.textContent = `No se pudo importar: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 async function uploadPcapFile(file) {
   if (!file) return;
   const nameEl = $('#pcap-file-name');
@@ -1985,6 +2266,19 @@ let currentDeviceId = null;
 let currentDeviceAutoType = null;
 let currentDeviceData = null;
 let allDevices = [];
+// Deliberately NOT the same list as allDevices: that one is zone-scoped
+// (see loadDevices' own zoneFilterQuery()), but a manually-created switch
+// (POST /api/inventory/devices) has no capture_session_id at all -- and
+// therefore no Zona attribution -- so it would never show up there no
+// matter which Zona's Descubrimiento activo tab is open. This one is
+// always org-wide, so a switch is selectable regardless of the current
+// Zona (or its total lack of one).
+let allSwitchDevices = [];
+
+async function loadSwitchTopologyDevices() {
+  allSwitchDevices = await api('/api/inventory/devices');
+  renderSwitchTopologySelect();
+}
 
 function fitTableScroll(wrapperId, rowsToShow = 7) {
   const wrapper = document.getElementById(wrapperId);

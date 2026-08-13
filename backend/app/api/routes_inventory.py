@@ -1,13 +1,22 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
+from app.api.routes_capture import _get_owned_sensor, _sensor_organization_id
 from app.auth.deps import get_current_user, is_super_admin, require_admin
 from app.db import get_db
 from app.fingerprint.device_classifier import ROUTER_NAT
 from app.fingerprint.ip_scope import is_lan_ip
 from app.i18n import message
 from app.models import CaptureSession, Device, DeviceProtocol, Flow, Sensor, User, Zone
-from app.schemas import DeviceDetailOut, DeviceOut, DeviceUpdateRequest, FlowOut, device_detail_out, device_out
+from app.schemas import (
+    DeviceCreateRequest,
+    DeviceDetailOut,
+    DeviceOut,
+    DeviceUpdateRequest,
+    FlowOut,
+    device_detail_out,
+    device_out,
+)
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"])
 
@@ -97,6 +106,64 @@ def _get_own_device(db: Session, user: User, device_id: int) -> Device:
     if device is None:
         raise HTTPException(status_code=404, detail=message("inventory.device_not_found", user.locale))
     return device
+
+
+@router.post("/devices", response_model=DeviceDetailOut)
+def create_device(payload: DeviceCreateRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """Registers a Device nobody's sensor has captured yet -- typically a
+    switch about to be the target of an SNMP walk or a manual table import
+    (routes_discovery.py). See DeviceCreateRequest's own docstring for what
+    sensor_id does and why it matters for Zona/Sitio-scoped visibility."""
+    if is_super_admin(user):
+        if payload.organization_id is None:
+            raise HTTPException(status_code=400, detail=message("sites.organization_id_required", user.locale))
+        organization_id = payload.organization_id
+    else:
+        organization_id = user.organization_id
+
+    if payload.mac and payload.ip:
+        existing = (
+            db.query(Device)
+            .filter(Device.organization_id == organization_id, Device.mac == payload.mac, Device.ip == payload.ip)
+            .one_or_none()
+        )
+        if existing is not None:
+            raise HTTPException(status_code=409, detail=message("inventory.duplicate_device", user.locale))
+
+    capture_session_id = None
+    if payload.sensor_id is not None:
+        sensor = _get_owned_sensor(db, user, payload.sensor_id)
+        if _sensor_organization_id(db, sensor) != organization_id:
+            raise HTTPException(status_code=400, detail=message("inventory.sensor_wrong_organization", user.locale))
+        # A real capture never happened here -- this row exists purely to
+        # give the Device below a Zona/Sitio attribution through the same
+        # capture_session_id -> Sensor -> Zone chain every other capture
+        # source relies on (see DeviceCreateRequest's docstring).
+        capture_session = CaptureSession(
+            organization_id=organization_id,
+            sensor_id=sensor.id,
+            name=f"manual-device:{payload.custom_name or payload.ip or payload.mac or 'device'}",
+            source_type="manual_device",
+            source=payload.custom_name or payload.ip or payload.mac or "manual",
+            status="completed",
+        )
+        db.add(capture_session)
+        db.flush()
+        capture_session_id = capture_session.id
+
+    device = Device(
+        organization_id=organization_id,
+        capture_session_id=capture_session_id,
+        mac=payload.mac,
+        ip=payload.ip,
+        custom_name=payload.custom_name,
+        custom_device_type=payload.device_type,
+        custom_device_type_secondary=payload.device_type_secondary,
+    )
+    db.add(device)
+    db.commit()
+    db.refresh(device)
+    return device_detail_out(device, user.locale)
 
 
 @router.get("/devices/{device_id}", response_model=DeviceDetailOut)

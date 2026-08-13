@@ -129,6 +129,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "La sesión no es un escaneo SNMP",
         "en": "Session is not an SNMP scan",
     },
+    "discovery.not_an_snmp_walk_session": {
+        "es": "La sesión no es un walk SNMP de switches",
+        "en": "Session is not an SNMP switch walk",
+    },
     "discovery.sensor_must_be_live": {
         "es": "Este sensor es externo: el descubrimiento activo necesita una interfaz en vivo en este servidor",
         "en": "That sensor is external: active discovery needs a live interface on this server",
@@ -138,6 +142,14 @@ MESSAGES: dict[str, dict[str, str]] = {
         "en": "That sensor is external and doesn't support a remote connection yet: it only accepts .pcap uploads",
     },
     "inventory.device_not_found": {"es": "Dispositivo no encontrado", "en": "Device not found"},
+    "inventory.duplicate_device": {
+        "es": "Ya existe un dispositivo con esa MAC/IP en esta organización",
+        "en": "A device with that MAC/IP already exists in this organization",
+    },
+    "inventory.sensor_wrong_organization": {
+        "es": "Ese sensor pertenece a otra organización",
+        "en": "That sensor belongs to a different organization",
+    },
     "organizations.duplicate_slug": {
         "es": "Ya existe una organización con ese identificador",
         "en": "An organization with that slug already exists",
