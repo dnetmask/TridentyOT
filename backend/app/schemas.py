@@ -145,16 +145,14 @@ class TopologyNode(BaseModel):
 
 
 class TopologyEdge(BaseModel):
-    """One link on the topology graph -- either a human-confirmed
+    """One link on the topology graph -- today always a human-confirmed
     NetworkLink (`kind` "confirmed"/"uncertain", `link_id` set, ports
-    filled in from what the human entered) or a live-computed suggestion
-    from Flow (`kind` "suggested", `link_id` null, no real port names --
-    see build_topology() for why a NetworkLink always wins over a
-    suggestion for the same device pair)."""
+    filled in from what the human entered). Deliberately never derived from
+    Flow -- see routes_topology.py's module docstring for why."""
 
     source: int
     target: int
-    kind: str  # "confirmed" | "uncertain" | "suggested"
+    kind: str  # "confirmed" | "uncertain"
     source_port: str | None = None
     target_port: str | None = None
     label: str | None = None

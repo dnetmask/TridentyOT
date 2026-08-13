@@ -771,7 +771,6 @@
       <div class="topology-legend">
         <span><span class="swatch" style="border-color:var(--accent)"></span><span data-i18n="topology.legend_confirmed">Confirmado</span></span>
         <span><span class="swatch" style="border-color:var(--med); border-top-style:dashed;"></span><span data-i18n="topology.legend_uncertain">Dudoso / sin confirmar</span></span>
-        <span><span class="swatch" style="border-color:var(--muted); border-top-style:dotted;"></span><span data-i18n="topology.legend_suggested">Sugerido (tráfico observado)</span></span>
       </div>
       <div id="topology-edit-hint" class="muted hidden" style="font-size:12px; margin-bottom:6px;" data-i18n="topology.edit_hint">
         Modo edición activo: hacé click en un dispositivo y luego en otro para crear un enlace entre ambos.
@@ -1197,10 +1196,8 @@ const I18N = {
   },
   'topology.legend_confirmed': { es: 'Confirmado', en: 'Confirmed' },
   'topology.legend_uncertain': { es: 'Dudoso / sin confirmar', en: 'Uncertain / unconfirmed' },
-  'topology.legend_suggested': { es: 'Sugerido (tráfico observado)', en: 'Suggested (observed traffic)' },
   'topology.save_btn': { es: 'Guardar', en: 'Save' },
   'topology.delete_btn': { es: 'Eliminar', en: 'Delete' },
-  'topology.confirm_btn': { es: 'Confirmar enlace', en: 'Confirm link' },
   'topology.cancel_btn': { es: 'Cancelar', en: 'Cancel' },
   'topology.source_port': { es: 'Puerto en este lado', en: 'Port on this side' },
   'topology.target_port': { es: 'Puerto en el otro lado', en: 'Port on the other side' },
@@ -1208,7 +1205,6 @@ const I18N = {
   'topology.notes': { es: 'Notas', en: 'Notes' },
   'topology.new_link_title': { es: 'Nuevo enlace', en: 'New link' },
   'topology.edit_link_title': { es: 'Enlace', en: 'Link' },
-  'topology.suggested_link_title': { es: 'Enlace sugerido (sin confirmar)', en: 'Suggested link (unconfirmed)' },
   'capture.live_title': { es: 'Captura en vivo', en: 'Live capture' },
   'capture.sensor': { es: 'Sensor', en: 'Sensor' },
   'capture.add_sensor': { es: '+ Sensor', en: '+ Sensor' },
@@ -2537,10 +2533,6 @@ function renderTopology(data) {
           'source-label': 'data(source_port)', 'target-label': 'data(target_port)',
           'source-text-offset': 24, 'target-text-offset': 24, color: mutedColor,
       } },
-      { selector: 'edge[kind = "suggested"]', style: {
-          width: 1.4, 'line-color': mutedColor, 'line-style': 'dotted',
-          label: 'data(label)', color: mutedColor,
-      } },
     ],
     // 'cose' is a force layout -- it has no real notion of "these two boxes
     // must not overlap", so with only a handful of devices per Zona its
@@ -2619,11 +2611,7 @@ function wireTopologyEvents() {
     const edge = evt.target;
     const pos = edge.renderedMidpoint();
     const data = edge.data();
-    if (data.link_id != null) {
-      openTopologyLinkForm(Number(data.source), Number(data.target), data, pos);
-    } else {
-      openSuggestedLinkPanel(data, pos);
-    }
+    openTopologyLinkForm(Number(data.source), Number(data.target), data, pos);
   });
 
   cy.on('tap', evt => { if (evt.target === cy) closeTopologyPanel(); });
@@ -2686,24 +2674,6 @@ function openTopologyLinkForm(deviceAId, deviceBId, existing, renderedPos) {
   panel.classList.remove('hidden');
 }
 
-function openSuggestedLinkPanel(edgeData, pos) {
-  const panel = $('#topology-panel');
-  const admin = isAdmin();
-  panel.innerHTML = `
-    <h3>${escapeHtml(i18nText('topology.suggested_link_title'))}</h3>
-    <div class="row-line">${escapeHtml(topologyDeviceLabel(edgeData.source))} &harr; ${escapeHtml(topologyDeviceLabel(edgeData.target))}</div>
-    <div class="row-line">${escapeHtml(edgeData.label || '')}</div>
-    ${admin ? `
-      <div class="actions">
-        <button onclick="confirmSuggestedLink(${edgeData.source}, ${edgeData.target})">${escapeHtml(i18nText('topology.confirm_btn'))}</button>
-        <button onclick="closeTopologyPanel()">${escapeHtml(i18nText('topology.cancel_btn'))}</button>
-      </div>
-    ` : ''}
-  `;
-  topologyPositionPanel(panel, pos);
-  panel.classList.remove('hidden');
-}
-
 async function saveTopologyLink(deviceAId, deviceBId, linkId) {
   const body = {
     device_a_id: deviceAId,
@@ -2731,18 +2701,6 @@ async function saveTopologyLink(deviceAId, deviceBId, linkId) {
     closeTopologyPanel();
     loadTopology();
   } catch (e) { alert('No se pudo guardar el enlace: ' + e.message); }
-}
-
-async function confirmSuggestedLink(deviceAId, deviceBId) {
-  try {
-    await api('/api/topology/links', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device_a_id: deviceAId, device_b_id: deviceBId, status: 'confirmed' }),
-    });
-    closeTopologyPanel();
-    loadTopology();
-  } catch (e) { alert('No se pudo confirmar el enlace: ' + e.message); }
 }
 
 async function deleteTopologyLink(linkId) {

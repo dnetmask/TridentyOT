@@ -96,21 +96,19 @@ def test_topology_maps_device_type_to_icon(client, db_session, org_id):
     assert icons[unknown.id] == "other"
 
 
-def test_topology_suggests_edge_from_flow(client, db_session, org_id):
+def test_topology_draws_no_edge_from_flow_alone(client, db_session, org_id):
+    """Talking to each other is not proof of a direct cable -- see
+    routes_topology.py's module docstring. Flow traffic between two devices
+    with no NetworkLink must not produce any edge at all."""
     a = _make_device(db_session, org_id, ip="10.0.1.10")
     b = _make_device(db_session, org_id, ip="10.0.1.20")
     _make_flow(db_session, a, b, protocol="modbus")
 
     edges = client.get("/api/topology").json()["edges"]
-    assert len(edges) == 1
-    edge = edges[0]
-    assert edge["kind"] == "suggested"
-    assert edge["link_id"] is None
-    assert {edge["source"], edge["target"]} == {a.id, b.id}
-    assert edge["label"] == "modbus"
+    assert edges == []
 
 
-def test_confirmed_link_outranks_flow_suggestion(client, db_session, org_id):
+def test_confirmed_link_unaffected_by_coexisting_flow(client, db_session, org_id):
     a = _make_device(db_session, org_id, ip="10.0.1.10")
     b = _make_device(db_session, org_id, ip="10.0.1.20")
     _make_flow(db_session, a, b)

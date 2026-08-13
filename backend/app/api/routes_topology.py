@@ -2,10 +2,14 @@
 human-asserted physical links (POST/PATCH/DELETE /api/topology/links) --
 see app/models.py's NetworkLink docstring for the core design decision:
 a NetworkLink is never inferred automatically, only entered by someone who
-knows the real wiring. Everything auto-detected only ever produces
-*suggested* edges, computed live from Flow on every request rather than
-stored -- there's nothing to keep in sync, and a NetworkLink for the same
-device pair always wins over one.
+knows the real wiring.
+
+Topology is deliberately NOT built from Flow: who-talked-to-whom is a
+logical communication graph, not proof of a direct cable -- two devices can
+chat right through several switches without being connected to each other.
+Until there's a real source of physical adjacency (CDP/LLDP neighbor TLVs,
+an SNMP walk of BRIDGE-MIB's MAC-to-port table, etc.), the only edges this
+endpoint draws are the ones a human actually entered.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,7 +20,7 @@ from app.auth.deps import get_current_user, is_super_admin, require_admin
 from app.db import get_db
 from app.fingerprint.device_classifier import HMI, NETWORK_DEVICE, PLC, ROUTER_NAT, SERVER, WORKSTATION
 from app.i18n import message
-from app.models import CaptureSession, Device, Flow, NetworkLink, Sensor, User, Zone
+from app.models import CaptureSession, Device, NetworkLink, Sensor, User, Zone
 from app.schemas import (
     NetworkLinkCreateRequest,
     NetworkLinkOut,
@@ -91,12 +95,6 @@ def _manual_edge(link: NetworkLink) -> TopologyEdge:
     )
 
 
-def _suggested_edge(device_a_id: int, device_b_id: int, flows: list[Flow]) -> TopologyEdge:
-    protocols = sorted({f.protocol for f in flows})
-    label = protocols[0] if len(protocols) == 1 else f"{len(protocols)} protocolos"
-    return TopologyEdge(source=device_a_id, target=device_b_id, kind="suggested", label=label)
-
-
 @router.get("", response_model=TopologyOut)
 def get_topology(
     zone_id: int | None = None,
@@ -121,30 +119,12 @@ def get_topology(
     # way -- a link is a standalone fact about two devices, not something
     # any one capture observed) -- dropping a link here because one of its
     # two devices fell outside the filter is the same "don't show an edge
-    # to a node that isn't drawn" rule applied to suggested/Flow edges below.
+    # to a node that isn't drawn" rule that would apply to any other kind
+    # of edge this endpoint might grow later.
     manual_links = [
         link for link in link_query.all() if link.device_a_id in device_ids and link.device_b_id in device_ids
     ]
-    manual_pairs = {(link.device_a_id, link.device_b_id) for link in manual_links}
     edges = [_manual_edge(link) for link in manual_links]
-
-    flows = (
-        db.query(Flow)
-        .filter(Flow.device_a_id.in_(device_ids), Flow.device_b_id.in_(device_ids))
-        .all()
-        if device_ids
-        else []
-    )
-    flows_by_pair: dict[tuple[int, int], list[Flow]] = {}
-    for flow in flows:
-        flows_by_pair.setdefault((flow.device_a_id, flow.device_b_id), []).append(flow)
-    for pair, pair_flows in flows_by_pair.items():
-        # A real NetworkLink always outranks a Flow-derived suggestion for
-        # the same two devices -- see NetworkLink's own docstring for why
-        # (a human's claim about the wiring beats an inference from traffic).
-        if pair in manual_pairs:
-            continue
-        edges.append(_suggested_edge(pair[0], pair[1], pair_flows))
 
     return TopologyOut(nodes=nodes, edges=edges)
 
@@ -179,11 +159,11 @@ def create_network_link(
     payload: NetworkLinkCreateRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)
 ):
     """Upsert by device pair, not a strict create: the unique constraint on
-    (device_a_id, device_b_id) means a second POST for the same two
-    devices updates the existing row instead of 409ing -- this is what
-    lets the frontend's "confirmar" action on a Flow-suggested edge just
-    POST the pair unconditionally, without first checking whether some
-    earlier, weaker claim about it (e.g. status=uncertain) already exists."""
+    (device_a_id, device_b_id) means a second POST for the same two devices
+    updates the existing row instead of 409ing -- lets the frontend just
+    POST a pair unconditionally to upgrade an existing weaker claim (e.g.
+    status=uncertain) to confirmed, without checking first whether one
+    already exists."""
     device_a, device_b = _get_owned_devices_pair(db, user, payload.device_a_id, payload.device_b_id)
     # Normalized the same way Flow's own device_a/device_b are (lower id
     # first) so the unique constraint means the same thing regardless of

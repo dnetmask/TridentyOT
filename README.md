@@ -397,30 +397,28 @@ dispositivos que ya aparecen en Inventario -- cada uno con un ícono según su `
 (vendorizado localmente en `backend/app/static/vendor/`, sin CDN: un sensor OT suele correr en una
 red aislada sin salida a internet).
 
-Es importante entender qué tipo de "enlace" es cada uno, porque la topología mostrada combina dos
-cosas de naturaleza distinta:
+Todo enlace dibujado es un `NetworkLink` (tabla `network_links`): una afirmación explícita de alguien
+que conoce el cableado real -- **confirmado** (línea sólida azul) o **dudoso/sin confirmar** (línea
+punteada naranja), ambos con los puertos de cada lado si se conocen. La Topología deliberadamente
+**no** se calcula desde `Flow` (quién habló con quién): eso es un grafo *lógico* de comunicación
+observada, nunca una prueba de que existe un cable físico entre esos dos equipos -- dos dispositivos
+pueden hablar a través de varios switches intermedios sin estar conectados directamente, y mezclar
+ambas cosas en el mismo dibujo termina mostrando enlaces que no existen. Mientras no haya una fuente
+confiable de adyacencia física real, un dispositivo sin `NetworkLink` sale suelto, sin ninguna línea.
 
-- **Enlaces sugeridos** (línea punteada gris, sin puertos): se calculan al vuelo desde `Flow` (quién
-  habló con quién) -- es un grafo *lógico* de comunicación observada, nunca una prueba de que existe
-  un cable físico entre esos dos equipos (dos dispositivos pueden hablar a través de varios switches
-  intermedios sin estar conectados directamente). No se guardan en la base -- se recalculan en cada
-  consulta.
-- **Enlaces humanos** (`NetworkLink`, tabla `network_links`): una afirmación explícita de alguien que
-  conoce el cableado real -- **confirmado** (línea sólida azul) o **dudoso/sin confirmar** (línea
-  punteada naranja), ambos con los puertos de cada lado si se conocen. Un enlace humano para un par
-  de dispositivos siempre pisa al enlace sugerido por Flow para ese mismo par -- una afirmación
-  humana sobre el cableado vale más que una inferencia a partir de tráfico observado.
-
-Por qué no hay descubrimiento 100% automático de la topología física todavía: eso requiere caminar
-(walk, no un GET fijo) las tablas de vecinos CDP-MIB/LLDP-MIB y la BRIDGE-MIB de cada switch por
-SNMP -- lo que hoy hace `snmp_discovery.py` es un GET liviano de 3 OIDs puntuales, no un walk de
-tablas. Mientras esa pieza no exista, la Topología combina lo que sí se puede inferir hoy (Flow) con
-la posibilidad de que un humano complete/corrija el resto a mano, directamente sobre el grafo.
+Por qué no hay descubrimiento automático de la topología física todavía: hoy no hay ninguna fuente de
+datos que confirme adyacencia real. CDP/LLDP sólo se leen para identificar el equipo (Device ID/System
+Name, Platform, versión) -- no se extraen los TLVs de puerto (Port ID/Chassis ID) que harían falta
+para saber a qué puerto físico está conectado cada vecino, y el pipeline de captura tampoco sabe por
+qué interfaz entró cada paquete. SNMP (`snmp_discovery.py`) hoy es un GET puntual de 3 OIDs
+(sysDescr/sysObjectID/sysName), no un walk de tablas -- falta caminar (walk, no un GET fijo) BRIDGE-MIB
+(`dot1dTpFdbTable`/`dot1dBasePortIfIndex`, la tabla MAC-a-puerto de un switch) o CDP-MIB/LLDP-MIB. Y no
+existe ninguna captura de tablas MAC. Hasta que exista alguna de esas piezas, la Topología es
+enteramente lo que un humano confirme/corrija a mano sobre el grafo.
 
 **Uso desde el dashboard** (rol admin): activar "Modo edición", hacer click en un dispositivo y
 luego en otro para crear un enlace nuevo (se abre un formulario con puerto de cada lado, estado y
-notas); hacer click en un enlace sugerido para "Confirmarlo" (lo convierte en un enlace humano real);
-hacer click en un enlace humano existente para editarlo o borrarlo. Un visualizador ve el mismo grafo
+notas); hacer click en un enlace existente para editarlo o borrarlo. Un visualizador ve el mismo grafo
 pero sin esas acciones. Por API:
 
 ```bash
