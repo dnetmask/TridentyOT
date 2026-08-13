@@ -119,6 +119,19 @@ def test_scalance_mac_table_best_effort():
     ]
 
 
+def test_scalance_mac_table_skips_unrecognized_line_instead_of_crashing():
+    """Regression test: _MAC_RE.search() can find a MAC substring inside a
+    whitespace-separated column that isn't itself a bare MAC (e.g. a
+    "MAC-Address:"-style label glued to the value, common in real switch
+    CLI dumps) -- that line has no column matched by _MAC_RE.fullmatch(),
+    which used to make the mac_idx lookup raise StopIteration and crash the
+    whole import with an opaque 500 instead of just skipping the one
+    unrecognized line."""
+    raw = "MAC-Address:00-1B-1B-11-22-33 VLAN:1 Port:P0.1\n00-1B-1B-11-22-44   1    P0.2"
+    entries = parse_switch_table("siemens_scalance", "mac_table", raw)
+    assert entries == [{"mac": "00:1b:1b:11:22:44", "interface_name": "P0.2", "vlan": "1"}]
+
+
 def test_scalance_arp_best_effort():
     entries = parse_switch_table("siemens_scalance", "arp", SCALANCE_ARP)
     assert entries == [{"ip": "192.168.1.1", "mac": "00:1b:1b:11:22:00"}]

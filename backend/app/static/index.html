@@ -2091,6 +2091,12 @@ async function createManualSwitch() {
         custom_name: name || null, ip: ip || null, mac: mac || null,
         device_type: 'network_device', device_type_secondary: deviceTypeSecondary,
         sensor_id: sensorId ? Number(sensorId) : null,
+        // Only load-bearing for a super admin (DeviceCreateRequest.organization_id
+        // is ignored for a regular admin, who's always pinned to their own org)
+        // -- without it, a super admin browsing a specific org/site/zone still
+        // got rejected with "organization_id_required" despite that context
+        // already fully identifying the org.
+        organization_id: currentOrgId(),
       }),
     });
     $('#new-switch-name').value = ''; $('#new-switch-ip').value = ''; $('#new-switch-mac').value = '';

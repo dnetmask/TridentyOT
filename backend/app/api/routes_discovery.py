@@ -235,7 +235,18 @@ def import_switch_table(
     try:
         parsed_rows = parse_switch_table(payload.vendor, payload.table_type, payload.raw_text)
     except ValueError as exc:
+        # Unknown vendor/table_type combination -- parse_switch_table's own
+        # error already says exactly which, so it's safe to surface as-is.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        # The per-vendor parsers are best-effort regexes over real-world CLI
+        # paste, most of it never seen against a real device (see
+        # switch_table_parsers.py's own docstring) -- an unrecognized line
+        # shape should never bubble up as an opaque 500, only as "couldn't
+        # parse this", so the user can fix the paste and retry.
+        raise HTTPException(
+            status_code=400, detail=message("discovery.switch_table_parse_failed", user.locale)
+        ) from exc
 
     table_import = SwitchTableImport(
         organization_id=switch.organization_id,

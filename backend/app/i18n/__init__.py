@@ -137,6 +137,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "Este sensor es externo: el descubrimiento activo necesita una interfaz en vivo en este servidor",
         "en": "That sensor is external: active discovery needs a live interface on this server",
     },
+    "discovery.switch_table_parse_failed": {
+        "es": "No se pudo interpretar el texto pegado para ese fabricante/tipo de tabla. Revisá que el "
+        "formato corresponda al fabricante y tipo de tabla seleccionados e intentá de nuevo.",
+        "en": "Couldn't parse the pasted text for that vendor/table type. Check that the format matches "
+        "the selected vendor and table type, then try again.",
+    },
     "capture.sensor_kind_mismatch": {
         "es": "Ese sensor es externo y aún no admite conexión remota: solo se le pueden adjuntar archivos .pcap",
         "en": "That sensor is external and doesn't support a remote connection yet: it only accepts .pcap uploads",

@@ -97,6 +97,49 @@ def test_import_mac_table_creates_link_and_reports_suspected_uplink(client, db_s
     assert link.source == "mac_table"
 
 
+def test_import_unrecognized_line_is_skipped_not_a_crash(client, db_session, org_id):
+    """Regression test for switch_table_parsers._parse_scalance_mac_table's
+    StopIteration bug: a line whose only MAC-looking substring is glued to
+    a label (no whitespace around it, e.g. real Scalance CLI output using
+    "Label:value" columns) used to crash parse_switch_table with an
+    unhandled StopIteration, surfacing as an opaque 500 to the user instead
+    of just skipping that one unrecognized line."""
+    switch_resp = client.post("/api/inventory/devices", json={"custom_name": "switch-2", "ip": "10.9.9.6"})
+    switch_id = switch_resp.json()["id"]
+
+    resp = client.post(
+        "/api/discovery/switch-tables/import",
+        json={
+            "device_id": switch_id,
+            "table_type": "mac_table",
+            "vendor": "siemens_scalance",
+            "raw_text": "MAC-Address:00-1B-1B-11-22-33 VLAN:1 Port:P0.1",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["entries_parsed"] == 0
+
+
+def test_import_parser_failure_is_a_400_not_a_500(client, db_session, org_id, monkeypatch):
+    """Defense-in-depth: whatever the per-vendor parser raises beyond the
+    ValueError already handled for an unknown vendor/table_type, it must
+    still surface as a normal 400 the user can act on, never an opaque
+    500 -- see import_switch_table's broad `except Exception` guard."""
+    switch_resp = client.post("/api/inventory/devices", json={"custom_name": "switch-3", "ip": "10.9.9.7"})
+    switch_id = switch_resp.json()["id"]
+
+    def _boom(vendor, table_type, raw_text):
+        raise RuntimeError("unexpected parser bug")
+
+    monkeypatch.setattr("app.api.routes_discovery.parse_switch_table", _boom)
+
+    resp = client.post(
+        "/api/discovery/switch-tables/import",
+        json={"device_id": switch_id, "table_type": "mac_table", "vendor": "cisco", "raw_text": "whatever"},
+    )
+    assert resp.status_code == 400, resp.text
+
+
 def test_import_rejects_device_from_another_organization(client, db_session, org_id):
     from app.models import Organization
 

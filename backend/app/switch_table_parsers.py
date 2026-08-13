@@ -159,7 +159,15 @@ def _parse_scalance_mac_table(raw_text: str) -> list[dict]:
         if not mac_match:
             continue
         cols = line.split()
-        mac_idx = next(i for i, c in enumerate(cols) if _MAC_RE.fullmatch(c))
+        # The MAC found by _MAC_RE.search() above can span (or sit inside) a
+        # whitespace-separated token without being an exact match for it --
+        # e.g. a "MAC-Address:00-1B-1B-11-22-33" column glued to its label --
+        # in which case no column fullmatch()es and this row can't be
+        # positionally decoded. Skip it rather than crash the whole import
+        # over one unrecognized line.
+        mac_idx = next((i for i, c in enumerate(cols) if _MAC_RE.fullmatch(c)), None)
+        if mac_idx is None:
+            continue
         vlan = cols[mac_idx + 1] if mac_idx + 1 < len(cols) else None
         port = cols[mac_idx + 2] if mac_idx + 2 < len(cols) else (cols[mac_idx - 1] if mac_idx > 0 else None)
         if not port:
