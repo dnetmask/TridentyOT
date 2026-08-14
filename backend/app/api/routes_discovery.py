@@ -1,9 +1,11 @@
+import json
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.routes_capture import _get_own_session, _get_owned_sensor, _sensor_organization_id
 from app.api.routes_inventory import _get_own_device
-from app.auth.deps import require_admin
+from app.auth.deps import get_current_user, is_super_admin, require_admin
 from app.capture.active_discovery import run_profinet_dcp_scan
 from app.capture.nmap_discovery import nmap_scan_manager
 from app.capture.snmp_discovery import expand_targets, snmp_scan_manager, snmp_walk_manager
@@ -12,6 +14,7 @@ from app.i18n import message
 from app.models import (
     SENSOR_KIND_LIVE,
     CaptureSession,
+    Device,
     Sensor,
     SwitchArpEntry,
     SwitchMacTableEntry,
@@ -25,9 +28,11 @@ from app.schemas import (
     ProfinetDcpScanRequest,
     SnmpScanRequest,
     SnmpSwitchWalkRequest,
+    SwitchTableImportHistoryOut,
     SwitchTableImportOut,
     SwitchTableImportRequest,
     capture_session_out,
+    switch_table_import_history_out,
 )
 from app.switch_table_parsers import parse_switch_table
 from app.topology_from_switch import apply_arp_table, apply_mac_table, apply_neighbor_table
@@ -277,5 +282,45 @@ def import_switch_table(
         db.flush()
         result = apply_neighbor_table(db, switch, entries)
 
+    table_import.entries_parsed = len(parsed_rows)
+    table_import.result_summary = json.dumps(result)
     db.commit()
     return SwitchTableImportOut(import_id=table_import.id, entries_parsed=len(parsed_rows), **result)
+
+
+@router.get("/switch-tables/imports", response_model=list[SwitchTableImportHistoryOut])
+def list_switch_table_imports(
+    device_id: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """History for "Importar tabla manualmente" (and SNMP walks, same
+    underlying SwitchTableImport row) -- see that model's own docstring on
+    why result_summary is persisted instead of only ever existing in the
+    single HTTP response the import itself returned."""
+    query = db.query(SwitchTableImport)
+    if not is_super_admin(user):
+        query = query.filter(SwitchTableImport.organization_id == user.organization_id)
+    if device_id is not None:
+        query = query.filter(SwitchTableImport.device_id == device_id)
+    imports = query.order_by(SwitchTableImport.created_at.desc()).all()
+
+    # Bulk-resolved, not one query per row -- same reasoning as
+    # routes_topology.py's _zone_by_capture_session_id.
+    device_ids = {i.device_id for i in imports}
+    devices_by_id = {d.id: d for d in db.query(Device).filter(Device.id.in_(device_ids)).all()} if device_ids else {}
+    user_ids = {i.imported_by_user_id for i in imports if i.imported_by_user_id is not None}
+    usernames_by_id = (
+        {u.id: u.username for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
+    )
+
+    return [
+        switch_table_import_history_out(
+            i,
+            device_name=(devices_by_id[i.device_id].display_name or f"device-{i.device_id}")
+            if i.device_id in devices_by_id
+            else f"device-{i.device_id}",
+            imported_by=usernames_by_id.get(i.imported_by_user_id),
+        )
+        for i in imports
+    ]

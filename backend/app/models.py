@@ -448,7 +448,15 @@ class SwitchTableImport(Base):
 
     `raw_text` is kept even for a successful parse -- if a parser turns out
     to have a bug, this is what lets it be re-run later without asking the
-    user to paste the same table again."""
+    user to paste the same table again.
+
+    `result_summary` is the plain-JSON dict app/topology_from_switch.py's
+    apply_*() returned (links_created_or_updated, suspected_uplinks,
+    etc.) -- otherwise that conclusion only ever existed in the single
+    HTTP response for whoever ran the import, gone the moment they
+    navigated away, with no way to later answer "what did importing this
+    table actually do?" (mirrors why CaptureSession persists its own
+    packet_count/dropped_count instead of only returning them once)."""
 
     __tablename__ = "switch_table_imports"
 
@@ -463,6 +471,8 @@ class SwitchTableImport(Base):
     # made the switch.
     vendor: Mapped[str] = mapped_column(String(24))
     raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    entries_parsed: Mapped[int] = mapped_column(default=0)
+    result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     imported_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
 

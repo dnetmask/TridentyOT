@@ -97,6 +97,42 @@ def test_import_mac_table_creates_link_and_reports_suspected_uplink(client, db_s
     assert link.source == "mac_table"
 
 
+def test_import_history_lists_past_imports_with_device_name_and_conclusions(client, db_session, org_id):
+    """The history endpoint is what makes an import inspectable after the
+    fact -- same conclusion fields as the POST response (see
+    SwitchTableImport.result_summary's own docstring), plus which device
+    it belongs to and who ran it, so it isn't only ever visible in the one
+    HTTP response at import time."""
+    switch_resp = client.post("/api/inventory/devices", json={"custom_name": "switch-history", "ip": "10.9.9.20"})
+    switch_id = switch_resp.json()["id"]
+    plc = Device(organization_id=org_id, mac="00:11:22:33:44:55", ip="10.0.1.10")
+    db_session.add(plc)
+    db_session.commit()
+
+    import_resp = client.post(
+        "/api/discovery/switch-tables/import",
+        json={"device_id": switch_id, "table_type": "mac_table", "vendor": "cisco", "raw_text": CISCO_MAC_TABLE},
+    )
+    assert import_resp.status_code == 200, import_resp.text
+
+    history = client.get("/api/discovery/switch-tables/imports").json()
+    assert len(history) == 1
+    row = history[0]
+    assert row["device_id"] == switch_id
+    assert row["device_name"] == "switch-history"
+    assert row["table_type"] == "mac_table"
+    assert row["vendor"] == "cisco"
+    assert row["entries_parsed"] == 3
+    assert row["links_created_or_updated"] == 1
+    assert row["suspected_uplinks"] == [{"interface": "Gi0/2", "mac_count": 2}]
+    assert row["imported_by"] == "admin"
+
+    scoped = client.get(f"/api/discovery/switch-tables/imports?device_id={switch_id}").json()
+    assert len(scoped) == 1
+    other_device = client.post("/api/inventory/devices", json={"custom_name": "other-switch"}).json()
+    assert client.get(f"/api/discovery/switch-tables/imports?device_id={other_device['id']}").json() == []
+
+
 def test_import_unrecognized_line_is_skipped_not_a_crash(client, db_session, org_id):
     """Regression test for switch_table_parsers._parse_scalance_mac_table's
     StopIteration bug: a line whose only MAC-looking substring is glued to
@@ -138,6 +174,45 @@ def test_import_parser_failure_is_a_400_not_a_500(client, db_session, org_id, mo
         json={"device_id": switch_id, "table_type": "mac_table", "vendor": "cisco", "raw_text": "whatever"},
     )
     assert resp.status_code == 400, resp.text
+
+
+def test_import_neighbors_auto_creates_device_and_link_via_api(client, db_session, org_id):
+    """End-to-end check that the auto-provisioning in apply_neighbor_table
+    (see test_topology_from_switch.py for the unit-level coverage) is
+    actually wired through this endpoint: an LLDP neighbor with no match
+    in inventory yet must appear as a real Device afterward, not just in
+    the response body."""
+    switch_resp = client.post("/api/inventory/devices", json={"custom_name": "switch-4", "ip": "10.9.9.8"})
+    switch_id = switch_resp.json()["id"]
+
+    resp = client.post(
+        "/api/discovery/switch-tables/import",
+        json={
+            "device_id": switch_id,
+            "table_type": "neighbors",
+            "vendor": "cisco",
+            "raw_text": (
+                "------------------------------------------------\n"
+                "Local Intf: Gi0/1\n"
+                "Chassis id: 0011.2233.9900\n"
+                "Port id: Gi0/24\n"
+                "System Name: new-neighbor-switch\n"
+                "------------------------------------------------\n"
+            ),
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["links_created_or_updated"] == 1
+    assert body["devices_created"] == [{"id": body["devices_created"][0]["id"], "name": "new-neighbor-switch"}]
+
+    created_id = body["devices_created"][0]["id"]
+    created = db_session.get(Device, created_id)
+    assert created.custom_name == "new-neighbor-switch"
+    assert created.organization_id == org_id
+
+    inventory = client.get("/api/inventory/devices").json()
+    assert any(d["id"] == created_id for d in inventory)
 
 
 def test_import_rejects_device_from_another_organization(client, db_session, org_id):

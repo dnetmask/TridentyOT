@@ -1,4 +1,5 @@
 import datetime
+import json
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -358,7 +359,31 @@ class SwitchTableImportOut(BaseModel):
     devices_enriched: int = 0  # arp only -- Device.ip/mac filled in, never a link
     suspected_uplinks: list[dict] = []
     unmatched_macs: list[dict] = []  # mac_table only -- MAC not in inventory, so no link either
-    unresolved_neighbors: list[dict] = []
+    devices_created: list[dict] = []  # neighbors only -- auto-provisioned from an unmatched CDP/LLDP neighbor
+
+
+class SwitchTableImportHistoryOut(BaseModel):
+    """One row of "Importar tabla manualmente"'s history -- same
+    conclusion fields as SwitchTableImportOut (read back from
+    SwitchTableImport.result_summary instead of computed fresh), plus
+    which switch/who/when, so a past import stays inspectable instead of
+    only ever existing in the single HTTP response the import itself
+    returned."""
+
+    id: int
+    device_id: int
+    device_name: str
+    table_type: Literal["mac_table", "arp", "neighbors"]
+    source: Literal["manual_paste", "snmp"]
+    vendor: str
+    entries_parsed: int
+    links_created_or_updated: int = 0
+    devices_enriched: int = 0
+    suspected_uplinks: list[dict] = []
+    unmatched_macs: list[dict] = []
+    devices_created: list[dict] = []
+    imported_by: str | None
+    created_at: datetime.datetime
 
 
 class ScanRequest(BaseModel):
@@ -580,6 +605,30 @@ def vulnerability_finding_out(finding, locale: str) -> VulnerabilityFindingOut:
     data["description"] = render_i18n(finding.description, locale)
     data["evidence"] = render_i18n(finding.evidence, locale)
     return VulnerabilityFindingOut(**data)
+
+
+def switch_table_import_history_out(imp, device_name: str, imported_by: str | None) -> SwitchTableImportHistoryOut:
+    """result_summary is stored as a plain (not i18n-encoded) JSON dict --
+    see SwitchTableImport's own docstring -- so this only needs to parse
+    it back, not render_i18n() it. A row saved before result_summary
+    existed (or one that somehow failed to serialize) just falls back to
+    an empty dict, same as a fresh import that found nothing."""
+    try:
+        result = json.loads(imp.result_summary) if imp.result_summary else {}
+    except ValueError:
+        result = {}
+    return SwitchTableImportHistoryOut(
+        id=imp.id,
+        device_id=imp.device_id,
+        device_name=device_name,
+        table_type=imp.table_type,
+        source=imp.source,
+        vendor=imp.vendor,
+        entries_parsed=imp.entries_parsed,
+        imported_by=imported_by,
+        created_at=imp.created_at,
+        **result,
+    )
 
 
 def capture_session_out(session_obj, locale: str) -> CaptureSessionOut:

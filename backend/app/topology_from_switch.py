@@ -12,6 +12,8 @@ this logic.
 
 from sqlalchemy.orm import Session
 
+from app.fingerprint.device_classifier import NETWORK_DEVICE, SWITCH_L2
+from app.i18n import bilingual, encode_i18n
 from app.models import LINK_CONFIRMED, LINK_SOURCE_CDP, LINK_SOURCE_LLDP, LINK_SOURCE_MAC_TABLE, LINK_SOURCE_MANUAL
 from app.models import Device, NetworkLink, SwitchArpEntry, SwitchMacTableEntry, SwitchNeighborEntry
 
@@ -133,15 +135,17 @@ def apply_arp_table(db: Session, organization_id: int, entries: list[SwitchArpEn
 def apply_neighbor_table(db: Session, switch: Device, entries: list[SwitchNeighborEntry]) -> dict:
     """Each entry is the switch's own claim about its direct neighbor --
     the strongest signal this app has for a real link, since it names both
-    the local and the remote port directly instead of inferring anything.
-    A neighbor that can't be matched to an existing Device (by name/
-    hostname or its reported management IP) is reported as unresolved
-    rather than auto-created: good evidence a link exists, not enough on
-    its own to invent a whole new inventory row for the other end -- the
-    user creates that switch manually (POST /api/inventory/devices) and
-    re-imports once they have."""
+    the local and the remote port directly instead of inferring anything
+    (unlike a MAC table's multi-MAC uplink, which is genuinely ambiguous
+    about *which* other switch it goes to). That's strong enough evidence
+    to act on without a human confirming it first: a neighbor that can't
+    be matched to an existing Device (by name/hostname or its reported
+    management IP) gets auto-created as a network_device -- inheriting the
+    switch's own capture_session_id so it shows up in the same Zona/Sitio-
+    scoped views the switch itself does -- and linked immediately, instead
+    of only being reported for the user to create manually and reimport."""
     links_created_or_updated = 0
-    unresolved_neighbors = []
+    devices_created = []
     for entry in entries:
         query = db.query(Device).filter(Device.organization_id == switch.organization_id, Device.id != switch.id)
         candidates = [
@@ -153,19 +157,30 @@ def apply_neighbor_table(db: Session, switch: Device, entries: list[SwitchNeighb
         ]
         other = candidates[0] if candidates else None
         if other is None:
-            unresolved_neighbors.append(
-                {
-                    "remote_device_name": entry.remote_device_name,
-                    "local_port": entry.local_port,
-                    "remote_port": entry.remote_port,
-                    "remote_mgmt_ip": entry.remote_mgmt_ip,
-                    "remote_platform": entry.remote_platform,
-                }
+            other = Device(
+                organization_id=switch.organization_id,
+                capture_session_id=switch.capture_session_id,
+                custom_name=entry.remote_device_name,
+                ip=entry.remote_mgmt_ip,
+                model=entry.remote_platform,
+                device_type=NETWORK_DEVICE,
+                device_type_secondary=SWITCH_L2,
+                device_type_confidence=1.0,
+                device_type_evidence=encode_i18n(
+                    bilingual(
+                        es=f"Creado automáticamente: vecino {entry.protocol.upper()} de "
+                        f"{switch.display_name or f'device-{switch.id}'} ({entry.local_port or '?'})",
+                        en=f"Auto-created: {entry.protocol.upper()} neighbor of "
+                        f"{switch.display_name or f'device-{switch.id}'} ({entry.local_port or '?'})",
+                    )
+                ),
             )
-            continue
+            db.add(other)
+            db.flush()  # need other.id before it can be a NetworkLink endpoint below
+            devices_created.append({"id": other.id, "name": entry.remote_device_name})
         source = _NEIGHBOR_LINK_SOURCE[entry.protocol]
         notes = f"Detectado vía {entry.protocol.upper()}"
         if _upsert_link(db, switch, entry.local_port, other, entry.remote_port, source=source, notes=notes):
             links_created_or_updated += 1
 
-    return {"links_created_or_updated": links_created_or_updated, "unresolved_neighbors": unresolved_neighbors}
+    return {"links_created_or_updated": links_created_or_updated, "devices_created": devices_created}

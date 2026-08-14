@@ -50,6 +50,7 @@ detail` paste (app/switch_table_parsers.py) instead.
 
 import datetime
 import ipaddress
+import json
 import threading
 from typing import Any
 
@@ -600,17 +601,20 @@ def _apply_walked_table(db: Session, switch: Device, table_type: str, rows: list
         entries = [SwitchMacTableEntry(switch_table_import_id=table_import.id, **row) for row in rows]
         db.add_all(entries)
         db.flush()
-        apply_mac_table(db, switch, entries)
+        result = apply_mac_table(db, switch, entries)
     elif table_type == "arp":
         entries = [SwitchArpEntry(switch_table_import_id=table_import.id, **row) for row in rows]
         db.add_all(entries)
         db.flush()
-        apply_arp_table(db, switch.organization_id, entries)
+        result = apply_arp_table(db, switch.organization_id, entries)
     else:  # "neighbors"
         entries = [SwitchNeighborEntry(switch_table_import_id=table_import.id, **row) for row in rows]
         db.add_all(entries)
         db.flush()
-        apply_neighbor_table(db, switch, entries)
+        result = apply_neighbor_table(db, switch, entries)
+
+    table_import.entries_parsed = len(rows)
+    table_import.result_summary = json.dumps(result)
 
 
 class _SnmpWalkWorker:

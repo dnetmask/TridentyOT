@@ -147,7 +147,7 @@ def test_apply_neighbor_table_creates_link_with_both_ports_for_known_neighbor(db
     db_session.commit()
 
     assert result["links_created_or_updated"] == 1
-    assert result["unresolved_neighbors"] == []
+    assert result["devices_created"] == []
     link = db_session.query(NetworkLink).one()
     assert link.source == LINK_SOURCE_CDP
     assert {link.device_a_id, link.device_b_id} == {switch_a.id, switch_b.id}
@@ -174,7 +174,12 @@ def test_apply_neighbor_table_matches_by_management_ip(db_session, org_id):
     assert switch_b.id in (link.device_a_id, link.device_b_id)
 
 
-def test_apply_neighbor_table_reports_unresolved_neighbor_without_creating_device(db_session, org_id):
+def test_apply_neighbor_table_auto_creates_unresolved_neighbor_and_links_it(db_session, org_id):
+    """An LLDP/CDP neighbor is the switch's own direct protocol handshake --
+    strong enough evidence to auto-provision a Device for it (unlike a MAC
+    table's ambiguous multi-MAC uplink), so the topology reflects it
+    immediately instead of asking the user to create it manually and
+    reimport."""
     from app.models import Device
 
     switch = _make_device(db_session, org_id, custom_name="switch-a")
@@ -184,19 +189,26 @@ def test_apply_neighbor_table_reports_unresolved_neighbor_without_creating_devic
         SwitchNeighborEntry(
             switch_table_import_id=0, protocol="lldp", local_port="Gi0/1",
             remote_device_name="mystery-switch", remote_port="Gi0/2",
-            remote_mgmt_ip=None, remote_platform=None,
+            remote_mgmt_ip="10.0.0.9", remote_platform="Siemens Scalance X-308",
         )
     ]
     result = apply_neighbor_table(db_session, switch, entries)
+    db_session.commit()
 
-    assert result["links_created_or_updated"] == 0
-    assert result["unresolved_neighbors"] == [
-        {
-            "remote_device_name": "mystery-switch",
-            "local_port": "Gi0/1",
-            "remote_port": "Gi0/2",
-            "remote_mgmt_ip": None,
-            "remote_platform": None,
-        }
-    ]
-    assert db_session.query(Device).count() == before_count
+    assert result["links_created_or_updated"] == 1
+    assert len(result["devices_created"]) == 1
+    created_id = result["devices_created"][0]["id"]
+    assert result["devices_created"][0]["name"] == "mystery-switch"
+    assert db_session.query(Device).count() == before_count + 1
+
+    created = db_session.get(Device, created_id)
+    assert created.custom_name == "mystery-switch"
+    assert created.ip == "10.0.0.9"
+    assert created.model == "Siemens Scalance X-308"
+    assert created.display_device_type == "network_device"
+    assert created.display_device_type_secondary == "switch_l2"
+    assert created.capture_session_id == switch.capture_session_id
+    assert created.device_type_evidence  # non-empty: traceable back to this auto-creation
+
+    link = db_session.query(NetworkLink).one()
+    assert {link.device_a_id, link.device_b_id} == {switch.id, created_id}
