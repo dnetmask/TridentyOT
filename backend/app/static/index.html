@@ -2186,6 +2186,10 @@ function switchImportResultHtml(result) {
     html += `<div style="margin-top:6px;">Uplinks sospechosos (múltiples MAC en el mismo puerto, sin enlace creado):<ul style="margin:4px 0 0 18px;">` +
       result.suspected_uplinks.map(u => `<li>${escapeHtml(u.interface)} -- ${u.mac_count} MACs</li>`).join('') + `</ul></div>`;
   }
+  if (result.unmatched_macs && result.unmatched_macs.length) {
+    html += `<div style="margin-top:6px;">MAC sin dispositivo coincidente en el inventario (sin enlace creado -- cargá o descubrí ese equipo primero y reimportá):<ul style="margin:4px 0 0 18px;">` +
+      result.unmatched_macs.map(m => `<li>${escapeHtml(m.interface)} -- ${escapeHtml(m.mac)}</li>`).join('') + `</ul></div>`;
+  }
   if (result.unresolved_neighbors && result.unresolved_neighbors.length) {
     html += `<div style="margin-top:6px;">Vecinos sin identificar en el inventario (creá el switch manualmente y reimportá):<ul style="margin:4px 0 0 18px;">` +
       result.unresolved_neighbors.map(n => `<li>${escapeHtml(n.remote_device_name)} (${escapeHtml(n.local_port || '?')} -> ${escapeHtml(n.remote_port || '?')})</li>`).join('') + `</ul></div>`;
@@ -2212,6 +2216,12 @@ $('#switch-import-btn').addEventListener('click', async () => {
       body: JSON.stringify({ device_id: device.id, table_type: tableType, vendor, raw_text: rawText }),
     });
     status.innerHTML = switchImportResultHtml(result);
+    // The import already persisted raw_text server-side (SwitchTableImport
+    // keeps it, precisely so a fixed parser can be re-run later without
+    // asking again -- see switch_table_parsers.py's own docstring), so
+    // it's safe to clear the box: pasting the next table (e.g. LLDP right
+    // after MAC addresses) never risks losing the one that just succeeded.
+    $('#switch-import-text').value = '';
     loadDevices();
     loadSwitchTopologyDevices();
     loadTopology();

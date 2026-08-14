@@ -59,18 +59,21 @@ def _upsert_link(
 
 def apply_mac_table(db: Session, switch: Device, entries: list[SwitchMacTableEntry]) -> dict:
     """A port that shows exactly one MAC gets a NetworkLink to whatever
-    Device owns that MAC (if it's in inventory at all -- an unknown MAC is
-    silently skipped, same "don't invent a Device" stance as neighbors
-    below). A port with more than one MAC is the classic switch-to-switch
-    uplink signature -- reported as a suspected uplink instead of guessed
-    at, since a MAC table alone can't say *which* other switch it goes to
-    (that's what CDP/LLDP is for)."""
+    Device owns that MAC (if it's in inventory at all -- an unknown MAC
+    produces neither a Device nor a link, same "don't invent one" stance as
+    neighbors below, but IS reported back as unmatched so a 0-link result
+    doesn't read as "nothing happened" when the table was in fact read
+    correctly). A port with more than one MAC is the classic switch-to-
+    switch uplink signature -- reported as a suspected uplink instead of
+    guessed at, since a MAC table alone can't say *which* other switch it
+    goes to (that's what CDP/LLDP is for)."""
     by_interface: dict[str, set[str]] = {}
     for entry in entries:
         by_interface.setdefault(entry.interface_name, set()).add(entry.mac)
 
     links_created_or_updated = 0
     suspected_uplinks = []
+    unmatched_macs = []
     for interface_name, macs in by_interface.items():
         if len(macs) > 1:
             suspected_uplinks.append({"interface": interface_name, "mac_count": len(macs)})
@@ -82,6 +85,7 @@ def apply_mac_table(db: Session, switch: Device, entries: list[SwitchMacTableEnt
             .one_or_none()
         )
         if other is None:
+            unmatched_macs.append({"interface": interface_name, "mac": mac})
             continue
         if _upsert_link(
             db, switch, interface_name, other, None,
@@ -89,7 +93,11 @@ def apply_mac_table(db: Session, switch: Device, entries: list[SwitchMacTableEnt
         ):
             links_created_or_updated += 1
 
-    return {"links_created_or_updated": links_created_or_updated, "suspected_uplinks": suspected_uplinks}
+    return {
+        "links_created_or_updated": links_created_or_updated,
+        "suspected_uplinks": suspected_uplinks,
+        "unmatched_macs": unmatched_macs,
+    }
 
 
 def apply_arp_table(db: Session, organization_id: int, entries: list[SwitchArpEntry]) -> dict:

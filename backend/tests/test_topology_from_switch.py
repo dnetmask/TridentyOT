@@ -66,12 +66,18 @@ def test_apply_mac_table_flags_multi_mac_port_as_suspected_uplink_without_a_link
     assert db_session.query(NetworkLink).count() == 0
 
 
-def test_apply_mac_table_skips_unknown_mac(db_session, org_id):
+def test_apply_mac_table_reports_unknown_mac_without_a_link(db_session, org_id):
+    """An unmatched MAC creates neither a Device nor a link (same "don't
+    invent one" stance as an unresolved neighbor), but must still be
+    reported back -- otherwise a real, correctly-parsed table with every
+    port pointing at gear that isn't in inventory yet reads as "0 links,
+    nothing happened" instead of "read fine, nothing to match against"."""
     switch = _make_device(db_session, org_id, custom_name="switch-1")
     entries = [SwitchMacTableEntry(switch_table_import_id=0, mac="aa:bb:cc:dd:ee:ff", interface_name="Gi0/3")]
     result = apply_mac_table(db_session, switch, entries)
 
     assert result["links_created_or_updated"] == 0
+    assert result["unmatched_macs"] == [{"interface": "Gi0/3", "mac": "aa:bb:cc:dd:ee:ff"}]
     assert db_session.query(NetworkLink).count() == 0
 
 

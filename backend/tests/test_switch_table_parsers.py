@@ -57,8 +57,29 @@ SCALANCE_ARP = """IP Address       MAC Address         Interface
 192.168.1.1      00-1B-1B-11-22-00    VLAN1
 """
 
-SCALANCE_LLDP = """Local Port  Chassis ID          Port ID   System Name
-P0.1        00-1B-1B-11-22-00   P0.24     scalance-core
+# Real "show lldp neighbors brief" output (trimmed/anonymized) -- note the
+# header uses tabs inconsistently and one System Name has an embedded
+# space ("OT18 SW01 SALA SERVIDORES"), both of which broke the previous
+# best-effort parser (see _find_column_spans' docstring for why parsing
+# now anchors on the dashed separator row instead).
+SCALANCE_LLDP = """OT01_SW01_INGENI#
+
+### SEND: show lldp neighbors brief
+show lldp neighbors brief
+
+\t\tSystem Name                        \t Device ID                  Local Intf
+
+
+-----------------------------------------------      --------------------          ----------
+
+
+OT10_SW01_AMONIACO                                      ot10xbsw01...                  Ex0/17
+
+
+SW-KOF-URU-OFC-COC1-AS01.sa.kof.ccf                     d0:e0:42:33:bf:80              Gi0/1
+
+
+OT18 SW01 SALA SERVIDORES                               ot18xbsw01...                  Gi0/6
 """
 
 
@@ -137,17 +158,41 @@ def test_scalance_arp_best_effort():
     assert entries == [{"ip": "192.168.1.1", "mac": "00:1b:1b:11:22:00"}]
 
 
-def test_scalance_neighbors_best_effort_skips_header_row():
+def test_scalance_neighbors_parses_real_lldp_brief_output():
+    """Regression test for a real bug report: the previous best-effort
+    parser (keyed off "every data row has a MAC" -- untrue for this
+    format, where Device ID is often a truncated hostname instead) read 0
+    rows from this exact output. See _find_column_spans' docstring for why
+    parsing now anchors on the separator row's dash positions instead."""
     entries = parse_switch_table("siemens_scalance", "neighbors", SCALANCE_LLDP)
     assert entries == [
         {
             "protocol": "lldp",
-            "local_port": "P0.1",
-            "remote_device_name": "scalance-core",
-            "remote_port": "P0.24",
+            "local_port": "Ex0/17",
+            "remote_device_name": "OT10_SW01_AMONIACO",
+            "remote_port": None,
             "remote_mgmt_ip": None,
             "remote_platform": None,
-        }
+        },
+        {
+            "protocol": "lldp",
+            "local_port": "Gi0/1",
+            "remote_device_name": "SW-KOF-URU-OFC-COC1-AS01.sa.kof.ccf",
+            "remote_port": None,
+            "remote_mgmt_ip": None,
+            "remote_platform": None,
+        },
+        {
+            "protocol": "lldp",
+            "local_port": "Gi0/6",
+            # The real device's System Name has a space instead of an
+            # underscore -- proof this survives an embedded space, unlike
+            # a naive line.split() would.
+            "remote_device_name": "OT18 SW01 SALA SERVIDORES",
+            "remote_port": None,
+            "remote_mgmt_ip": None,
+            "remote_platform": None,
+        },
     ]
 
 

@@ -6,10 +6,12 @@ produces.
 
 Cisco parsers are based on the real, well-documented IOS CLI output of
 `show mac address-table`, `show arp`, `show cdp neighbors detail` and
-`show lldp neighbors detail`. Siemens Scalance parsers are BEST-EFFORT:
-there's no verified real-device sample to calibrate against yet, only the
-commonly documented CLI table shape for the X-200/X-300 CLI. Expect to
-adjust these once someone pastes real Scalance output -- that's exactly
+`show lldp neighbors detail`. Siemens Scalance's mac_table/arp parsers are
+still BEST-EFFORT (no verified real-device sample yet, only the commonly
+documented CLI table shape for the X-200/X-300 CLI); its neighbors parser
+(_parse_scalance_neighbors) IS calibrated against real `show lldp
+neighbors brief` output. Expect to keep adjusting the best-effort ones
+once someone pastes real Scalance output for them too -- that's exactly
 why every SwitchTableImport keeps raw_text, so a fixed parser can be
 re-run against it without asking the user to paste it again.
 
@@ -191,34 +193,65 @@ def _parse_scalance_arp(raw_text: str) -> list[dict]:
     return entries
 
 
-def _parse_scalance_neighbors(raw_text: str) -> list[dict]:
-    """Scalance switches speak LLDP, not CDP (that's a Cisco-proprietary
-    protocol) -- every entry from this parser is protocol="lldp". Expected
-    shape: "Local Port  Chassis ID  Port ID  System Name", one neighbor per
-    line."""
-    entries = []
-    for line in _lines(raw_text):
-        mac_match = _MAC_RE.search(line)
-        cols = line.split()
-        # Every real data row has a Chassis ID (a MAC) -- a header/separator
-        # line never does, which is what tells the two apart here.
-        if not cols or not mac_match:
+_COLUMN_DASH_RE = re.compile(r"-{2,}")
+_SEPARATOR_ROW_RE = re.compile(r"^[-\s]+$")
+
+
+def _find_column_spans(lines: list[str]) -> tuple[int, list[tuple[int, int | None]]] | None:
+    """Locates a "----   ----   ----" separator row (the kind under a
+    fixed-width CLI table header) and returns its line index plus each
+    column's (start, end-exclusive) character span, derived from where
+    each run of dashes *starts* -- not from the header text above it,
+    which is free to mix tabs and spaces inconsistently (real Scalance
+    output does exactly that). Slicing later rows by these positions,
+    instead of line.split(), is what survives a value that itself
+    contains a space (e.g. a System Name of "OT18 SW01 SALA SERVIDORES",
+    seen in real output)."""
+    for i, line in enumerate(lines):
+        if not _SEPARATOR_ROW_RE.match(line):
             continue
-        local_port = cols[0]
-        # Best-effort positional guess: chassis id (a MAC), then port id,
-        # then whatever's left is the system name -- real device output
-        # will need this recalibrated once seen.
-        after_chassis = line[mac_match.end() :].split()
-        remote_port = after_chassis[0] if after_chassis else None
-        remote_device_name = " ".join(after_chassis[1:]) or None
-        if not remote_device_name:
+        starts = [m.start() for m in _COLUMN_DASH_RE.finditer(line)]
+        if len(starts) < 2:
+            continue
+        spans = [(start, starts[j + 1] if j + 1 < len(starts) else None) for j, start in enumerate(starts)]
+        return i, spans
+    return None
+
+
+def _slice_by_spans(line: str, spans: list[tuple[int, int | None]]) -> list[str]:
+    return [(line[start:end] if end is not None else line[start:]).strip() for start, end in spans]
+
+
+def _parse_scalance_neighbors(raw_text: str) -> list[dict]:
+    """Calibrated against real Scalance CLI output ("show lldp neighbors
+    brief"): a "System Name / Device ID / Local Intf" header, a dashed
+    separator row, then one neighbor per line -- see _find_column_spans
+    for why parsing anchors on the separator row instead of the header.
+    Device ID is inconsistently a MAC or a truncated hostname in real
+    output, with no reliable shape to key off, so it isn't mapped to any
+    field; this "brief" table also has no remote-port column at all (only
+    "show lldp neighbors detail" would carry one, same detail-vs-brief
+    distinction as Cisco's own two neighbor parsers)."""
+    lines = _lines(raw_text)
+    found = _find_column_spans(lines)
+    if found is None:
+        return []
+    separator_idx, spans = found
+    if len(spans) < 3:
+        return []
+    entries = []
+    for line in lines[separator_idx + 1 :]:
+        if not line.strip():
+            continue
+        system_name, _device_id, local_intf = _slice_by_spans(line, spans[:3])
+        if not system_name or not local_intf:
             continue
         entries.append(
             {
                 "protocol": "lldp",
-                "local_port": local_port,
-                "remote_device_name": remote_device_name,
-                "remote_port": remote_port,
+                "local_port": local_intf,
+                "remote_device_name": system_name,
+                "remote_port": None,
                 "remote_mgmt_ip": None,
                 "remote_platform": None,
             }
