@@ -348,6 +348,7 @@
   .topology-panel .actions button { flex: 1; padding: 6px; font-size: 11.5px; }
   .topology-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 4px 0 10px; }
   .topology-legend .swatch { display: inline-block; width: 22px; height: 0; border-top: 2px solid; margin-right: 5px; vertical-align: middle; }
+  .topology-legend .icon-swatch { width: 16px; height: 16px; margin-right: 5px; vertical-align: middle; }
   .flex-between { display: flex; justify-content: space-between; align-items: center; }
   .status-running { color: var(--accent); }
   .status-completed, .status-stopped { color: var(--muted); }
@@ -871,6 +872,7 @@
         <span><span class="swatch" style="border-color:var(--accent)"></span><span data-i18n="topology.legend_confirmed">Confirmado</span></span>
         <span><span class="swatch" style="border-color:var(--med); border-top-style:dashed;"></span><span data-i18n="topology.legend_uncertain">Dudoso / sin confirmar</span></span>
       </div>
+      <div id="topology-type-legend" class="topology-legend"></div>
       <div id="topology-edit-hint" class="muted hidden" style="font-size:12px; margin-bottom:6px;" data-i18n="topology.edit_hint">
         Modo edición activo: hacé click en un dispositivo y luego en otro para crear un enlace entre ambos.
       </div>
@@ -2775,10 +2777,13 @@ let topologyCy = null;
 let topologyPositions = {};
 let topologyPendingSourceId = null;
 
-// Display label for each device-type compound box -- see renderTopology's
-// groupByType. Keys match the icon names routes_topology.py's _icon_key()
-// sends (and the /vendor/icons/*.svg filenames), not device_type directly,
-// since network_device splits into router/switch here.
+// Display label for each device-type icon -- also drives the icon legend
+// (renderTopologyTypeLegend) now that device type is just a starting-
+// position hint (renderTopology's groupByType/clusterSeed), not a
+// compound box with its own label anymore. Keys match the icon names
+// routes_topology.py's _icon_key() sends (and the /vendor/icons/*.svg
+// filenames), not device_type directly, since network_device splits into
+// router/switch here.
 const TOPOLOGY_TYPE_GROUP_LABELS = {
   plc: 'PLC', hmi: 'HMI', server: 'Servidor/VM', pc: 'PC',
   router: 'Router', switch: 'Switch', other: 'Otro',
@@ -2786,6 +2791,18 @@ const TOPOLOGY_TYPE_GROUP_LABELS = {
 
 function topologyIconUrl(icon) {
   return `/vendor/icons/${icon || 'other'}.svg`;
+}
+
+// Static (not data-dependent), so a single render is enough -- called once
+// from renderTopology rather than wired to its own init hook, since that's
+// already the natural "Topología tab is on screen" entry point.
+function renderTopologyTypeLegend() {
+  const el = $('#topology-type-legend');
+  if (!el || el.dataset.rendered) return;
+  el.dataset.rendered = '1';
+  el.innerHTML = Object.entries(TOPOLOGY_TYPE_GROUP_LABELS).map(([icon, label]) => `
+    <span><img class="icon-swatch" src="${topologyIconUrl(icon)}" alt="">${escapeHtml(label)}</span>
+  `).join('');
 }
 
 function topologyPanelOpen() {
@@ -2803,6 +2820,7 @@ async function loadTopology() {
 }
 
 function renderTopology(data) {
+  renderTopologyTypeLegend();
   const container = $('#topology-cy');
   if (!container) return;
   // refreshAllData()'s 15s poll calls loadTopology() unconditionally, even
@@ -2828,23 +2846,22 @@ function renderTopology(data) {
   const zoneIds = [...new Set(data.nodes.map(n => n.zone_id).filter(id => id != null))];
   const groupByZone = zoneIds.length > 1;
 
-  // The everyday case (a single Zona, no Zona grouping to speak of) gets
-  // grouped by device type instead -- Switches/PLC/HMI/Servidor/PC/Router/
-  // Otro each in their own box -- so the "corazón" (switches) and the end
-  // devices start out visually sorted into groups instead of scattered by
-  // a force layout, before a human starts dragging things into place and
-  // drawing manual links between groups. Same compound-node mechanism as
-  // Zona grouping, just keyed by `icon` instead of `zone_id` -- and
-  // deliberately mutually exclusive with it (nesting type inside Zona
-  // boxes is a reasonable future step, not done here).
+  // The everyday case (a single Zona, no Zona grouping to speak of) starts
+  // devices sorted by type instead -- Switches/PLC/HMI/Servidor/PC/Router/
+  // Otro seeded into their own rough cluster -- so the "corazón" (switches)
+  // and the end devices start out visually sorted instead of scattered by
+  // a force layout, before a human starts dragging things into their real
+  // final layout and drawing manual links between them. Deliberately NOT a
+  // compound node (unlike Zona grouping below): a real Cytoscape parent
+  // permanently owns its children -- there's no clean "drag this device out
+  // of the Switches box and leave it in the final topology" move, which is
+  // exactly what building a real topology out of this needs. This is only
+  // an initial-position hint (see clusterSeed below); nothing keeps a node
+  // "inside" its type group once the layout runs.
   const iconGroups = [...new Set(data.nodes.map(n => n.icon))];
   const groupByType = !groupByZone && iconGroups.length > 1;
 
-  const nodeParentOf = (n) => {
-    if (groupByZone && n.zone_id != null) return `zone-${n.zone_id}`;
-    if (groupByType) return `type-${n.icon}`;
-    return null;
-  };
+  const nodeParentOf = (n) => (groupByZone && n.zone_id != null ? `zone-${n.zone_id}` : null);
 
   // A cached position only counts if it was captured under this SAME
   // parent grouping -- otherwise a flat (or differently-grouped) position
@@ -2866,13 +2883,30 @@ function renderTopology(data) {
         return { data: { id: `zone-${zid}`, label: (sample && sample.zone_name) || `Zona ${zid}` } };
       })
     : [];
-  const typeParents = groupByType
-    ? iconGroups.map(icon => ({ data: { id: `type-${icon}`, label: TOPOLOGY_TYPE_GROUP_LABELS[icon] || icon } }))
-    : [];
+
+  // Only a starting point for the force layout below (see the groupByType
+  // branch), never a lasting constraint -- buckets same-icon nodes into
+  // their own roughly-square cell of the canvas so 'cose' starts already
+  // clustered by type instead of from a random scatter, without any
+  // compound node holding them there.
+  const clusterSeed = (!hasAllPositions && groupByType) ? (() => {
+    const cols = Math.ceil(Math.sqrt(iconGroups.length));
+    const w = container.clientWidth / cols;
+    const h = container.clientHeight / Math.ceil(iconGroups.length / cols);
+    const cellOf = {};
+    iconGroups.forEach((icon, i) => {
+      cellOf[icon] = { x: (i % cols + 0.5) * w, y: (Math.floor(i / cols) + 0.5) * h };
+    });
+    const seeded = {};
+    data.nodes.forEach(n => {
+      const cell = cellOf[n.icon];
+      seeded[n.id] = { x: cell.x + (Math.random() - 0.5) * w * 0.6, y: cell.y + (Math.random() - 0.5) * h * 0.6 };
+    });
+    return seeded;
+  })() : null;
 
   const elements = [
     ...zoneParents,
-    ...typeParents,
     ...data.nodes.map(n => {
       const parent = nodeParentOf(n);
       return {
@@ -2881,7 +2915,8 @@ function renderTopology(data) {
         // all) makes Cytoscape treat the node as already positioned at
         // its default (0,0) instead of letting the layout place it --
         // omit the key entirely rather than pass an empty value.
-        ...(hasAllPositions ? { position: topologyPositions[n.id].pos } : {}),
+        ...(hasAllPositions ? { position: topologyPositions[n.id].pos }
+          : clusterSeed ? { position: clusterSeed[n.id] } : {}),
         classes: n.is_ot_suspected ? 'ot-suspected' : '',
       };
     }),
@@ -2959,20 +2994,29 @@ function renderTopology(data) {
   if (hasAllPositions) {
     // Nothing to do -- every node already has an explicit position (set
     // above) and 'preset' just keeps it.
-  } else if (groupByZone || groupByType) {
+  } else if (groupByZone) {
     // 'cose' is a force layout -- it has no real notion of "these two boxes
-    // must not overlap", so with only a handful of devices per group its
+    // must not overlap", so with only a handful of devices per Zona its
     // compound boxes routinely end up overlapping regardless of how hard the
     // repulsion/nesting forces are tuned (a known limitation of the core
     // algorithm, not a config problem). 'grid' instead places top-level
-    // nodes -- Zona or device-type boxes included -- into non-overlapping
-    // cells and lays out each compound's own children within its cell,
-    // which is exactly the guarantee a grouped view needs.
+    // nodes -- Zona boxes included -- into non-overlapping cells and lays
+    // out each compound's own children within its cell, which is exactly
+    // the guarantee a grouped view needs.
     topologyCy.layout({ name: 'grid', condense: false, avoidOverlap: true, avoidOverlapPadding: 40 }).run();
+  } else if (groupByType) {
+    // No compound boxes to protect here -- clusterSeed above already
+    // placed same-type nodes near each other, so 'cose' just needs
+    // randomize:false to refine (spread out, straighten edges) from that
+    // starting arrangement instead of discarding it for a random scatter.
+    topologyCy.layout({
+      name: 'cose', animate: false, randomize: false,
+      nodeRepulsion: () => 9000, idealEdgeLength: () => 100,
+    }).run();
   } else {
-    // An ungrouped view (one Zona, one device type) has no compound
-    // structure to protect, so it keeps the force layout that reads better
-    // for a handful of freely-connected devices.
+    // An ungrouped view (one Zona, one device type) has nothing to seed
+    // clustering from, so it keeps the plain force layout that reads
+    // better for a handful of freely-connected devices.
     topologyCy.layout({ name: 'cose', animate: false, nodeRepulsion: () => 9000, idealEdgeLength: () => 100 }).run();
   }
 
