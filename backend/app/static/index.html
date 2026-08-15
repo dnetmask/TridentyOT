@@ -2991,6 +2991,17 @@ function renderTopology(data) {
     wheelSensitivity: 0.25,
   });
 
+  // Cytoscape caches the container's bounding rect at construction time to
+  // map screen coordinates (clicks, drags) to model space -- if WebKit/
+  // Safari hasn't finished laying out the container by that exact instant
+  // (a known timing quirk, distinct from Chrome/Firefox), every tap lands
+  // offset from where it visually looks like it landed, until something
+  // (e.g. a zoom, which forces Cytoscape to recompute its transform) fixes
+  // it. An explicit resize() right after construction forces that same
+  // recomputation against the container's real, current bounding rect
+  // instead of waiting for a zoom to paper over it.
+  topologyCy.resize();
+
   if (hasAllPositions) {
     // Nothing to do -- every node already has an explicit position (set
     // above) and 'preset' just keeps it.
@@ -3073,9 +3084,15 @@ function wireTopologyEvents() {
   cy.on('mouseout', 'node:childless', () => { tooltip.style.display = 'none'; });
 
   cy.on('tap', 'node:childless', evt => {
-    if (!isAdmin() || !$('#topology-edit-mode').checked) return;
     const node = evt.target;
     const id = node.data('id');
+    // Edit mode is only for the click-A-then-click-B link flow; outside
+    // it, a tap opens the read-only info+actions card instead (see
+    // openTopologyDeviceCard) -- the two never compete for the same tap.
+    if (!isAdmin() || !$('#topology-edit-mode').checked) {
+      openTopologyDeviceCard(Number(id), node.renderedPosition());
+      return;
+    }
     if (topologyPendingSourceId === id) {
       node.removeClass('topology-pending');
       topologyPendingSourceId = null;
@@ -3112,11 +3129,51 @@ function topologyDeviceLabel(id) {
   return node.length ? node.data('label') : `#${id}`;
 }
 
+// Clamps on BOTH axes against the panel's own current size -- a device
+// near the bottom (or right) edge of the canvas used to only get the X
+// axis clamped, so its panel spilled past the bottom of #topology-cy
+// instead of shifting up to stay fully visible. Must run AFTER the panel
+// is unhidden (offsetWidth/offsetHeight read 0 for a display:none
+// element), so callers remove 'hidden' before calling this.
 function topologyPositionPanel(panel, pos) {
   const container = $('#topology-cy');
-  const maxLeft = container.clientWidth - 236;
+  const maxLeft = Math.max(0, container.clientWidth - panel.offsetWidth - 4);
+  const maxTop = Math.max(0, container.clientHeight - panel.offsetHeight - 4);
   panel.style.left = `${Math.max(0, Math.min(pos.x + 20, maxLeft))}px`;
-  panel.style.top = `${Math.max(0, pos.y - 20)}px`;
+  panel.style.top = `${Math.max(0, Math.min(pos.y - 20, maxTop))}px`;
+}
+
+// The info+actions card for a plain tap outside edit mode -- name, IP,
+// tipo, fabricante, estado, plus "Ver en Inventario" (jumpToDevice,
+// already used elsewhere) and an admin-only "Editar tipo" shortcut that
+// also focuses the type field once there. Reuses #topology-panel (the
+// same one openTopologyLinkForm uses) since only one of the two is ever
+// open at a time.
+function openTopologyDeviceCard(deviceId, renderedPos) {
+  const panel = $('#topology-panel');
+  const node = topologyCy.getElementById(String(deviceId));
+  if (!node.length) return;
+  const d = node.data();
+  const admin = isAdmin();
+  panel.innerHTML = `
+    <h3>${escapeHtml(d.label)}</h3>
+    ${d.ip ? `<div class="row-line">IP: ${escapeHtml(d.ip)}</div>` : ''}
+    <div class="row-line">Tipo: ${escapeHtml(TOPOLOGY_TYPE_GROUP_LABELS[d.icon] || d.icon || 'Otro')}</div>
+    ${d.vendor ? `<div class="row-line">Fabricante: ${escapeHtml(d.vendor)}</div>` : ''}
+    <div class="row-line">Estado: ${d.is_external ? 'Externo (fuera de la LAN)' : 'Activo en la red'}</div>
+    <div class="actions">
+      <button onclick="jumpToDevice(${deviceId})">Ver en Inventario</button>
+      ${admin ? `<button onclick="jumpToDeviceAndEditType(${deviceId})">Editar tipo</button>` : ''}
+    </div>
+  `;
+  panel.classList.remove('hidden');
+  topologyPositionPanel(panel, renderedPos);
+}
+
+async function jumpToDeviceAndEditType(deviceId) {
+  await jumpToDevice(deviceId);
+  const select = $('#edit-device-type');
+  if (select) { select.scrollIntoView({ block: 'center' }); select.focus(); }
 }
 
 function openTopologyLinkForm(deviceAId, deviceBId, existing, renderedPos) {
@@ -3155,8 +3212,8 @@ function openTopologyLinkForm(deviceAId, deviceBId, existing, renderedPos) {
       ${notes ? `<div class="row-line">${escapeHtml(notes)}</div>` : ''}
     `}
   `;
-  topologyPositionPanel(panel, pos);
   panel.classList.remove('hidden');
+  topologyPositionPanel(panel, pos);
 }
 
 async function saveTopologyLink(deviceAId, deviceBId, linkId) {
