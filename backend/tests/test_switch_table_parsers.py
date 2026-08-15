@@ -196,6 +196,71 @@ def test_scalance_neighbors_parses_real_lldp_brief_output():
     ]
 
 
+# Real "show lldp neighbors detail" output (trimmed/anonymized), including
+# the trailing "--More--"/ANSI-garbled pager lines seen in a real capture --
+# one of which swallows the very last "===" separator into "[K=========================".
+SCALANCE_LLDP_DETAIL = """T01_SW01_INGENI#
+
+### SEND: show lldp neighbors detail
+show lldp neighbors detail
+
+=========================
+
+Local Intf  : Ex0/17
+System Name : OT10_SW01_AMONIACO
+Device ID   : ot10xbsw01xbamoniacoab0c
+Hold-time   : 20
+Capability  : B,R
+Port Id     : port-017
+
+=========================
+
+Local Intf  : Gi0/6
+System Name : OT18 SW01 SALA SERVIDORES
+Device ID   : ot18xbsw01xbsalaxbservidores4d55
+Hold-time   : 20
+Capability  : B,R
+Port Id     : port-001
+
+[K
+--More--[K
+
+[K=========================
+
+Total Entries Displayed : 9
+
+[27m"""
+
+
+def test_scalance_neighbors_parses_real_lldp_detail_output():
+    """Regression test for a second real Scalance sample: "show lldp
+    neighbors detail" (unlike "brief", it carries a real remote port via
+    "Port Id"). Also proves the parser survives a console pager's
+    "--More--" and ANSI-garbled lines, including one where the escape code
+    is glued directly onto what should have been the final "==="
+    separator -- that block still gets flushed via the parser's
+    unconditional trailing _flush()."""
+    entries = parse_switch_table("siemens_scalance", "neighbors", SCALANCE_LLDP_DETAIL)
+    assert entries == [
+        {
+            "protocol": "lldp",
+            "local_port": "Ex0/17",
+            "remote_device_name": "OT10_SW01_AMONIACO",
+            "remote_port": "port-017",
+            "remote_mgmt_ip": None,
+            "remote_platform": None,
+        },
+        {
+            "protocol": "lldp",
+            "local_port": "Gi0/6",
+            "remote_device_name": "OT18 SW01 SALA SERVIDORES",
+            "remote_port": "port-001",
+            "remote_mgmt_ip": None,
+            "remote_platform": None,
+        },
+    ]
+
+
 def test_unknown_vendor_table_type_raises():
     import pytest
 

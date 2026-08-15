@@ -9,8 +9,9 @@ Cisco parsers are based on the real, well-documented IOS CLI output of
 `show lldp neighbors detail`. Siemens Scalance's mac_table/arp parsers are
 still BEST-EFFORT (no verified real-device sample yet, only the commonly
 documented CLI table shape for the X-200/X-300 CLI); its neighbors parser
-(_parse_scalance_neighbors) IS calibrated against real `show lldp
-neighbors brief` output. Expect to keep adjusting the best-effort ones
+(_parse_scalance_neighbors) IS calibrated against real output, both
+`show lldp neighbors brief` and `show lldp neighbors detail`. Expect to
+keep adjusting the best-effort ones
 once someone pastes real Scalance output for them too -- that's exactly
 why every SwitchTableImport keeps raw_text, so a fixed parser can be
 re-run against it without asking the user to paste it again.
@@ -222,7 +223,7 @@ def _slice_by_spans(line: str, spans: list[tuple[int, int | None]]) -> list[str]
     return [(line[start:end] if end is not None else line[start:]).strip() for start, end in spans]
 
 
-def _parse_scalance_neighbors(raw_text: str) -> list[dict]:
+def _parse_scalance_neighbors_brief(lines: list[str]) -> list[dict]:
     """Calibrated against real Scalance CLI output ("show lldp neighbors
     brief"): a "System Name / Device ID / Local Intf" header, a dashed
     separator row, then one neighbor per line -- see _find_column_spans
@@ -230,9 +231,9 @@ def _parse_scalance_neighbors(raw_text: str) -> list[dict]:
     Device ID is inconsistently a MAC or a truncated hostname in real
     output, with no reliable shape to key off, so it isn't mapped to any
     field; this "brief" table also has no remote-port column at all (only
-    "show lldp neighbors detail" would carry one, same detail-vs-brief
-    distinction as Cisco's own two neighbor parsers)."""
-    lines = _lines(raw_text)
+    "show lldp neighbors detail", see _parse_scalance_neighbors_detail,
+    carries one -- same detail-vs-brief distinction as Cisco's own two
+    neighbor parsers)."""
     found = _find_column_spans(lines)
     if found is None:
         return []
@@ -257,6 +258,65 @@ def _parse_scalance_neighbors(raw_text: str) -> list[dict]:
             }
         )
     return entries
+
+
+_SCALANCE_DETAIL_MARKER_RE = re.compile(r"^\s*Local Intf\s*:", re.IGNORECASE)
+_SCALANCE_DETAIL_FIELD_RE = re.compile(r"^\s*(?P<key>[A-Za-z ]+?)\s*:\s*(?P<value>.*?)\s*$")
+_SCALANCE_DETAIL_SEPARATOR_RE = re.compile(r"^=+$")
+
+
+def _parse_scalance_neighbors_detail(lines: list[str]) -> list[dict]:
+    """Calibrated against real Scalance CLI output ("show lldp neighbors
+    detail"): "===...===" separated blocks of "Label  : value" lines
+    (Local Intf, System Name, Device ID, Hold-time, Capability, Port Id).
+    Unlike "brief", this DOES carry the remote port (Port Id); still no
+    management IP field at all, unlike Cisco's own detail output. A
+    console pager's "--More--"/ANSI-garbled lines (seen in real captures,
+    including one where the ANSI code swallows the separator itself) never
+    match the field regex -- they're silently skipped, same as any other
+    unrecognized line -- and the final block still gets flushed via the
+    unconditional call after the loop even when its trailing separator
+    line was garbled that way."""
+    entries: list[dict] = []
+    current: dict[str, str] = {}
+
+    def _flush():
+        local_intf = current.get("local intf")
+        system_name = current.get("system name")
+        if local_intf and system_name:
+            entries.append(
+                {
+                    "protocol": "lldp",
+                    "local_port": local_intf,
+                    "remote_device_name": system_name,
+                    "remote_port": current.get("port id"),
+                    "remote_mgmt_ip": None,
+                    "remote_platform": None,
+                }
+            )
+
+    for line in lines:
+        if _SCALANCE_DETAIL_SEPARATOR_RE.match(line.strip()):
+            _flush()
+            current = {}
+            continue
+        m = _SCALANCE_DETAIL_FIELD_RE.match(line)
+        if not m:
+            continue
+        current[m.group("key").strip().lower()] = m.group("value").strip()
+    _flush()
+    return entries
+
+
+def _parse_scalance_neighbors(raw_text: str) -> list[dict]:
+    """Dispatches to whichever real Scalance neighbor shape this is --
+    "show lldp neighbors detail" (per-neighbor blocks, checked first since
+    it's unambiguous) or "...brief" (a single dashed-separator table) --
+    same detail-vs-brief split as Cisco's own _parse_cisco_neighbors."""
+    lines = _lines(raw_text)
+    if any(_SCALANCE_DETAIL_MARKER_RE.match(line) for line in lines):
+        return _parse_scalance_neighbors_detail(lines)
+    return _parse_scalance_neighbors_brief(lines)
 
 
 _PARSERS = {
