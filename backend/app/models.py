@@ -39,6 +39,14 @@ class Organization(Base):
     # Default locale for new users created under this org; each user can
     # still override it individually (see User.locale).
     default_locale: Mapped[str] = mapped_column(String(5), default="es")
+    # IANA zone name (e.g. "America/Bogota") used to display every
+    # timestamp this organization's users see (Últ. visto, Primera vez,
+    # ...) -- everything is stored as UTC (see utcnow() below); this is a
+    # purely presentational setting, editable by the org's own admin (see
+    # routes_organizations.update_my_organization), not just a super_admin.
+    # UTC is the safe default for a brand-new org rather than guessing a
+    # region.
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC")
     created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
 
 

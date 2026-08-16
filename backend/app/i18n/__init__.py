@@ -161,6 +161,14 @@ MESSAGES: dict[str, dict[str, str]] = {
         "en": "An organization with that slug already exists",
     },
     "organizations.not_found": {"es": "Organización no encontrada", "en": "Organization not found"},
+    "organizations.no_organization": {
+        "es": "Tu cuenta no pertenece a ninguna organización",
+        "en": "Your account doesn't belong to any organization",
+    },
+    "organizations.invalid_timezone": {
+        "es": "Esa zona horaria no es válida",
+        "en": "That timezone isn't valid",
+    },
     "sites.not_found": {"es": "Sitio no encontrado", "en": "Site not found"},
     "sites.organization_id_required": {
         "es": "Debes indicar la organización para este sitio",

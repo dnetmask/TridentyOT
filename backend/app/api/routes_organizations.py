@@ -1,13 +1,21 @@
+import zoneinfo
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.auth import ROLE_ADMIN
-from app.auth.deps import require_super_admin
+from app.auth.deps import require_admin, require_super_admin
 from app.auth.security import hash_password
 from app.db import get_db
 from app.i18n import message
 from app.models import Organization, User
-from app.schemas import OrganizationCreateRequest, OrganizationOut, OrganizationUpdateRequest, OrganizationWithAdminOut
+from app.schemas import (
+    OrganizationCreateRequest,
+    OrganizationOut,
+    OrganizationSettingsUpdateRequest,
+    OrganizationUpdateRequest,
+    OrganizationWithAdminOut,
+)
 
 router = APIRouter(prefix="/api/organizations", tags=["organizations"])
 
@@ -52,6 +60,35 @@ def create_organization(
     db.refresh(org)
     db.refresh(admin_user)
     return OrganizationWithAdminOut(organization=org, admin_user=admin_user)
+
+
+@router.patch("/me", response_model=OrganizationOut)
+def update_my_organization(
+    payload: OrganizationSettingsUpdateRequest,
+    db: Session = Depends(get_db),
+    current: User = Depends(require_admin),
+):
+    """Self-service settings for the caller's own organization (Ajustes,
+    under Administración) -- open to that org's own admin, unlike
+    update_organization above (platform-level management, super_admin
+    only, acting on any organization by id). Declared before
+    "/{organization_id}" so "me" is never mistaken for one.
+
+    A super_admin has no organization of their own (see User.organization_id's
+    docstring), so this 404s for one exactly like a real caller with a
+    dangling/deleted organization_id would."""
+    if current.organization_id is None:
+        raise HTTPException(status_code=404, detail=message("organizations.no_organization", current.locale))
+    org = db.get(Organization, current.organization_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail=message("organizations.not_found", current.locale))
+
+    if payload.timezone not in zoneinfo.available_timezones():
+        raise HTTPException(status_code=400, detail=message("organizations.invalid_timezone", current.locale))
+    org.timezone = payload.timezone
+    db.commit()
+    db.refresh(org)
+    return org
 
 
 @router.patch("/{organization_id}", response_model=OrganizationOut)

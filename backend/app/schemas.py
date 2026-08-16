@@ -423,11 +423,14 @@ class UserOut(BaseModel):
     locale: str
     created_at: datetime.datetime
     # organization_id is a real column on User, so it's always populated
-    # automatically. organization_name has no equivalent attribute on the
-    # ORM object (User has no `organization` relationship) -- it stays
-    # None unless a caller explicitly fills it in, see user_out() below.
+    # automatically. organization_name/organization_timezone have no
+    # equivalent attribute on the ORM object (User has no `organization`
+    # relationship) -- they stay None unless a caller explicitly fills
+    # them in, see user_out() below. organization_timezone is what the
+    # frontend's fmtDate() renders every stored (UTC) timestamp in.
     organization_id: int | None = None
     organization_name: str | None = None
+    organization_timezone: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -484,6 +487,7 @@ class OrganizationOut(BaseModel):
     slug: str
     deployment_mode: str
     default_locale: str
+    timezone: str
     created_at: datetime.datetime
 
 
@@ -512,6 +516,17 @@ class OrganizationUpdateRequest(BaseModel):
     renaming (the slug in particular may be referenced elsewhere)."""
 
     name: str = Field(min_length=1, max_length=255)
+
+
+class OrganizationSettingsUpdateRequest(BaseModel):
+    """Self-service settings an org's own admin can change (PATCH
+    /api/organizations/me) -- distinct from OrganizationUpdateRequest
+    above, which is platform-level management restricted to a
+    super_admin acting on any organization by id. timezone is the first
+    field here; more self-service settings (e.g. licensing) are expected
+    to land in this same request as they're built."""
+
+    timezone: str = Field(min_length=1, max_length=64)
 
 
 class SiteOut(BaseModel):
@@ -662,10 +677,12 @@ def capture_session_out(session_obj, locale: str) -> CaptureSessionOut:
 
 def user_out(db, user) -> UserOut:
     """Like UserOut.model_validate(user), but also fills in
-    organization_name -- there's no `organization` relationship on the User
-    model to pull that from automatically. Used for a user's own account
-    (GET/PATCH /api/auth/me) so the frontend can label its nav tree root
-    without a super_admin-only call to GET /api/organizations."""
+    organization_name/organization_timezone -- there's no `organization`
+    relationship on the User model to pull those from automatically. Used
+    for a user's own account (GET/PATCH /api/auth/me) so the frontend can
+    label its nav tree root and render every timestamp in the org's
+    configured zone (see fmtDate()) without a super_admin-only call to
+    GET /api/organizations."""
     from app.models import Organization
 
     data = UserOut.model_validate(user).model_dump()
@@ -673,4 +690,5 @@ def user_out(db, user) -> UserOut:
         org = db.get(Organization, user.organization_id)
         if org is not None:
             data["organization_name"] = org.name
+            data["organization_timezone"] = org.timezone
     return UserOut(**data)

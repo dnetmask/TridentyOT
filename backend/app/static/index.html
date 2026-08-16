@@ -1104,6 +1104,30 @@
     </div>
   </section>
 
+  <section id="tab-settings" class="tab">
+    <div class="card">
+      <h2 data-i18n="settings.timezone_title">Zona horaria</h2>
+      <p class="muted" style="font-size:12.5px;" data-i18n="settings.timezone_hint">
+        Todas las fechas y horas de la aplicación (Último visto, Primera vez, ...) se muestran en esta zona horaria.
+        Los datos internamente siempre se guardan en UTC.
+      </p>
+      <div class="row">
+        <div>
+          <label data-i18n="settings.timezone_label">Zona horaria</label>
+          <select id="settings-timezone-select"></select>
+        </div>
+        <button class="action" id="save-timezone-btn" data-i18n="settings.save_btn">Guardar</button>
+      </div>
+      <div id="settings-timezone-error" style="color:var(--crit); font-size:12.5px; margin-top:8px;"></div>
+      <div id="settings-timezone-success" style="color:var(--ok); font-size:12.5px; margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="settings.licensing_title">Licenciamiento</h2>
+      <p class="muted" data-i18n="settings.licensing_hint">Próximamente vas a poder administrar tu licencia desde acá.</p>
+    </div>
+  </section>
+
   <section id="tab-reports" class="tab">
     <div class="card">
       <div class="flex-between">
@@ -1560,6 +1584,20 @@ const I18N = {
   'users.create_btn': { es: 'Crear', en: 'Create' },
   'users.title': { es: 'Usuarios', en: 'Users' },
   'users.col_created': { es: 'Creado', en: 'Created' },
+  'settings.nav_label': { es: 'Ajustes', en: 'Settings' },
+  'settings.timezone_title': { es: 'Zona horaria', en: 'Timezone' },
+  'settings.timezone_hint': {
+    es: 'Todas las fechas y horas de la aplicación (Último visto, Primera vez, ...) se muestran en esta zona horaria. Los datos internamente siempre se guardan en UTC.',
+    en: 'Every date/time shown in the app (Last seen, First seen, ...) is displayed in this timezone. Data is always stored internally in UTC.',
+  },
+  'settings.timezone_label': { es: 'Zona horaria', en: 'Timezone' },
+  'settings.save_btn': { es: 'Guardar', en: 'Save' },
+  'settings.save_success': { es: 'Zona horaria actualizada.', en: 'Timezone updated.' },
+  'settings.licensing_title': { es: 'Licenciamiento', en: 'Licensing' },
+  'settings.licensing_hint': {
+    es: 'Próximamente vas a poder administrar tu licencia desde acá.',
+    en: 'You\'ll be able to manage your license from here soon.',
+  },
   'infra.create_site_title': { es: 'Crear sitio', en: 'Create site' },
   'infra.site_name': { es: 'Nombre', en: 'Name' },
   'infra.site_city': { es: 'Ciudad', en: 'City' },
@@ -1883,7 +1921,16 @@ async function jumpToDevice(deviceId) {
 
 function fmtDate(iso) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString();
+  const tz = currentUser && currentUser.organization_timezone;
+  if (!tz) return new Date(iso).toLocaleString();
+  try {
+    return new Date(iso).toLocaleString(undefined, { timeZone: tz });
+  } catch (e) {
+    // An unknown/invalid zone name (shouldn't happen -- the backend only
+    // ever stores one validated against Python's own zoneinfo database)
+    // would otherwise throw and blank out every timestamp on screen.
+    return new Date(iso).toLocaleString();
+  }
 }
 
 function sevBadge(sev) {
@@ -4815,7 +4862,8 @@ function buildOrgAdminFlyout() {
       <button type="button" class="flyout-close" onclick="closeFlyout()">×</button>
     </div>
     <div class="flyout-section-title">Configure</div>
-    <button type="button" class="flyout-link" onclick="openUsersFor(${orgId})">Usuarios</button>`;
+    <button type="button" class="flyout-link" onclick="openUsersFor(${orgId})">Usuarios</button>
+    <button type="button" class="flyout-link" onclick="openSettingsFor(${orgId})">${escapeHtml(i18nText('settings.nav_label'))}</button>`;
 }
 
 async function renameOrganization(id) {
@@ -5032,6 +5080,60 @@ function openUsersFor(organizationId) {
   loadUsers();
   renderSidebarRail();
 }
+
+function openSettingsFor(organizationId) {
+  activateTab('settings'); // resets activeRailKey -- set back below
+  activeRailKey = 'org-admin';
+  renderSettingsTab();
+  renderSidebarRail();
+}
+
+// Native IANA list (Chrome/Edge/Firefox 99+, per MDN) -- falls back to a
+// short, common-cases list for anything older rather than leaving the
+// select empty. UTC is always present and always first: the safe,
+// unambiguous choice regardless of where an org is actually located.
+function timezoneOptionsList() {
+  let zones;
+  try {
+    zones = Intl.supportedValuesOf('timeZone');
+  } catch (e) {
+    zones = [
+      'America/Bogota', 'America/Mexico_City', 'America/New_York', 'America/Chicago', 'America/Denver',
+      'America/Los_Angeles', 'America/Sao_Paulo', 'America/Argentina/Buenos_Aires', 'America/Santiago',
+      'America/Lima', 'Europe/Madrid', 'Europe/London',
+    ];
+  }
+  return ['UTC', ...zones.filter(z => z !== 'UTC')];
+}
+
+function renderSettingsTab() {
+  const select = $('#settings-timezone-select');
+  const selected = (currentUser && currentUser.organization_timezone) || 'UTC';
+  select.innerHTML = timezoneOptionsList()
+    .map(z => `<option value="${z}" ${z === selected ? 'selected' : ''}>${z}</option>`)
+    .join('');
+  $('#settings-timezone-error').textContent = '';
+  $('#settings-timezone-success').textContent = '';
+}
+
+$('#save-timezone-btn').addEventListener('click', async () => {
+  const timezone = $('#settings-timezone-select').value;
+  const errorEl = $('#settings-timezone-error');
+  const successEl = $('#settings-timezone-success');
+  errorEl.textContent = '';
+  successEl.textContent = '';
+  try {
+    await api('/api/organizations/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timezone }),
+    });
+    if (currentUser) currentUser.organization_timezone = timezone;
+    successEl.textContent = i18nText('settings.save_success');
+  } catch (e) {
+    errorEl.textContent = e.message;
+  }
+});
 
 $('#create-site-btn').addEventListener('click', async () => {
   const name = $('#new-site-name').value.trim();

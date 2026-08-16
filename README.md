@@ -708,6 +708,25 @@ dinámicamente en las tablas (por ejemplo botones "Detener"/"Borrar" o el mensaj
 todavía se muestran en español pase lo que pase -- ver `app/i18n` en el backend y el diccionario
 `I18N` en `static/index.html`.
 
+### Zona horaria (Administración → Ajustes)
+
+Todo timestamp se guarda internamente en UTC (`utcnow()`), pero se mostraba siempre convertido a la
+zona horaria del navegador (`fmtDate()` usaba `new Date(x).toLocaleString()` sin `timeZone` alguno) --
+en un despliegue real eso rara vez coincide con la zona del propio sistema/planta (ej. Bogotá,
+Colombia), especialmente si quien lo mira está en otro huso horario.
+
+Ahora cada organización tiene su propia zona horaria (`Organization.timezone`, UTC por defecto),
+configurable por su propio admin -- no hace falta ser Super Admin -- desde **Administración → Ajustes**
+(debajo de Usuarios), con un selector que cubre la lista completa de zonas IANA que el navegador
+soporte (`Intl.supportedValuesOf('timeZone')`, ~400 zonas en cualquier navegador moderno). El cambio
+se guarda vía `PATCH /api/organizations/me` y de ahí en adelante `fmtDate()` renderiza cada fecha
+(Último visto, Primera vez, ...) con esa zona (`toLocaleString(undefined, { timeZone })`) en vez de la
+del navegador -- todos los usuarios de una misma organización ven las mismas horas,
+independientemente de dónde estén ellos mismos parados.
+
+La misma pantalla de Ajustes tiene una segunda tarjeta, **Licenciamiento**, por ahora un placeholder
+("Próximamente") a la espera de desarrollarse.
+
 ### Tema claro/oscuro
 
 El dashboard sigue por defecto la preferencia del sistema operativo (`prefers-color-scheme`), y
