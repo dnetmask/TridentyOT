@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.capture.packet_processor import PacketRecord
 from app.fingerprint.device_classifier import NETWORK_DEVICE, ROUTER_NAT, classify_device_type
+from app.fingerprint.dhcp_fingerprint import fingerprint_dhcp_options
 from app.fingerprint.identity_detect import IdentityHint
 from app.fingerprint.ip_scope import is_lan_ip, is_real_unicast_ip
 from app.fingerprint.os_fingerprint import (
@@ -23,7 +24,7 @@ from app.fingerprint.os_fingerprint import (
 from app.fingerprint.protocol_detect import OT, PROFINET_OTHER, ProtocolInfo, classify
 from app.fingerprint.vendor_lookup import lookup_vendor
 from app.i18n import bilingual, encode_i18n
-from app.models import CaptureSession, Device, DeviceProtocol, Flow, VulnerabilityFinding, utcnow
+from app.models import ArpObservation, CaptureSession, Device, DeviceProtocol, Flow, VulnerabilityFinding, utcnow
 
 _PRINTABLE_BANNER_MIN_RATIO = 0.85
 
@@ -81,6 +82,7 @@ class IngestCache:
         self.devices_by_mac: dict[tuple[int, str], Device] = {}
         self.protocols: dict[tuple[int, str, int | None, str], DeviceProtocol] = {}
         self.flows: dict[tuple[int, int, str, int | None], Flow] = {}
+        self.arp_observations: dict[tuple[int, str], ArpObservation] = {}
 
 
 def _is_real_unicast_mac(mac: str | None) -> bool:
@@ -106,6 +108,8 @@ def get_or_create_device(
     organization_id: int,
     capture_session_id: int | None = None,
     cache: IngestCache | None = None,
+    vlan: int | None = None,
+    ttl: int | None = None,
 ) -> Device | None:
     if mac is not None and not _is_real_unicast_mac(mac):
         mac = None
@@ -152,6 +156,8 @@ def get_or_create_device(
             ip=ip,
             mac=mac,
             vendor=lookup_vendor(mac),
+            vlan=vlan,
+            last_ttl=ttl,
             capture_session_id=capture_session_id,
             first_seen=now,
             last_seen=now,
@@ -165,6 +171,15 @@ def get_or_create_device(
             device.ip = ip
         if device.vendor is None:
             device.vendor = lookup_vendor(device.mac)
+        # Last-seen-wins, unlike mac/ip above: a device rarely changes VLAN
+        # or its stack's initial TTL, but when it does the newest
+        # observation is more likely correct than the first. Only ever
+        # overwritten when this call actually carries a value -- None means
+        # "this packet didn't say", not "clear it".
+        if vlan is not None:
+            device.vlan = vlan
+        if ttl is not None:
+            device.last_ttl = ttl
         device.last_seen = now
         # Re-attributes to whichever capture last confirmed this device,
         # not just whichever one first discovered it -- devices are matched
@@ -197,6 +212,44 @@ def get_or_create_device(
             cache.devices_by_mac[(organization_id, device.mac)] = device
 
     return device
+
+
+def upsert_arp_observation(
+    session: Session,
+    ip: str,
+    mac: str,
+    organization_id: int,
+    cache: IngestCache | None = None,
+) -> ArpObservation:
+    """Live IP<->MAC binding straight off the wire -- see ArpObservation's
+    docstring for why this is a separate table from Device rather than
+    just reading device.ip/device.mac (a switch/router can sit between the
+    sensor and a device, so a Device's own ip/mac don't necessarily reflect
+    what's on this particular segment's ARP cache right now). Upserted by
+    (organization_id, ip): both mac and last_seen are overwritten on every
+    call, since an IP that now resolves to a different mac (NIC swap, DHCP
+    lease turnover) should reflect what the segment says *now*, not
+    whichever binding this sensor happened to see first."""
+    key = (organization_id, ip)
+    existing = cache.arp_observations.get(key) if cache is not None else None
+    if existing is None:
+        existing = (
+            session.query(ArpObservation)
+            .filter(ArpObservation.organization_id == organization_id, ArpObservation.ip == ip)
+            .one_or_none()
+        )
+    now = utcnow()
+    if existing is None:
+        existing = ArpObservation(organization_id=organization_id, ip=ip, mac=mac, last_seen=now)
+        session.add(existing)
+    else:
+        existing.mac = mac
+        existing.last_seen = now
+
+    if cache is not None:
+        cache.arp_observations[key] = existing
+
+    return existing
 
 
 def apply_os_guess(device: Device, guess: OsGuess) -> None:
@@ -558,7 +611,7 @@ def ingest_packet_record(
     if record.transport == "arp":
         device = get_or_create_device(
             session, ip=record.src_ip, mac=record.src_mac, organization_id=organization_id,
-            capture_session_id=capture_session_id, cache=cache,
+            capture_session_id=capture_session_id, cache=cache, vlan=record.vlan,
         )
         if device is not None:
             # A device only ever seen via ARP has no protocol/OS evidence at
@@ -567,6 +620,13 @@ def ingest_packet_record(
             # classification attempt rather than leaving it unclassified
             # purely because it never happened to send TCP/UDP traffic.
             apply_device_type_guess(session, device)
+        if (
+            record.src_ip
+            and record.src_mac
+            and is_real_unicast_ip(record.src_ip)
+            and _is_real_unicast_mac(record.src_mac)
+        ):
+            upsert_arp_observation(session, record.src_ip, record.src_mac, organization_id, cache=cache)
         return
 
     if record.transport in ("cdp", "lldp"):
@@ -576,7 +636,7 @@ def ingest_packet_record(
         # is ever seen sending ordinary IP traffic; see get_or_create_device).
         device = get_or_create_device(
             session, ip=None, mac=record.src_mac, organization_id=organization_id,
-            capture_session_id=capture_session_id, cache=cache,
+            capture_session_id=capture_session_id, cache=cache, vlan=record.vlan,
         )
         if device is not None:
             if record.l2_hostname:
@@ -601,7 +661,7 @@ def ingest_packet_record(
         # involved) reads as PLC, exactly right for a PROFINET IO device.
         device = get_or_create_device(
             session, ip=None, mac=record.src_mac, organization_id=organization_id,
-            capture_session_id=capture_session_id, cache=cache,
+            capture_session_id=capture_session_id, cache=cache, vlan=record.vlan,
         )
         if device is not None:
             if record.l2_hostname:
@@ -639,7 +699,7 @@ def ingest_packet_record(
     # flow) actually needs a real device on both ends.
     src_device = get_or_create_device(
         session, ip=record.src_ip, mac=record.src_mac, organization_id=organization_id,
-        capture_session_id=capture_session_id, cache=cache,
+        capture_session_id=capture_session_id, cache=cache, vlan=record.vlan, ttl=record.ttl,
     )
     dst_device = get_or_create_device(
         session, ip=record.dst_ip, mac=None, organization_id=organization_id,
@@ -694,6 +754,17 @@ def ingest_packet_record(
         # ttl/window always describe the packet's sender, i.e. src_device
         apply_os_guess(src_device, guess)
         apply_device_type_guess(session, src_device)
+
+    # DHCP option 55 is a client-implementation fingerprint independent of
+    # the TCP/IP stack signature above (see fingerprint/dhcp_fingerprint.py)
+    # -- both feed the same never-downgrade apply_os_guess merge, so
+    # whichever signal is more confident (not necessarily whichever ran
+    # first) is the one that sticks.
+    if src_device is not None and record.dhcp_param_request_list:
+        dhcp_guess = fingerprint_dhcp_options(record.dhcp_param_request_list)
+        if dhcp_guess is not None:
+            apply_os_guess(src_device, dhcp_guess)
+            apply_device_type_guess(session, src_device)
 
     if src_device is not None and dst_device is not None and record.transport in ("tcp", "udp"):
         server_side = _pick_server_side(record)

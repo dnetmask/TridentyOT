@@ -232,6 +232,21 @@ class Device(Base):
 
     is_ot_suspected: Mapped[bool] = mapped_column(default=False)
 
+    # 802.1Q VLAN ID, last-seen wins. Only ever learned from a frame this
+    # device sent (mirrors mac's sender-only semantics in
+    # inventory_service.get_or_create_device), and only overwritten when the
+    # frame actually carried a tag -- an untagged frame leaves this
+    # unchanged rather than clearing it, since "no tag on this frame" isn't
+    # proof the device has no VLAN (native/untagged VLANs exist).
+    vlan: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # IP TTL from the most recently captured packet this device sent -- a
+    # coarse hop-distance/OS-family signal (see fingerprint/os_fingerprint.py)
+    # kept separate from os_guess/os_confidence since TTL alone is weak and
+    # easily conflated (a Linux host and a network appliance can both boot
+    # from 64) and is meant for hop-distance inference, not classification.
+    last_ttl: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # The capture session that *most recently* confirmed this device (see
     # inventory_service.get_or_create_device) -- also used to remove it when
     # that session is deleted, provided no other session's protocols/flows
@@ -530,6 +545,27 @@ class SwitchNeighborEntry(Base):
     remote_port: Mapped[str | None] = mapped_column(String(64), nullable=True)
     remote_mgmt_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     remote_platform: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class ArpObservation(Base):
+    """A live IP<->MAC binding this sensor itself captured off the wire (an
+    ARP request or reply), upserted by (organization_id, ip) -- last_seen
+    wins, this is not an append-only log. Distinct from SwitchArpEntry
+    above, which is a point-in-time snapshot pasted/walked from a switch's
+    own ARP table: this one is continuously refreshed from passive capture.
+    ARP never routes past a default gateway, so two devices with an entry
+    for each other here are proof of sharing one L2 broadcast domain --
+    exactly the corroborating signal later topology-inference phases need
+    before treating a Flow as anything more than "these two IPs talked"."""
+
+    __tablename__ = "arp_observations"
+    __table_args__ = (UniqueConstraint("organization_id", "ip", name="uq_arp_observation_org_ip"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    ip: Mapped[str] = mapped_column(String(45), index=True)
+    mac: Mapped[str] = mapped_column(String(17), index=True)
+    last_seen: Mapped[datetime.datetime] = mapped_column(default=utcnow)
 
 
 class VulnerabilityFinding(Base):

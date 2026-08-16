@@ -14,14 +14,14 @@ from scapy.contrib.pnio_dcp import (
     ProfinetDCP,
 )
 from scapy.layers.inet import IP, TCP, UDP
-from scapy.layers.l2 import ARP, LLC, SNAP, Ether
+from scapy.layers.l2 import ARP, LLC, SNAP, Dot1Q, Ether
 from scapy.layers.netbios import NBNSHeader, NBNSRegistrationRequest
 
 from scapy.packet import Raw
 
 from app.capture.packet_processor import process_packet
 from app.inventory.inventory_service import IngestCache, _looks_like_text_banner, ingest_packet_record
-from app.models import Device, DeviceProtocol, Flow
+from app.models import ArpObservation, Device, DeviceProtocol, Flow
 
 
 def test_ingest_modbus_syn_creates_device_and_ot_protocol(db_session, org_id):
@@ -845,3 +845,99 @@ def test_bacnet_i_am_fills_evidence_only_without_asserting_a_device_type(db_sess
     assert device.device_type_evidence is not None
     assert "1234" in device.device_type_evidence
     assert "42" in device.device_type_evidence
+
+
+def test_vlan_is_persisted_on_sender_device_only(db_session, org_id):
+    """VLAN, like mac, is only ever learned from a packet's sender -- the
+    destination's own VLAN membership isn't something this packet proves."""
+    pkt = Ether() / Dot1Q(vlan=42) / IP(src="10.0.7.5", dst="10.0.7.50", ttl=64) / TCP(
+        sport=51000, dport=502, flags="S", window=1024
+    )
+    ingest_packet_record(db_session, process_packet(Ether(bytes(pkt))), org_id)
+    db_session.commit()
+
+    client = db_session.query(Device).filter(Device.ip == "10.0.7.5").one()
+    server = db_session.query(Device).filter(Device.ip == "10.0.7.50").one()
+    assert client.vlan == 42
+    assert server.vlan is None
+
+
+def test_vlan_last_seen_wins_but_untagged_frame_never_clears_it(db_session, org_id):
+    """A device rarely changes VLAN, but when it does the newest tagged
+    observation should win. An untagged frame from the same sender
+    afterwards must never clear a VLAN already recorded -- "no tag on this
+    frame" isn't proof the device has no VLAN (native/untagged VLANs
+    exist)."""
+    tagged_10 = Ether() / Dot1Q(vlan=10) / IP(src="10.0.7.6", dst="10.0.7.51", ttl=64) / TCP(
+        sport=51001, dport=502, flags="S", window=1024
+    )
+    ingest_packet_record(db_session, process_packet(Ether(bytes(tagged_10))), org_id)
+    db_session.commit()
+    assert db_session.query(Device).filter(Device.ip == "10.0.7.6").one().vlan == 10
+
+    tagged_20 = Ether() / Dot1Q(vlan=20) / IP(src="10.0.7.6", dst="10.0.7.51", ttl=64) / TCP(
+        sport=51001, dport=502, flags="A", window=1024
+    )
+    ingest_packet_record(db_session, process_packet(Ether(bytes(tagged_20))), org_id)
+    db_session.commit()
+    assert db_session.query(Device).filter(Device.ip == "10.0.7.6").one().vlan == 20
+
+    untagged = Ether() / IP(src="10.0.7.6", dst="10.0.7.51", ttl=64) / TCP(
+        sport=51001, dport=502, flags="A", window=1024
+    )
+    ingest_packet_record(db_session, process_packet(untagged), org_id)
+    db_session.commit()
+    assert db_session.query(Device).filter(Device.ip == "10.0.7.6").one().vlan == 20
+
+
+def test_ttl_is_persisted_as_last_ttl_and_last_seen_wins(db_session, org_id):
+    first = Ether() / IP(src="10.0.7.7", dst="10.0.7.52", ttl=64) / TCP(
+        sport=51002, dport=502, flags="S", window=1024
+    )
+    ingest_packet_record(db_session, process_packet(first), org_id)
+    db_session.commit()
+    device = db_session.query(Device).filter(Device.ip == "10.0.7.7").one()
+    assert device.last_ttl == 64
+
+    second = Ether() / IP(src="10.0.7.7", dst="10.0.7.52", ttl=48) / TCP(
+        sport=51002, dport=502, flags="A", window=1024
+    )
+    ingest_packet_record(db_session, process_packet(second), org_id)
+    db_session.commit()
+    device = db_session.query(Device).filter(Device.ip == "10.0.7.7").one()
+    assert device.last_ttl == 48
+
+
+def test_arp_ingest_records_a_live_arp_observation(db_session, org_id):
+    pkt = Ether() / ARP(psrc="10.0.7.10", pdst="10.0.7.1", hwsrc="aa:bb:cc:dd:ee:10")
+    ingest_packet_record(db_session, process_packet(pkt), org_id)
+    db_session.commit()
+
+    obs = db_session.query(ArpObservation).filter(ArpObservation.ip == "10.0.7.10").one()
+    assert obs.mac == "aa:bb:cc:dd:ee:10"
+    assert obs.organization_id == org_id
+
+
+def test_arp_observation_upserts_by_ip_not_appended(db_session, org_id):
+    """A live ARP table is a current snapshot, not a log -- a second binding
+    for the same IP (e.g. after a NIC swap or DHCP lease turnover) should
+    replace the row, not add a second one."""
+    first = Ether() / ARP(psrc="10.0.7.11", pdst="10.0.7.1", hwsrc="aa:bb:cc:dd:ee:11")
+    ingest_packet_record(db_session, process_packet(first), org_id)
+    db_session.commit()
+
+    second = Ether() / ARP(psrc="10.0.7.11", pdst="10.0.7.1", hwsrc="aa:bb:cc:dd:ee:99")
+    ingest_packet_record(db_session, process_packet(second), org_id)
+    db_session.commit()
+
+    rows = db_session.query(ArpObservation).filter(ArpObservation.ip == "10.0.7.11").all()
+    assert len(rows) == 1
+    assert rows[0].mac == "aa:bb:cc:dd:ee:99"
+
+
+def test_broadcast_arp_never_creates_an_arp_observation(db_session, org_id):
+    pkt = Ether(src="ff:ff:ff:ff:ff:ff") / ARP(op=1, hwsrc="ff:ff:ff:ff:ff:ff", psrc="0.0.0.0", pdst="10.0.7.1")
+    ingest_packet_record(db_session, process_packet(pkt), org_id)
+    db_session.commit()
+
+    assert db_session.query(ArpObservation).filter(ArpObservation.ip == "0.0.0.0").one_or_none() is None

@@ -14,8 +14,9 @@ from scapy.contrib.pnio_dcp import (
     DCPNameOfStationBlock,
     ProfinetDCP,
 )
+from scapy.layers.dhcp import BOOTP, DHCP
 from scapy.layers.inet import IP, TCP, UDP
-from scapy.layers.l2 import ARP, LLC, SNAP, Ether
+from scapy.layers.l2 import ARP, LLC, SNAP, Dot1Q, Ether
 from scapy.packet import Raw
 
 from app.capture.packet_processor import process_packet
@@ -50,6 +51,52 @@ def test_process_arp():
     assert record.transport == "arp"
     assert record.src_ip == "10.0.0.5"
     assert record.dst_ip == "10.0.0.1"
+
+
+def test_process_tagged_frame_extracts_vlan():
+    pkt = Ether(src="aa:bb:cc:dd:ee:01", dst="aa:bb:cc:dd:ee:02") / Dot1Q(vlan=42) / IP(
+        src="10.0.0.5", dst="10.0.0.10", ttl=64
+    ) / TCP(sport=51000, dport=502, flags="S")
+    record = process_packet(Ether(bytes(pkt)))
+    assert record.vlan == 42
+    assert record.transport == "tcp"
+
+
+def test_process_untagged_frame_has_no_vlan():
+    pkt = Ether() / IP(src="10.0.0.5", dst="10.0.0.10", ttl=64) / TCP(sport=51000, dport=502, flags="S")
+    record = process_packet(pkt)
+    assert record.vlan is None
+
+
+def test_process_tagged_arp_extracts_vlan_too():
+    """VLAN tagging happens at the outer Ethernet framing level, independent
+    of whether the frame carries an ARP, TCP, UDP, or ICMP payload above
+    it."""
+    pkt = Ether(src="aa:bb:cc:dd:ee:05", dst="ff:ff:ff:ff:ff:ff") / Dot1Q(vlan=7) / ARP(
+        psrc="10.0.0.5", pdst="10.0.0.1", hwsrc="aa:bb:cc:dd:ee:05"
+    )
+    record = process_packet(Ether(bytes(pkt)))
+    assert record.transport == "arp"
+    assert record.vlan == 7
+
+
+def test_process_dhcp_discover_extracts_param_request_list():
+    pkt = (
+        Ether(src="aa:bb:cc:dd:ee:03", dst="ff:ff:ff:ff:ff:ff")
+        / IP(src="0.0.0.0", dst="255.255.255.255")
+        / UDP(sport=68, dport=67)
+        / BOOTP(chaddr=b"\xaa\xbb\xcc\xdd\xee\x03")
+        / DHCP(options=[("message-type", "discover"), ("param_req_list", [1, 3, 6, 15]), "end"])
+    )
+    record = process_packet(Ether(bytes(pkt)))
+    assert record.transport == "udp"
+    assert record.dhcp_param_request_list == [1, 3, 6, 15]
+
+
+def test_process_udp_without_dhcp_has_no_param_request_list():
+    pkt = Ether() / IP(src="10.0.0.5", dst="10.0.0.20") / UDP(sport=123, dport=161) / Raw(load=b"snmp-ish-payload")
+    record = process_packet(pkt)
+    assert record.dhcp_param_request_list is None
 
 
 def test_process_udp_with_payload():

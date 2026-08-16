@@ -492,6 +492,38 @@ de una sola Zona no tiene nada que agrupar y se ve exactamente igual que antes.
 curl "http://localhost:8000/api/topology?site_id=3" -H "Authorization: Bearer $TOKEN"
 ```
 
+#### Cimientos de datos para una topología más real (VLAN, TTL, ARP en vivo, DHCP)
+
+Un `Flow` (quién habló con quién) nunca es prueba de un cable directo: siempre puede haber un switch
+L2 de por medio entre los dos extremos. Antes de intentar sugerir *ningún* enlace a partir de tráfico
+observado, hace falta capturar más señales que hoy se descartaban -- esta primera etapa solo agrega
+esas señales al inventario, sin dibujar todavía ningún `NetworkLink` a partir de ellas:
+
+- **VLAN (802.1Q)**: si el sensor ve la trama etiquetada, `Device.vlan` guarda el último VLAN ID visto
+  (gana el más reciente; una trama sin etiqueta nunca borra un VLAN ya conocido, porque "sin etiqueta
+  en esta trama" no prueba que el equipo no tenga VLAN -- existen VLANs nativas/no etiquetadas).
+- **TTL**: `Device.last_ttl` guarda el TTL IP del paquete más reciente enviado por ese equipo --
+  insumo para estimar distancia en saltos, separado de `os_confidence` porque el TTL solo es una señal
+  débil por sí sola.
+- **Tabla ARP en vivo** (`arp_observations`): a diferencia de `SwitchArpEntry` (una foto pegada/
+  caminada de la tabla ARP *del switch*), esta es la tabla ARP que el propio sensor arma en vivo
+  capturando ARP pasivamente, upsertada por (organización, IP) -- gana el binding más reciente, no es
+  un log que crece sin límite. El ARP nunca cruza un gateway, así que dos equipos con entradas mutuas
+  acá son prueba de que comparten el mismo dominio de broadcast L2.
+- **Huella DHCP (opción 55)**: además de la huella TCP/IP existente (estilo p0f, `os_fingerprint.py`),
+  `dhcp_fingerprint.py` identifica familia de SO a partir de la Parameter Request List que pide el
+  cliente DHCP -- una señal independiente que llega aunque el equipo nunca mande un SYN que el sensor
+  vea. Ambas huellas alimentan el mismo `Device.os_guess` sin pisarse: gana la de mayor confianza, no
+  la que llegó primero.
+- Tanto la tabla de huellas TCP/IP como la de DHCP son **conjuntos semilla hechos a mano** (igual que
+  los parsers de Cisco/Scalance): no son una base de datos completa tipo p0f/Fingerbank, están
+  pensadas para corregirse y ampliarse con tráfico real capturado en este mismo despliegue.
+
+Ninguno de estos datos dibuja todavía un enlace nuevo en Topología por sí solo -- son la base para una
+etapa posterior que primero clasifique "mismo segmento / enrutado / internet" y recién después
+sugiera una posible adyacencia, siempre exigiendo corroboración (CDP/LLDP, tabla MAC) o confirmación
+humana antes de convertirla en un `NetworkLink` real.
+
 ### Ejecutar el escaneo de vulnerabilidades
 
 ```bash
@@ -626,10 +658,11 @@ un doble (mock) del cliente HTTP para no depender de la disponibilidad de intern
 
 ## Limitaciones conocidas
 
-- El fingerprint pasivo de SO es una heurística ligera (TTL/ventana/opciones de un único paquete
-  SYN), no tiene la profundidad de una base de firmas completa tipo p0f ni de un escaneo activo
-  (`nmap -O`): identifica **familia** de sistema operativo con un nivel de confianza, no la versión
-  exacta.
+- El fingerprint pasivo de SO combina dos heurísticas ligeras -- TTL/ventana/opciones de un único
+  paquete SYN, y la Parameter Request List (opción 55) de un paquete DHCP -- ninguna con la
+  profundidad de una base de firmas completa tipo p0f/Fingerbank ni de un escaneo activo (`nmap -O`):
+  identifican **familia** de sistema operativo con un nivel de confianza, no la versión exacta, y sus
+  tablas de firmas son conjuntos semilla hechos a mano, pensados para corregirse contra tráfico real.
 - La identidad de un dispositivo se basa principalmente en su IP; la MAC capturada solo es fiable
   para hosts en el mismo segmento L2 que el punto de captura (para tráfico enrutado, la MAC
   observada corresponde al último salto/router, no al host origen). Si esa IP termina repetida en

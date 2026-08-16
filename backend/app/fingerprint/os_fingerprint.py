@@ -63,6 +63,24 @@ _SIGNATURES = [
         "has_timestamp": True,
     },
     {
+        "name": "linux_embedded",
+        "os_family": "Linux",
+        "label": "Linux (embedded/constrained kernel, no timestamps)",
+        # A real, well-documented p0f-era category: kernels built without
+        # CONFIG_TCP_TIMESTAMPS (common on older or memory-constrained
+        # embedded Linux -- SOHO routers, IP cameras, many "smart" OT
+        # peripherals) still negotiate SACK but never send a timestamp or
+        # window scale option, and default to a much smaller window than a
+        # full desktop/server kernel. Distinct from embedded_ot below,
+        # which assumes no TCP options survive at all.
+        "ttl": 64,
+        "window_min": 4096,
+        "window_max": 16384,
+        "has_wscale": False,
+        "has_sack": True,
+        "has_timestamp": False,
+    },
+    {
         "name": "bsd_macos",
         "os_family": "macOS/BSD",
         "label": "macOS / BSD family",
@@ -89,6 +107,23 @@ _SIGNATURES = [
         "os_family": "Embedded/OT",
         "label": "Embedded stack / RTOS (possible OT-ICS device)",
         "ttl": 64,
+        "window_min": 0,
+        "window_max": 4096,
+        "has_wscale": False,
+        "has_sack": False,
+        "has_timestamp": False,
+    },
+    {
+        "name": "embedded_windows_like",
+        "os_family": "Embedded/OT",
+        "label": "Embedded stack / RTOS (Windows-like TTL, possible legacy OT/HMI device)",
+        # Some older/legacy industrial HMIs and thin clients (Windows
+        # CE/embedded-derived stacks, some ICS vendor RTOS builds) default
+        # to a TTL of 128 the same as desktop Windows, but negotiate no TCP
+        # options at all and use a tiny window -- without this entry, the
+        # scorer's biggest single signal (TTL) alone was enough to
+        # misclassify one of these as plain "Windows".
+        "ttl": 128,
         "window_min": 0,
         "window_max": 4096,
         "has_wscale": False,

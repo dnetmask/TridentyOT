@@ -69,6 +69,8 @@ class DeviceOut(BaseModel):
     display_device_type_secondary: str | None
     is_ot_suspected: bool
     is_external: bool
+    vlan: int | None
+    last_ttl: int | None
     protocol_count: int
     protocol_names: list[str] = []
     first_seen: datetime.datetime

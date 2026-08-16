@@ -5,8 +5,9 @@ sniff() callback or from iterating over a loaded .pcap file.
 
 from dataclasses import dataclass, field
 
+from scapy.layers.dhcp import DHCP
 from scapy.layers.inet import ICMP, IP, TCP, UDP
-from scapy.layers.l2 import ARP, Ether
+from scapy.layers.l2 import ARP, Dot1Q, Ether
 from scapy.packet import Packet
 
 from app.fingerprint.hostname_detect import extract_hostname_hints
@@ -97,6 +98,11 @@ class PacketRecord:
     src_port: int | None = None
     dst_port: int | None = None
     ttl: int | None = None
+    # 802.1Q VLAN ID this frame was tagged with, or None if untagged --
+    # tagging happens at the outer Ethernet framing level, so this is
+    # populated once in process_packet() regardless of which branch
+    # (ARP/CDP/LLDP/PROFINET/IP) the frame dispatches to below.
+    vlan: int | None = None
     tcp_flags: str | None = None
     window: int | None = None
     tcp_options: list = field(default_factory=list)
@@ -123,6 +129,26 @@ class PacketRecord:
     # Protocol-level device identity (EtherNet/IP CIP, Modbus device ID,
     # ...) self-reported by this packet's sender -- see identity_detect.py.
     identity_hints: list = field(default_factory=list)
+    # DHCP option 55 (Parameter Request List), in the order the client sent
+    # it -- a client-implementation fingerprint (see fingerprint/
+    # dhcp_fingerprint.py), only ever set on a DHCP client packet's sender.
+    dhcp_param_request_list: list[int] | None = None
+
+
+def _dhcp_param_request_list(pkt: Packet) -> list[int] | None:
+    """The client's option 55 (Parameter Request List) from a DHCP packet,
+    in wire order. Only ever meaningful on a client message (DISCOVER/
+    REQUEST/INFORM); a server's OFFER/ACK never carries this option, so
+    this naturally returns None for those without needing to check the
+    DHCP message type separately."""
+    if not pkt.haslayer(DHCP):
+        return None
+    for opt in pkt[DHCP].options:
+        if isinstance(opt, tuple) and opt[0] == "param_req_list":
+            value = opt[1]
+            if isinstance(value, (list, tuple)) and value:
+                return [int(v) for v in value]
+    return None
 
 
 def _mac(pkt: Packet, field_name: str) -> str | None:
@@ -174,6 +200,11 @@ def process_packet(pkt: Packet) -> PacketRecord | None:
         src_mac=_mac(pkt, "src"),
         dst_mac=_mac(pkt, "dst"),
     )
+    # 802.1Q tagging happens at the outer Ethernet framing level, independent
+    # of whatever the frame carries above it -- checked once here rather
+    # than in each branch below.
+    if pkt.haslayer(Dot1Q):
+        record.vlan = int(pkt[Dot1Q].vlan)
 
     # CDP/LLDP are pure L2 discovery frames (no IP layer) that switches and
     # routers send about themselves -- the only passive way to identify
@@ -254,6 +285,7 @@ def process_packet(pkt: Packet) -> PacketRecord | None:
             record.src_port = int(udp.sport)
             record.dst_port = int(udp.dport)
             record.payload = bytes(udp.payload)[:MAX_PAYLOAD_BYTES]
+            record.dhcp_param_request_list = _dhcp_param_request_list(pkt)
         elif pkt.haslayer(ICMP):
             record.transport = "icmp"
         else:
