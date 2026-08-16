@@ -528,6 +528,36 @@ etapa posterior que primero clasifique "mismo segmento / enrutado / internet" y 
 sugiera una posible adyacencia, siempre exigiendo corroboración (CDP/LLDP, tabla MAC) o confirmación
 humana antes de convertirla en un `NetworkLink` real.
 
+#### Clasificación mismo segmento / enrutado / internet
+
+Usando los cimientos de arriba, cada `Device` con IP se clasifica en `Device.segment_relation`
+(recalculado en cada pase completo tras ingestar un lote/archivo, igual que `apply_gateway_detection`):
+
+- **`internet`**: IP pública (`is_lan_ip` la descarta) -- nunca un activo local, por definición nunca
+  puede tener un cable directo con nada de este despliegue.
+- **`same_segment`**: IP privada con una `ArpObservation` viva para ese mismo (Sensor, IP) -- el ARP
+  nunca cruza un router, así que esto es prueba de que comparte el dominio de broadcast L2 de ese
+  Sensor. Es el **único** estado que una etapa posterior debería considerar candidato a enlace
+  directo, y solo con corroboración adicional (CDP/LLDP, tabla MAC) o confirmación humana -- nunca
+  solo por esto.
+- **`routed_local`**: IP privada sin esa `ArpObservation` -- llegó a través de un router (otra Zona/
+  Sensor, otra VLAN, otro Sitio), sigue siendo un activo interno legítimo, pero nunca candidato a
+  enlace directo con algo visto solo en este segmento.
+
+Un equipo sin IP (identificado solo por MAC, ej. un switch visto por CDP/LLDP) queda sin clasificar:
+la pregunta no aplica. No es un campo con "nunca degradar" como `os_guess` -- es una foto del estado
+actual (¿existe ahora una `ArpObservation` que coincida?), recalculada de cero en cada pase.
+
+**Detección de gateway consciente de HSRP/VRRP**: `apply_gateway_detection` (el mecanismo que ya
+detectaba un gateway por una MAC compartida en 2+ IPs públicas) ahora además reconoce al instante,
+desde una sola fila, una MAC virtual de First-Hop Redundancy Protocol (HSRP `00:00:0c:07:ac:xx` o
+VRRP `00:00:5e:00:0{1,2}:xx`) -- por construcción nunca es la MAC real de un host. Si la IP de esa
+fila es pública, se asigna `network_device`/`router_nat` con confianza 1.0 de inmediato, sin esperar
+a que se acumulen varias IPs. Si es privada, aplica la misma ambigüedad de enrutamiento inter-VLAN ya
+documentada arriba (podría ser la IP propia del gateway, o un host real distinto en otra subred cuyo
+tráfico de vuelta este mismo par de routers reenvió) -- ahí solo se rellena `device_type_evidence`
+(y solo si nada más ya clasificó ese equipo), nunca se fuerza el tipo.
+
 ### Ejecutar el escaneo de vulnerabilidades
 
 ```bash

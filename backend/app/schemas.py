@@ -71,6 +71,7 @@ class DeviceOut(BaseModel):
     is_external: bool
     vlan: int | None
     last_ttl: int | None
+    segment_relation: str | None
     protocol_count: int
     protocol_names: list[str] = []
     first_seen: datetime.datetime

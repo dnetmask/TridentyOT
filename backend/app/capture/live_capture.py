@@ -33,7 +33,12 @@ from scapy.sendrecv import AsyncSniffer
 from app.capture.packet_processor import PacketRecord, process_packet
 from app.db import session_scope
 from app.i18n import bilingual, encode_i18n
-from app.inventory.inventory_service import IngestCache, apply_gateway_detection, ingest_packet_record
+from app.inventory.inventory_service import (
+    IngestCache,
+    apply_gateway_detection,
+    apply_segment_classification,
+    ingest_packet_record,
+)
 from app.models import CaptureSession
 
 logger = logging.getLogger(__name__)
@@ -181,6 +186,7 @@ class _CaptureWorker:
             # once enough distinct public IPs have accumulated, which no
             # single packet's ingest can tell on its own.
             apply_gateway_detection(db, capture_session.organization_id)
+            apply_segment_classification(db, capture_session.organization_id)
             capture_session.packet_count += len(batch)
             capture_session.dropped_count += dropped
 

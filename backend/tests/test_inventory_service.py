@@ -743,6 +743,244 @@ def test_gateway_detection_ignores_a_single_shared_public_ip(db_session, org_id)
     assert pub_device.display_device_type != "network_device"
 
 
+def test_hsrp_mac_flags_public_ip_gateway_from_a_single_observation(db_session, org_id):
+    """Unlike the multi-public-IP pattern above, a First-Hop Redundancy
+    Protocol virtual MAC (HSRP here) is recognized as a router identity
+    from just one row -- it's never a real host's own NIC address."""
+    from app.inventory.inventory_service import apply_gateway_detection
+
+    HSRP_MAC = "00:00:0c:07:ac:0a"
+    reply = Ether(src=HSRP_MAC) / IP(src="8.8.8.8", dst="10.0.6.8", ttl=64) / TCP(
+        sport=443, dport=51000, flags="SA", window=8192
+    )
+    ingest_packet_record(db_session, process_packet(reply), org_id)
+    db_session.commit()
+
+    apply_gateway_detection(db_session, org_id)
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "8.8.8.8").one()
+    assert device.display_device_type == "network_device"
+    assert device.display_device_type_secondary == "router_nat"
+    assert device.device_type_confidence == 1.0
+    assert "HSRP" in device.device_type_evidence
+
+
+def test_vrrp_mac_flags_public_ip_gateway_from_a_single_observation(db_session, org_id):
+    from app.inventory.inventory_service import apply_gateway_detection
+
+    VRRP_MAC = "00:00:5e:00:01:05"
+    reply = Ether(src=VRRP_MAC) / IP(src="9.9.9.9", dst="10.0.6.9", ttl=64) / TCP(
+        sport=443, dport=51000, flags="SA", window=8192
+    )
+    ingest_packet_record(db_session, process_packet(reply), org_id)
+    db_session.commit()
+
+    apply_gateway_detection(db_session, org_id)
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "9.9.9.9").one()
+    assert device.display_device_type == "network_device"
+    assert device.display_device_type_secondary == "router_nat"
+    assert "VRRP" in device.device_type_evidence
+
+
+def test_fhrp_mac_on_a_private_ip_only_fills_evidence_never_overrides_device_type(db_session, org_id):
+    """Same inter-VLAN-routing ambiguity as the multi-public-IP pattern: a
+    private-IP row carrying a FHRP virtual MAC could genuinely be that
+    gateway's own address, or a distinct real host on another subnet whose
+    return traffic this same redundancy pair happened to forward -- so only
+    evidence fills in here, never a hard device_type override. Built as a
+    bare Device row directly (not through ingest_packet_record) so this
+    isolates apply_gateway_detection's own behavior from the unrelated
+    generic classifier, which would otherwise also vote network_device on
+    its own for this same MAC's Cisco OUI."""
+    from app.inventory.inventory_service import apply_gateway_detection
+
+    HSRP_MAC = "00:00:0c:07:ac:0b"
+    device = Device(organization_id=org_id, ip="10.0.6.10", mac=HSRP_MAC)
+    db_session.add(device)
+    db_session.commit()
+
+    apply_gateway_detection(db_session, org_id)
+    db_session.commit()
+
+    db_session.refresh(device)
+    assert device.device_type != "network_device"
+    assert device.device_type_secondary is None
+    assert "HSRP" in device.device_type_evidence
+
+
+def test_fhrp_mac_private_ip_evidence_never_overwrites_existing_evidence(db_session, org_id):
+    """The FHRP evidence-only branch must never clobber evidence a stronger
+    signal already established -- same "fills in only when blank" rule as
+    apply_identity_hints' BACnet handling."""
+    from app.inventory.inventory_service import apply_gateway_detection
+
+    HSRP_MAC = "00:00:0c:07:ac:0c"
+    device = Device(
+        organization_id=org_id,
+        ip="10.0.6.12",
+        mac=HSRP_MAC,
+        device_type_evidence="ya clasificado por otra señal",
+    )
+    db_session.add(device)
+    db_session.commit()
+
+    apply_gateway_detection(db_session, org_id)
+    db_session.commit()
+
+    db_session.refresh(device)
+    assert device.device_type_evidence == "ya clasificado por otra señal"
+
+
+def _make_capture_session(db_session, org_id, sensor_id):
+    from app.models import CaptureSession
+
+    cs = CaptureSession(organization_id=org_id, sensor_id=sensor_id, source_type="pcap", source="test.pcap")
+    db_session.add(cs)
+    db_session.commit()
+    return cs
+
+
+def test_segment_classification_public_ip_is_internet(db_session, org_id):
+    from app.inventory.inventory_service import SEGMENT_INTERNET, apply_segment_classification
+
+    pkt = Ether() / IP(src="8.8.4.4", dst="10.0.8.5", ttl=64) / TCP(sport=443, dport=51000, flags="SA", window=8192)
+    ingest_packet_record(db_session, process_packet(pkt), org_id)
+    db_session.commit()
+
+    apply_segment_classification(db_session, org_id)
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "8.8.4.4").one()
+    assert device.segment_relation == SEGMENT_INTERNET
+
+
+def test_segment_classification_lan_ip_with_arp_is_same_segment(db_session, org_id):
+    """An ArpObservation for this device's own ip, on this device's own
+    sensor, is proof of sharing an L2 broadcast domain -- ARP never crosses
+    a router."""
+    from app.inventory.inventory_service import SEGMENT_SAME, apply_segment_classification
+
+    sensor = _make_sensor(db_session, org_id, "Planta 5", "Linea 1", "Sensor E")
+    cs = _make_capture_session(db_session, org_id, sensor.id)
+
+    tcp_pkt = Ether() / IP(src="10.0.8.10", dst="10.0.8.50", ttl=64) / TCP(
+        sport=51000, dport=502, flags="S", window=1024
+    )
+    ingest_packet_record(db_session, process_packet(tcp_pkt), org_id, capture_session_id=cs.id, sensor_id=sensor.id)
+    arp_pkt = Ether() / ARP(psrc="10.0.8.10", pdst="10.0.8.1", hwsrc="aa:bb:cc:00:05:01")
+    ingest_packet_record(db_session, process_packet(arp_pkt), org_id, sensor_id=sensor.id)
+    db_session.commit()
+
+    apply_segment_classification(db_session, org_id)
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "10.0.8.10").one()
+    assert device.segment_relation == SEGMENT_SAME
+
+
+def test_segment_classification_lan_ip_without_arp_is_routed_local(db_session, org_id):
+    from app.inventory.inventory_service import SEGMENT_ROUTED_LOCAL, apply_segment_classification
+
+    sensor = _make_sensor(db_session, org_id, "Planta 6", "Linea 1", "Sensor F")
+    cs = _make_capture_session(db_session, org_id, sensor.id)
+
+    tcp_pkt = Ether() / IP(src="10.0.8.20", dst="10.0.8.50", ttl=63) / TCP(
+        sport=51001, dport=502, flags="S", window=1024
+    )
+    ingest_packet_record(db_session, process_packet(tcp_pkt), org_id, capture_session_id=cs.id, sensor_id=sensor.id)
+    db_session.commit()
+
+    apply_segment_classification(db_session, org_id)
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "10.0.8.20").one()
+    assert device.segment_relation == SEGMENT_ROUTED_LOCAL
+
+
+def test_segment_classification_only_matches_the_devices_own_sensor(db_session, org_id):
+    """An ArpObservation for the same IP on a DIFFERENT sensor (e.g. a
+    different site/line reusing the same private range) must never make
+    this device look same-segment -- see ArpObservation's own sensor
+    scoping."""
+    from app.inventory.inventory_service import SEGMENT_ROUTED_LOCAL, apply_segment_classification
+
+    sensor_a = _make_sensor(db_session, org_id, "Planta 7", "Linea 1", "Sensor G")
+    sensor_b = _make_sensor(db_session, org_id, "Planta 8", "Linea 1", "Sensor H")
+    cs_b = _make_capture_session(db_session, org_id, sensor_b.id)
+
+    # Sensor A sees the ARP binding for 192.168.9.5 on its own segment...
+    arp_pkt = Ether() / ARP(psrc="192.168.9.5", pdst="192.168.9.1", hwsrc="aa:bb:cc:00:06:01")
+    ingest_packet_record(db_session, process_packet(arp_pkt), org_id, sensor_id=sensor_a.id)
+    # ...but the Device row under test is actually attributed to Sensor B.
+    tcp_pkt = Ether() / IP(src="192.168.9.5", dst="10.0.8.60", ttl=63) / TCP(
+        sport=51002, dport=502, flags="S", window=1024
+    )
+    ingest_packet_record(
+        db_session, process_packet(tcp_pkt), org_id, capture_session_id=cs_b.id, sensor_id=sensor_b.id
+    )
+    db_session.commit()
+
+    apply_segment_classification(db_session, org_id)
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "192.168.9.5").one()
+    assert device.segment_relation == SEGMENT_ROUTED_LOCAL
+
+
+def test_segment_classification_leaves_mac_only_devices_unset(db_session, org_id):
+    from app.inventory.inventory_service import apply_segment_classification
+
+    pkt = (
+        Ether(src="aa:bb:cc:dd:ee:ff", dst="01:00:0c:cc:cc:cc")
+        / LLC()
+        / SNAP(OUI=0xC, code=0x2000)
+        / CDPv2_HDR(msg=[CDPMsgDeviceID(val=b"switch1.corp.local")])
+    )
+    ingest_packet_record(db_session, process_packet(Ether(bytes(pkt))), org_id)
+    db_session.commit()
+
+    apply_segment_classification(db_session, org_id)
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.mac == "aa:bb:cc:dd:ee:ff").one()
+    assert device.ip is None
+    assert device.segment_relation is None
+
+
+def test_segment_classification_upgrades_to_same_segment_once_arp_evidence_arrives(db_session, org_id):
+    """Not confidence-gated like os_guess -- a fresh pass simply reflects
+    whatever ArpObservation data exists right now, so a device classified
+    routed_local before its ARP entry ever arrived correctly upgrades once
+    that entry shows up, without needing any special-casing."""
+    from app.inventory.inventory_service import SEGMENT_ROUTED_LOCAL, SEGMENT_SAME, apply_segment_classification
+
+    sensor = _make_sensor(db_session, org_id, "Planta 9", "Linea 1", "Sensor I")
+    cs = _make_capture_session(db_session, org_id, sensor.id)
+
+    tcp_pkt = Ether() / IP(src="10.0.8.30", dst="10.0.8.50", ttl=63) / TCP(
+        sport=51003, dport=502, flags="S", window=1024
+    )
+    ingest_packet_record(db_session, process_packet(tcp_pkt), org_id, capture_session_id=cs.id, sensor_id=sensor.id)
+    db_session.commit()
+    apply_segment_classification(db_session, org_id)
+    db_session.commit()
+
+    device = db_session.query(Device).filter(Device.ip == "10.0.8.30").one()
+    assert device.segment_relation == SEGMENT_ROUTED_LOCAL
+
+    arp_pkt = Ether() / ARP(psrc="10.0.8.30", pdst="10.0.8.1", hwsrc="aa:bb:cc:00:07:01")
+    ingest_packet_record(db_session, process_packet(arp_pkt), org_id, sensor_id=sensor.id)
+    db_session.commit()
+    apply_segment_classification(db_session, org_id)
+    db_session.commit()
+
+    db_session.refresh(device)
+    assert device.segment_relation == SEGMENT_SAME
+
+
 def _modbus_object(object_id: int, value: str) -> bytes:
     return bytes([object_id, len(value)]) + value.encode()
 

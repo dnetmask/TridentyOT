@@ -73,6 +73,7 @@ from app.inventory.inventory_service import (
     apply_hostname_hints,
     apply_identity_hints,
     apply_os_guess,
+    apply_segment_classification,
     get_or_create_device,
     upsert_protocol,
 )
@@ -308,6 +309,7 @@ class _SnmpScanWorker:
                 for host in hosts_found.values():
                     _ingest_snmp_host(db, host, capture_session.organization_id, capture_session.id, cache)
                 apply_gateway_detection(db, capture_session.organization_id)
+                apply_segment_classification(db, capture_session.organization_id)
                 capture_session.packet_count = len(hosts_found)
             db.commit()
 
@@ -322,6 +324,7 @@ class _SnmpScanWorker:
                     for host in hosts_found.values():
                         _ingest_snmp_host(db, host, capture_session.organization_id, capture_session.id, cache)
                     apply_gateway_detection(db, capture_session.organization_id)
+                    apply_segment_classification(db, capture_session.organization_id)
                     capture_session.packet_count = len(hosts_found)
                 if status == "completed":
                     capture_session.bytes_processed = capture_session.total_bytes

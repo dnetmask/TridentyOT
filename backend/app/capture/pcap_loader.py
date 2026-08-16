@@ -12,7 +12,12 @@ from scapy.utils import PcapReader
 from sqlalchemy.orm import Session
 
 from app.capture.packet_processor import process_packet
-from app.inventory.inventory_service import IngestCache, apply_gateway_detection, ingest_packet_record
+from app.inventory.inventory_service import (
+    IngestCache,
+    apply_gateway_detection,
+    apply_segment_classification,
+    ingest_packet_record,
+)
 from app.models import CaptureSession
 
 # Minimum wall-clock time between progress commits. This is a *time* bound,
@@ -83,6 +88,7 @@ def process_pcap_file(db_session: Session, filepath: str, capture_session: Captu
         # by several public IPs) only shows up once the file has been read
         # in full, not from any single packet.
         apply_gateway_detection(db_session, capture_session.organization_id)
+        apply_segment_classification(db_session, capture_session.organization_id)
         capture_session.packet_count = count
         capture_session.bytes_processed = capture_session.total_bytes
         capture_session.status = "completed"

@@ -396,6 +396,27 @@ def apply_hostname_hints(session: Session, hints: list[tuple[str, str]], organiz
 # public IP alone doesn't prove a pattern.
 _GATEWAY_MIN_PUBLIC_IPS = 2
 
+# First-Hop Redundancy Protocol virtual MAC prefixes: a group of routers
+# sharing one gateway identity announces itself with a MAC out of one of
+# these reserved ranges, never a real host's own burned-in address --
+# recognizing one needs no accumulated evidence at all, unlike the
+# multi-public-IP pattern below. HSRPv2 uses a different virtual-MAC scheme
+# than HSRPv1's and isn't covered here (no verified real-world sample to
+# calibrate against yet -- same "seed now, extend later" convention as the
+# Cisco/Scalance switch-CLI parsers).
+_HSRP_V1_MAC_PREFIX = "00:00:0c:07:ac:"
+_VRRP_V4_MAC_PREFIX = "00:00:5e:00:01:"
+_VRRP_V6_MAC_PREFIX = "00:00:5e:00:02:"
+
+
+def _fhrp_protocol_label(mac: str) -> str | None:
+    lowered = mac.lower()
+    if lowered.startswith(_HSRP_V1_MAC_PREFIX):
+        return "HSRP"
+    if lowered.startswith(_VRRP_V4_MAC_PREFIX) or lowered.startswith(_VRRP_V6_MAC_PREFIX):
+        return "VRRP"
+    return None
+
 
 def apply_gateway_detection(session: Session, organization_id: int) -> None:
     """Detects a router/NAT gateway from a pattern purely-passive capture
@@ -431,6 +452,18 @@ def apply_gateway_detection(session: Session, organization_id: int) -> None:
     per-packet: the pattern is only visible once several distinct public
     IPs for the same MAC actually exist, which no single packet can tell
     on its own.
+
+    Separately, ANY device whose MAC falls in a known First-Hop Redundancy
+    Protocol (HSRP/VRRP) virtual range is recognized immediately, from a
+    single row -- no need to wait for several public IPs to accumulate,
+    since that MAC pattern is by construction never a real host's own NIC.
+    Only asserted as a hard device_type override when the row's own IP is
+    public; for a private IP the same inter-VLAN-routing ambiguity as
+    above applies (this row could genuinely be a different real host on
+    another subnet whose return traffic this same redundancy pair forwarded,
+    not the gateway's own address), so only device_type_evidence fills in
+    there -- and only if nothing else has spoken yet -- never a device_type
+    override, mirroring apply_identity_hints' BACnet handling.
     """
     devices = (
         session.query(Device)
@@ -442,6 +475,33 @@ def apply_gateway_detection(session: Session, organization_id: int) -> None:
         by_mac.setdefault(d.mac, []).append(d)
 
     for mac, group in by_mac.items():
+        fhrp_protocol = _fhrp_protocol_label(mac)
+        if fhrp_protocol is not None:
+            for member in group:
+                if not is_lan_ip(member.ip):
+                    if member.device_type != NETWORK_DEVICE or member.device_type_confidence < 1.0:
+                        member.device_type = NETWORK_DEVICE
+                        member.device_type_confidence = 1.0
+                        member.device_type_evidence = encode_i18n(
+                            bilingual(
+                                es=f"La MAC {mac} es una identidad virtual de {fhrp_protocol} compartida por "
+                                "un grupo de routers, nunca la de un host real",
+                                en=f"MAC {mac} is a {fhrp_protocol} virtual identity shared by a router "
+                                "redundancy group, never a real host's own NIC",
+                            )
+                        )
+                    if not member.device_type_secondary:
+                        member.device_type_secondary = ROUTER_NAT
+                elif not member.device_type_evidence:
+                    member.device_type_evidence = encode_i18n(
+                        bilingual(
+                            es=f"La MAC {mac} es una identidad virtual de {fhrp_protocol} -- podría ser la "
+                            "propia IP del gateway o un host en otra subred enrutado a través de él",
+                            en=f"MAC {mac} is a {fhrp_protocol} virtual identity -- could be the gateway's "
+                            "own IP, or a different host on another subnet routed through it",
+                        )
+                    )
+
         if len(group) < _GATEWAY_MIN_PUBLIC_IPS:
             continue
         public_members = [d for d in group if not is_lan_ip(d.ip)]
@@ -463,6 +523,85 @@ def apply_gateway_detection(session: Session, organization_id: int) -> None:
             )
         if not primary.device_type_secondary:
             primary.device_type_secondary = ROUTER_NAT
+
+
+# Device.segment_relation values -- see apply_segment_classification.
+SEGMENT_SAME = "same_segment"
+SEGMENT_ROUTED_LOCAL = "routed_local"
+SEGMENT_INTERNET = "internet"
+
+
+def apply_segment_classification(session: Session, organization_id: int) -> None:
+    """Fase 2 of the topology-accuracy roadmap: for every device with an IP,
+    classifies its relation to whichever sensor most recently confirmed it
+    (Device.capture_session_id -> CaptureSession.sensor_id, same
+    attribution already used for Zona/Sitio scoping elsewhere) into one of
+    three states:
+
+    - SEGMENT_INTERNET: a public IP (see is_lan_ip) -- never a local asset,
+      by definition never directly cabled to anything this deployment
+      monitors.
+    - SEGMENT_SAME: a private/LAN IP with a live ArpObservation for that
+      exact (sensor, ip) pair -- ARP never crosses a router, so this is
+      proof the device shares this sensor's own L2 broadcast domain. This
+      is the ONLY state a later phase should ever treat as "these two
+      devices might be a real cable apart" (still requiring further
+      corroboration -- CDP/LLDP, a MAC table -- before promoting anything
+      to an actual NetworkLink; see the module docstring's routed-traffic
+      caveat and the switch-topology docs).
+    - SEGMENT_ROUTED_LOCAL: a private/LAN IP with no such ArpObservation --
+      reached through a router (a different Zona/Sensor, another VLAN, a
+      different Sitio entirely), still a legitimate internal asset, just
+      never a candidate for a direct link with anything seen only on this
+      sensor's own segment.
+
+    A device with no IP at all (MAC-only, e.g. a CDP/LLDP-only switch) is
+    left with segment_relation unset -- the question doesn't apply to
+    something with no IP layer to reason about.
+
+    Deliberately NOT confidence-gated like os_guess/device_type: this is a
+    deterministic snapshot of currently-known data (does a matching
+    ArpObservation exist right now), recomputed fresh on every pass rather
+    than accumulated evidence that only ever strengthens. Runs as a
+    whole-table pass after ingesting a batch/file, same as
+    apply_gateway_detection and for the same reason: ArpObservation rows
+    accumulate independently of any one device's own packets, so a device
+    ingested early in a capture can only be reclassified once a later
+    packet (from a different flow entirely) adds the ARP evidence that
+    confirms it.
+    """
+    devices = (
+        session.query(Device)
+        .filter(Device.organization_id == organization_id, Device.ip.is_not(None))
+        .all()
+    )
+    if not devices:
+        return
+
+    capture_session_ids = {d.capture_session_id for d in devices if d.capture_session_id is not None}
+    sensor_by_capture_session: dict[int, int | None] = {}
+    if capture_session_ids:
+        sensor_by_capture_session = dict(
+            session.query(CaptureSession.id, CaptureSession.sensor_id)
+            .filter(CaptureSession.id.in_(capture_session_ids))
+            .all()
+        )
+
+    arp_keys = set(
+        session.query(ArpObservation.sensor_id, ArpObservation.ip)
+        .filter(ArpObservation.organization_id == organization_id)
+        .all()
+    )
+
+    for device in devices:
+        if not is_lan_ip(device.ip):
+            device.segment_relation = SEGMENT_INTERNET
+            continue
+        sensor_id = sensor_by_capture_session.get(device.capture_session_id)
+        if (sensor_id, device.ip) in arp_keys:
+            device.segment_relation = SEGMENT_SAME
+        else:
+            device.segment_relation = SEGMENT_ROUTED_LOCAL
 
 
 def upsert_protocol(

@@ -247,6 +247,17 @@ class Device(Base):
     # from 64) and is meant for hop-distance inference, not classification.
     last_ttl: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Fase 2 de la hoja de ruta de topología: "same_segment" | "routed_local"
+    # | "internet" -- see inventory_service.apply_segment_classification,
+    # which computes this as a whole-table pass, the same way
+    # apply_gateway_detection already does. None for a MAC-only device (no
+    # ip at all -- the question doesn't apply) or before the first pass has
+    # run. Deliberately NOT a confidence-gated/never-downgrade field like
+    # os_guess: it's a deterministic snapshot of "does an ArpObservation
+    # exist for this ip on this device's own sensor right now", recomputed
+    # fresh every pass rather than accumulated evidence.
+    segment_relation: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
     # The capture session that *most recently* confirmed this device (see
     # inventory_service.get_or_create_device) -- also used to remove it when
     # that session is deleted, provided no other session's protocols/flows
