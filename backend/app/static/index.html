@@ -365,12 +365,26 @@
   .topology-palette-item:active { cursor: grabbing; }
   .topology-palette-item img { width: 20px; height: 20px; flex-shrink: 0; }
   .topology-palette-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #topology-fullscreen-wrapper:fullscreen { background: var(--bg); padding: 14px; overflow: auto; }
-  #topology-fullscreen-wrapper:fullscreen #topology-cy { height: calc(100vh - 40px); }
-  #topology-fullscreen-wrapper:fullscreen .topology-palette { height: calc(100vh - 40px); }
-  #topology-fullscreen-wrapper:-webkit-full-screen { background: var(--bg); padding: 14px; overflow: auto; }
-  #topology-fullscreen-wrapper:-webkit-full-screen #topology-cy { height: calc(100vh - 40px); }
-  #topology-fullscreen-wrapper:-webkit-full-screen .topology-palette { height: calc(100vh - 40px); }
+  /* Fills the whole fullscreen viewport instead of guessing a fixed
+     px offset to subtract (which always left a gap at the bottom for
+     some browsers/window chrome combos): the wrapper becomes a 100vh
+     flex column, #topology-container takes all remaining height via
+     flex:1, and the canvas/palette then just stretch to 100% of that. */
+  #topology-fullscreen-wrapper:fullscreen,
+  #topology-fullscreen-wrapper:-webkit-full-screen {
+    display: flex; flex-direction: column; height: 100vh; width: 100vw;
+    background: var(--bg); padding: 14px; box-sizing: border-box;
+  }
+  #topology-fullscreen-wrapper:fullscreen #topology-container,
+  #topology-fullscreen-wrapper:-webkit-full-screen #topology-container {
+    flex: 1; min-height: 0;
+  }
+  #topology-fullscreen-wrapper:fullscreen #topology-cy,
+  #topology-fullscreen-wrapper:fullscreen .topology-palette,
+  #topology-fullscreen-wrapper:-webkit-full-screen #topology-cy,
+  #topology-fullscreen-wrapper:-webkit-full-screen .topology-palette {
+    height: 100%;
+  }
   .flex-between { display: flex; justify-content: space-between; align-items: center; }
   .status-running { color: var(--accent); }
   .status-completed, .status-stopped { color: var(--muted); }
@@ -3253,27 +3267,35 @@ function wireTopologyEvents() {
   cy.on('tap', 'node:childless', evt => {
     const node = evt.target;
     const id = node.data('id');
-    // Edit mode is only for the click-A-then-click-B link flow; outside
-    // it, a tap opens the read-only info+actions card instead (see
-    // openTopologyDeviceCard) -- the two never compete for the same tap.
+    // A pending source always wins the tap and completes (or cancels) the
+    // link flow, regardless of whether "Modo edición" itself is still
+    // checked -- that's what lets "Crear enlace" on a device's info card
+    // (startTopologyLinkFromCard) kick off the same flow as a one-off,
+    // without the checkbox ever having to be turned on.
+    if (topologyPendingSourceId != null) {
+      if (topologyPendingSourceId === id) {
+        node.removeClass('topology-pending');
+        topologyPendingSourceId = null;
+        updateTopologyEditHint();
+        return;
+      }
+      const sourceId = topologyPendingSourceId;
+      cy.getElementById(sourceId).removeClass('topology-pending');
+      topologyPendingSourceId = null;
+      updateTopologyEditHint();
+      openTopologyLinkForm(Number(sourceId), Number(id), null);
+      return;
+    }
+    // No pending source: outside edit mode, a plain tap opens the
+    // read-only info+actions card instead (see openTopologyDeviceCard) --
+    // the two never compete for the same tap.
     if (!isAdmin() || !$('#topology-edit-mode').checked) {
       openTopologyDeviceCard(Number(id), node.renderedPosition());
       return;
     }
-    if (topologyPendingSourceId === id) {
-      node.removeClass('topology-pending');
-      topologyPendingSourceId = null;
-      return;
-    }
-    if (topologyPendingSourceId == null) {
-      topologyPendingSourceId = id;
-      node.addClass('topology-pending');
-      return;
-    }
-    const sourceId = topologyPendingSourceId;
-    cy.getElementById(sourceId).removeClass('topology-pending');
-    topologyPendingSourceId = null;
-    openTopologyLinkForm(Number(sourceId), Number(id), null);
+    topologyPendingSourceId = id;
+    node.addClass('topology-pending');
+    updateTopologyEditHint();
   });
 
   cy.on('tap', 'edge', evt => {
@@ -3331,10 +3353,41 @@ function openTopologyDeviceCard(deviceId, renderedPos) {
     <div class="actions">
       <button onclick="jumpToDevice(${deviceId})">Ver en Inventario</button>
       ${admin ? `<button onclick="jumpToDeviceAndEditType(${deviceId})">Editar tipo</button>` : ''}
+      ${admin ? `<button onclick="startTopologyLinkFromCard(${deviceId})">Crear enlace</button>` : ''}
     </div>
   `;
   panel.classList.remove('hidden');
   topologyPositionPanel(panel, renderedPos);
+}
+
+// Third option on a device's info card: marks it as the pending source
+// for a new link and closes the card, exactly as if "Modo edición" were
+// on and this had been the first click -- the next tap on another device
+// (see wireTopologyEvents' tap handler, which checks topologyPendingSourceId
+// first regardless of the edit-mode checkbox) completes the link. Lets
+// link creation work as a one-off action without flipping that switch.
+function startTopologyLinkFromCard(deviceId) {
+  closeTopologyPanel();
+  const id = String(deviceId);
+  if (topologyPendingSourceId && topologyPendingSourceId !== id && topologyCy) {
+    topologyCy.getElementById(topologyPendingSourceId).removeClass('topology-pending');
+  }
+  topologyPendingSourceId = id;
+  if (topologyCy) {
+    const node = topologyCy.getElementById(id);
+    if (node.length) node.addClass('topology-pending');
+  }
+  updateTopologyEditHint();
+}
+
+// Shown whenever a tap is armed to complete a link -- either because
+// "Modo edición" is checked, or because a pending source was set via
+// startTopologyLinkFromCard while it wasn't.
+function updateTopologyEditHint() {
+  const hint = $('#topology-edit-hint');
+  if (!hint) return;
+  const show = $('#topology-edit-mode').checked || topologyPendingSourceId != null;
+  hint.classList.toggle('hidden', !show);
 }
 
 async function jumpToDeviceAndEditType(deviceId) {
@@ -3450,7 +3503,7 @@ $('#topology-edit-mode').addEventListener('change', () => {
     topologyCy.getElementById(topologyPendingSourceId).removeClass('topology-pending');
     topologyPendingSourceId = null;
   }
-  $('#topology-edit-hint').classList.toggle('hidden', !editing);
+  updateTopologyEditHint();
 });
 
 $('#topology-undo-btn').addEventListener('click', undoLastTopologyAction);
