@@ -258,6 +258,20 @@ class Device(Base):
     # fresh every pass rather than accumulated evidence.
     segment_relation: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
+    # True when `mac` was only ever learned from a gateway/firewall
+    # forwarding this row's traffic (2+ distinct IPs sharing one MAC --
+    # see inventory_service.apply_gateway_detection), never a frame this
+    # IP's own NIC actually sent. `mac` itself is deliberately left in
+    # place rather than cleared: get_or_create_device re-attaches it
+    # (`if mac and not device.mac`) on the very next packet from this same
+    # IP, which would just silently undo a cleared value on the next
+    # ingest -- this flag is the stable signal instead, recomputed fresh
+    # on every apply_gateway_detection pass same as segment_relation
+    # above. The one row in a shared-MAC group actually confirmed (via
+    # ArpObservation, a real self-identification) or heuristically chosen
+    # as the gateway's own address keeps this False.
+    is_mac_shared: Mapped[bool] = mapped_column(default=False)
+
     # The capture session that *most recently* confirmed this device (see
     # inventory_service.get_or_create_device) -- also used to remove it when
     # that session is deleted, provided no other session's protocols/flows
@@ -310,14 +324,17 @@ class Device(Base):
 
     @property
     def is_external(self) -> bool:
-        """A device counts as external only if BOTH signals agree: its IP
-        looks public AND we've never captured it transmitting (mac is None
-        -- see inventory_service.get_or_create_device, which only ever
-        learns mac from a packet's sender, never its destination). A LAN
-        host misconfigured with a public IP range still has a captured mac,
-        so it's correctly kept off this flag; a real off-network host
-        reached only through a router never does."""
-        return self.mac is None and not is_lan_ip(self.ip)
+        """A device counts as external if its IP looks public AND we have
+        no MAC that's genuinely this row's own: either mac is None (we've
+        never captured it transmitting -- see inventory_service.
+        get_or_create_device, which only ever learns mac from a packet's
+        sender, never its destination), or the mac we do have is only
+        borrowed from whatever gateway forwarded its traffic
+        (is_mac_shared, see apply_gateway_detection). A LAN host
+        misconfigured with a public IP range still has its own real mac
+        (is_mac_shared False), so it's correctly kept off this flag; a
+        real off-network host reached only through a router never does."""
+        return not is_lan_ip(self.ip) and (self.mac is None or self.is_mac_shared)
 
 
 class DeviceProtocol(Base):

@@ -440,30 +440,43 @@ def apply_gateway_detection(session: Session, organization_id: int) -> None:
     ends up as its own inventory row, all sharing the gateway's one real
     MAC, even though none of those IPs are actual local assets (see
     Device.is_external and the module docstring's routed-traffic caveat).
+    The exact same thing happens for a *private* IP on another VLAN/subnet
+    reached through this same gateway (inter-VLAN routing) -- its rows
+    share the gateway's MAC too, just as falsely.
 
-    Two or more distinct public IPs sharing a MAC is that exact pattern.
-    Once found, the oldest of those public-IP rows is picked to represent
-    the gateway in Inventory and classified as a network device (subcategory
-    "router_nat"); routes_inventory.list_devices collapses the rest of the
-    *public*-IP duplicates into it when hide_external is requested, without
-    deleting them (Flows/Vulnerabilidades still reference them normally).
+    Two or more distinct IPs sharing a MAC is that exact pattern -- a MAC
+    belongs to exactly one real NIC, so at most one member of a shared-MAC
+    group can genuinely own it. Picking *which* one, when possible:
 
-    Deliberately never promotes a *private*-IP row sharing that MAC to be
-    the gateway, even though the gateway's own LAN-side identity (if this
-    capture ever saw it speak from one, e.g. via ARP) would be a nicer,
-    more recognizable row to label -- there is no reliable way to tell
-    that apart from a real, distinct host on a different subnet whose
-    traffic was also routed through this same gateway (inter-VLAN routing
-    produces the exact same "sender MAC == the gateway" pattern for that
-    host's returning packets). Guessing wrong there would mislabel a real
-    asset as the gateway itself, which is worse than the gateway's own row
-    just not being the one every reader would expect; a private IP is
-    always left as a genuine, separate device, classified independently.
+    - An ArpObservation for one of the group's private IPs, on its own
+      sensor, resolving to this exact MAC is direct self-identification --
+      an ARP reply is the device itself stating "I am this MAC", not just
+      "a frame from this MAC happened to carry this source IP" the way a
+      forwarded TCP reply is. When this exists, that IP is confirmed as the
+      gateway's own real (usually LAN-management) address, full stop.
+    - Failing that, 2+ distinct *public* IPs sharing the MAC is still a
+      reliable (if less specific) tell that whichever device owns it is
+      routing/NATing traffic -- the oldest of those public-IP rows is
+      picked to represent it instead, same heuristic as before ARP
+      confirmation existed. A private-IP-only group with no ArpObservation
+      match gets no primary at all: guessing wrong would mislabel a real,
+      unrelated asset on another subnet as the gateway itself, which is
+      worse than the gateway's own row just not being identified.
+
+    Either way, once a primary is picked it's classified as a network
+    device (subcategory "router_nat"); routes_inventory.list_devices
+    collapses the rest of the *public*-IP duplicates into it when
+    hide_external is requested, without deleting them (Flows/
+    Vulnerabilidades still reference them normally). Every OTHER member of
+    the group -- public or private, whether or not a primary was found --
+    gets Device.is_mac_shared set: its mac field is left in place (clearing
+    it would just have get_or_create_device silently reattach it from the
+    very next packet on that same IP) but is now known to be borrowed, not
+    its own NIC.
 
     Runs as a whole-table pass after ingesting a batch/file rather than
-    per-packet: the pattern is only visible once several distinct public
-    IPs for the same MAC actually exist, which no single packet can tell
-    on its own.
+    per-packet: the pattern is only visible once several distinct IPs for
+    the same MAC actually exist, which no single packet can tell on its own.
 
     Separately, ANY device whose MAC falls in a known First-Hop Redundancy
     Protocol (HSRP/VRRP) virtual range is recognized immediately, from a
@@ -485,6 +498,24 @@ def apply_gateway_detection(session: Session, organization_id: int) -> None:
     by_mac: dict[str, list[Device]] = {}
     for d in devices:
         by_mac.setdefault(d.mac, []).append(d)
+
+    # Same (capture_session -> sensor) resolution apply_segment_classification
+    # uses to check "is there an ArpObservation for this exact (sensor, ip)"
+    # -- built once here rather than per-group/per-member.
+    capture_session_ids = {d.capture_session_id for d in devices if d.capture_session_id is not None}
+    sensor_by_capture_session: dict[int, int | None] = {}
+    if capture_session_ids:
+        sensor_by_capture_session = dict(
+            session.query(CaptureSession.id, CaptureSession.sensor_id)
+            .filter(CaptureSession.id.in_(capture_session_ids))
+            .all()
+        )
+    arp_mac_by_sensor_ip: dict[tuple[int | None, str], str] = {
+        (sensor_id, ip): observed_mac
+        for sensor_id, ip, observed_mac in session.query(
+            ArpObservation.sensor_id, ArpObservation.ip, ArpObservation.mac
+        ).filter(ArpObservation.organization_id == organization_id)
+    }
 
     for mac, group in by_mac.items():
         fhrp_protocol = _fhrp_protocol_label(mac)
@@ -522,36 +553,64 @@ def apply_gateway_detection(session: Session, organization_id: int) -> None:
         if len(group) < 2:
             continue  # a MAC used by only one device row is never this pattern
 
-        # Only ever a router/gateway's own address when 2+ *public* IPs
-        # share it (see this function's docstring on why a private-IP-only
-        # group never gets a "primary" -- there's no reliable way to tell
-        # the gateway's own LAN address apart from a distinct real host on
-        # another subnet whose *returning* traffic this same gateway
-        # forwarded). Every other member of this MAC's group, public or
-        # private, is definitely NOT this NIC's real owner either way --
-        # a MAC belongs to exactly one real device, and 2+ distinct IPs
-        # sharing one here is proof this MAC is whatever forwarded their
-        # traffic, not their own.
+        # First choice: a private member directly self-identified via ARP
+        # (see this function's docstring) -- the oldest such match if
+        # somehow more than one private IP in the group has one (shouldn't
+        # normally happen; a MAC really does belong to one NIC). Falling
+        # back to the 2+-public-IP heuristic only when no ARP confirmation
+        # exists at all.
         public_members = [d for d in group if not is_lan_ip(d.ip)]
-        primary = min(public_members, key=lambda d: d.id) if len(public_members) >= _GATEWAY_MIN_PUBLIC_IPS else None
+        arp_confirmed = sorted(
+            (
+                d
+                for d in group
+                if is_lan_ip(d.ip)
+                and arp_mac_by_sensor_ip.get((sensor_by_capture_session.get(d.capture_session_id), d.ip)) == mac
+            ),
+            key=lambda d: d.id,
+        )
+        primary = arp_confirmed[0] if arp_confirmed else (
+            min(public_members, key=lambda d: d.id) if len(public_members) >= _GATEWAY_MIN_PUBLIC_IPS else None
+        )
 
         if primary is not None:
             if primary.device_type != NETWORK_DEVICE or primary.device_type_confidence < 1.0:
                 primary.device_type = NETWORK_DEVICE
                 primary.device_type_confidence = 1.0
-                primary.device_type_evidence = encode_i18n(
-                    bilingual(
-                        es=f"Una misma MAC ({mac}) aparece en {len(public_members)} IPs públicas distintas -- "
-                        "consistente con un equipo que enruta/NATea tráfico hacia internet",
-                        en=f"The same MAC ({mac}) appears on {len(public_members)} distinct public IPs -- "
-                        "consistent with a device routing/NAT-ing traffic to the internet",
+                if primary in arp_confirmed:
+                    primary.device_type_evidence = encode_i18n(
+                        bilingual(
+                            es=f"Confirmado por ARP: esta IP responde por la MAC {mac}, compartida con "
+                            f"{len(group) - 1} otra(s) IP -- es la dirección real del equipo que enruta/NATea "
+                            "ese tráfico, no solo un destino alcanzado a través de él",
+                            en=f"ARP-confirmed: this IP itself answers for MAC {mac}, shared with "
+                            f"{len(group) - 1} other IP(s) -- this is the real address of the device "
+                            "routing/NAT-ing that traffic, not just a destination reached through it",
+                        )
                     )
-                )
+                else:
+                    primary.device_type_evidence = encode_i18n(
+                        bilingual(
+                            es=f"Una misma MAC ({mac}) aparece en {len(public_members)} IPs públicas distintas -- "
+                            "consistente con un equipo que enruta/NATea tráfico hacia internet",
+                            en=f"The same MAC ({mac}) appears on {len(public_members)} distinct public IPs -- "
+                            "consistent with a device routing/NAT-ing traffic to the internet",
+                        )
+                    )
             if not primary.device_type_secondary:
                 primary.device_type_secondary = ROUTER_NAT
+            primary.is_mac_shared = False
 
-        # Every other member almost always reads as NETWORK_DEVICE too, but
-        # only because it inherited the *gateway's* NIC vendor (e.g.
+        # Every other member of the group -- regardless of device_type --
+        # only has this MAC because it's whatever forwarded/routed its
+        # traffic, never its own NIC (a MAC belongs to exactly one real
+        # device, and we just established at most `primary` is it).
+        for member in group:
+            if member is not primary:
+                member.is_mac_shared = True
+
+        # Most non-primary members also read as NETWORK_DEVICE, but only
+        # because they inherited the *gateway's* NIC vendor (e.g.
         # "Fortinet, Inc.") along with its MAC -- vendor_category has no way
         # to know that vendor describes whoever forwarded the frame, not
         # this row's own (nonexistent, for this purpose) NIC. Re-derive

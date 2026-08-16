@@ -686,14 +686,16 @@ def test_gateway_detection_flags_mac_shared_across_public_ips(db_session, org_id
 
 
 def test_gateway_detection_never_promotes_a_private_ip_sharing_the_mac(db_session, org_id):
-    """A private-IP row sharing the gateway's MAC is never safe to treat as
-    "the gateway's own LAN identity" -- inter-VLAN routing produces the
-    exact same sender-MAC pattern for a real, distinct host on a different
-    subnet whose return traffic happens to pass through this same gateway.
-    There's no reliable way to tell those two cases apart, so the primary
-    is always one of the public-IP duplicates instead; a private IP is
-    always left alone as its own independently-classified device, even
-    when it's the only private-IP member of the group."""
+    """Without an ArpObservation confirming it, a private-IP row sharing the
+    gateway's MAC is never safe to treat as "the gateway's own LAN
+    identity" -- inter-VLAN routing produces the exact same sender-MAC
+    pattern for a real, distinct host on a different subnet whose return
+    traffic happens to pass through this same gateway. There's no reliable
+    way to tell those two cases apart from a forwarded TCP reply alone, so
+    the primary falls back to one of the public-IP duplicates instead; the
+    private IP is left alone as its own independently-classified device,
+    but still flagged is_mac_shared -- that MAC still isn't its own NIC,
+    confirmed gateway address or not."""
     from app.inventory.inventory_service import apply_gateway_detection
 
     GATEWAY_MAC = "aa:bb:cc:00:00:02"
@@ -719,9 +721,64 @@ def test_gateway_detection_never_promotes_a_private_ip_sharing_the_mac(db_sessio
     routed_device = db_session.query(Device).filter(Device.ip == "10.0.9.20").one()
     assert routed_device.display_device_type != "network_device"
     assert routed_device.display_device_type_secondary is None
+    assert routed_device.is_mac_shared is True
 
     primary = db_session.query(Device).filter(Device.device_type_secondary == "router_nat").one()
     assert primary.ip in ("8.8.4.4", "1.1.1.1")
+    assert primary.is_mac_shared is False
+
+
+def test_gateway_detection_uses_arp_to_identify_the_real_firewall_ip(db_session, org_id):
+    """An ArpObservation is the device itself answering "who has this IP" --
+    direct self-identification, unlike a forwarded TCP reply's sender MAC
+    (which could belong to any router along the path). When one confirms a
+    *private* IP in the shared-MAC group as genuinely owning that MAC, it's
+    promoted as the real firewall/gateway address -- overriding the weaker
+    2+-public-IP heuristic, and never getting is_mac_shared itself."""
+    from app.inventory.inventory_service import apply_gateway_detection
+    from app.inventory.inventory_service import upsert_arp_observation
+
+    FIREWALL_MAC = "aa:bb:cc:00:00:04"
+    reply1 = Ether(src=FIREWALL_MAC) / IP(src="34.209.79.111", dst="10.35.0.5", ttl=64) / TCP(
+        sport=443, dport=51000, flags="SA", window=8192
+    )
+    reply2 = Ether(src=FIREWALL_MAC) / IP(src="35.166.20.122", dst="10.35.0.5", ttl=64) / TCP(
+        sport=443, dport=51001, flags="SA", window=8192
+    )
+    # a real internal host on another VLAN, reached through the same firewall
+    routed = Ether(src=FIREWALL_MAC) / IP(src="172.16.11.10", dst="10.35.0.5", ttl=63) / TCP(
+        sport=445, dport=51002, flags="SA", window=8192
+    )
+    ingest_packet_record(db_session, process_packet(reply1), org_id)
+    ingest_packet_record(db_session, process_packet(reply2), org_id)
+    ingest_packet_record(db_session, process_packet(routed), org_id)
+    # the firewall's own LAN-management IP, confirmed by a live ARP reply
+    # this sensor captured -- unrelated to any of the routed traffic above
+    upsert_arp_observation(db_session, ip="10.35.0.254", mac=FIREWALL_MAC, organization_id=org_id)
+    firewall_device = Device(organization_id=org_id, ip="10.35.0.254", mac=None)
+    db_session.add(firewall_device)
+    db_session.commit()
+    # the ARP table alone doesn't create a Device row for that IP -- give
+    # it the same MAC a packet from it would have, so it's part of the group
+    firewall_device.mac = FIREWALL_MAC
+    db_session.commit()
+
+    apply_gateway_detection(db_session, org_id)
+    db_session.commit()
+
+    db_session.refresh(firewall_device)
+    assert firewall_device.display_device_type == "network_device"
+    assert firewall_device.display_device_type_secondary == "router_nat"
+    assert firewall_device.device_type_confidence == 1.0
+    assert firewall_device.is_mac_shared is False
+    assert "ARP" in firewall_device.device_type_evidence
+
+    pub1 = db_session.query(Device).filter(Device.ip == "34.209.79.111").one()
+    pub2 = db_session.query(Device).filter(Device.ip == "35.166.20.122").one()
+    routed_device = db_session.query(Device).filter(Device.ip == "172.16.11.10").one()
+    for other in (pub1, pub2, routed_device):
+        assert other.is_mac_shared is True
+        assert other.device_type_secondary != "router_nat"
 
 
 def test_gateway_detection_ignores_a_single_shared_public_ip(db_session, org_id):

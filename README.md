@@ -650,13 +650,37 @@ protocolos servidos) se sigue contando normalmente, solo se descarta el voto de 
 El área donde se arrastran y dibujan los equipos en la pestaña Topología se llama **el lienzo**
 (`#topology-cy`) -- así se la nombra ya en el propio texto de ayuda de la paleta ("Arrastrá un equipo
 al lienzo para ubicarlo..."). Si un equipo se arrastró ahí por error, la ficha de un dispositivo *sin
-ningún enlace real* (NetworkLink/Flow) ahora tiene un botón **Quitar del lienzo**: lo saca del
+ningún enlace real* (NetworkLink/Flow) ahora tiene un botón **Eliminar de topología**: lo saca del
 Cytoscape en vivo y limpia su posición cacheada (`topologyPositions`), así que vuelve a aparecer en
 el panel "Sin enlace" -- pero no toca el registro de `Device` en el Inventario ni nada en el backend
 (la posición nunca se persistió del lado del servidor, solo vive en memoria del navegador durante la
 sesión). Un equipo que sí tiene un enlace real no muestra este botón: pertenece al lienzo
 independientemente de cómo llegó ahí, así que "quitarlo" solo lo haría reaparecer en el próximo
 refresh en vez de mandarlo a "Sin enlace".
+
+#### Fix: la MAC compartida con el gateway ya no se muestra como propia, e identificar la IP real del firewall
+
+Seguimiento del fix anterior (destinos enrutados por un firewall ya no se clasifican como "Equipo de
+red"): aunque el `device_type` ya quedaba bien, esas mismas filas seguían mostrando la MAC del
+firewall en su propia columna MAC, como si fuera su propia tarjeta de red -- confuso, porque
+`get_or_create_device` la reasigna ahí exactamente por eso (esa fue la última MAC vista transmitiendo
+hacia esa IP), no porque sea suya.
+
+- Nuevo campo `Device.is_mac_shared`: `apply_gateway_detection` lo marca en `True` para todo miembro
+  de un grupo de MAC compartida (2+ IPs distintas) que no sea el elegido como el gateway real. El
+  campo `mac` en sí se deja intacto a propósito -- limpiarlo no serviría de nada, porque
+  `get_or_create_device` se lo volvería a asignar en el próximo paquete de esa misma IP (`if mac and
+  not device.mac`). En Inventario, la columna MAC muestra **"Enrutado"** en vez de la MAC cruda
+  cuando este campo está en `True` (con la MAC real disponible en el tooltip). `Device.is_external`
+  también lo tiene en cuenta ahora: una IP pública cuya única "MAC" es la prestada del gateway cuenta
+  como externa, igual que si nunca se hubiera capturado ninguna.
+- **Identificar la IP real del firewall**: hasta ahora, la fila elegida para representar al gateway
+  siempre era la IP pública más antigua del grupo -- un heurístico razonable pero nunca una prueba
+  directa. Ahora, si alguna IP *privada* del grupo tiene una `ArpObservation` propia que resuelve a
+  esa misma MAC, se la prioriza como la dirección real del equipo: una respuesta ARP es el propio
+  dispositivo afirmando "esta MAC es mía", a diferencia de una respuesta TCP reenviada (que solo
+  prueba que *alguien* en el camino tiene esa MAC, nunca cuál). Esa fila arranca en 100% de confianza
+  con evidencia explícita ("Confirmado por ARP: ...") y nunca se marca `is_mac_shared`.
 
 ### Ejecutar el escaneo de vulnerabilidades
 

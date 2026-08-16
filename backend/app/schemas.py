@@ -69,6 +69,7 @@ class DeviceOut(BaseModel):
     display_device_type_secondary: str | None
     is_ot_suspected: bool
     is_external: bool
+    is_mac_shared: bool
     vlan: int | None
     last_ttl: int | None
     segment_relation: str | None
