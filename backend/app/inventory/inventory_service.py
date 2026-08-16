@@ -308,6 +308,7 @@ def apply_device_type_guess(session: Session, device: Device) -> None:
     guess = classify_device_type(
         vendor=device.display_vendor,
         hostname=device.display_name,
+        model=device.model,
         os_signature=device.os_signature,
         has_ot_server_protocol=any(p.category == OT for p in server_protocols),
         server_protocol_count=len({p.protocol for p in server_protocols}),

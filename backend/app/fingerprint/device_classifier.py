@@ -1,9 +1,10 @@
 """Device-type classification (PC / servidor / PLC / HMI / equipo de red /
 otro) from evidence the rest of the passive pipeline already collects --
-protocols served, OS fingerprint, vendor, and hostname. Rule-based and
-explainable, same spirit as os_fingerprint.py's signature scoring: each
-rule casts a weighted vote for one type, the highest-scoring type wins,
-and the evidence that produced it is kept for display.
+protocols served, OS fingerprint, vendor, self-reported model, and
+hostname. Rule-based and explainable, same spirit as os_fingerprint.py's
+signature scoring: each rule casts a weighted vote for one type, the
+highest-scoring type wins, and the evidence that produced it is kept for
+display.
 
 This is inherently probabilistic from purely passive data alone -- a
 Windows Server and a Windows workstation have an identical TCP/IP
@@ -98,6 +99,25 @@ _HMI_VENDOR_KEYWORDS = ("weintek",)
 # than falling through to the zero-score OTHER fallback.
 _TRANSPORT_CONTROLLER_VENDOR_KEYWORDS = ("industrial software co",)
 
+# Substring match against the device's own self-reported product/platform
+# string (Device.model -- CDP's Platform TLV, PROFINET DCP's "Type of
+# Station" block, EtherNet/IP's product name, ...). More specific than a
+# vendor-name match: "Siemens" alone can't tell a SCALANCE switch from a
+# SIMATIC-PC engineering workstation from a real S7 PLC, but the product
+# family name always can. This is what actually caught the bug that added
+# this rule: a SIMATIC-PC (a Windows PC running TIA Portal, discovered via
+# PROFINET DCP/a CDP neighbor announcement) was being classified as
+# NETWORK_DEVICE on manufacturer alone -- see apply_neighbor_table's own
+# fallback in topology_from_switch.py, which used to hardcode
+# NETWORK_DEVICE for *any* unresolved CDP/LLDP neighbor regardless of what
+# it actually was.
+_WORKSTATION_MODEL_KEYWORDS = (
+    "simatic-pc", "simatic ipc", "simatic industrial pc", "simatic field pg",
+    "simatic rack pc", "simatic panel pc", "simatic microbox",
+)
+_PLC_MODEL_KEYWORDS = ("simatic s7-", "s7-1200", "s7-1500", "s7-300", "s7-400", "et 200", "et200", "logo!")
+_NETWORK_MODEL_KEYWORDS = ("scalance", "ruggedcom")
+
 # Substring match against the device's own (lowercased) hostname. A site's
 # naming convention is a strong hint when it exists (e.g. this product's
 # own test capture: "K787395-HMI01") but never authoritative alone --
@@ -148,6 +168,19 @@ def _vendor_category(vendor: str | None) -> str | None:
     return None
 
 
+def _model_category(model: str | None) -> str | None:
+    if not model:
+        return None
+    m = model.lower()
+    if any(k in m for k in _WORKSTATION_MODEL_KEYWORDS):
+        return WORKSTATION
+    if any(k in m for k in _PLC_MODEL_KEYWORDS):
+        return PLC
+    if any(k in m for k in _NETWORK_MODEL_KEYWORDS):
+        return NETWORK_DEVICE
+    return None
+
+
 def _hostname_category(hostname: str | None) -> str | None:
     if not hostname:
         return None
@@ -169,6 +202,7 @@ def classify_device_type(
     *,
     vendor: str | None,
     hostname: str | None,
+    model: str | None = None,
     os_signature: str | None,
     has_ot_server_protocol: bool,
     server_protocol_count: int,
@@ -238,6 +272,39 @@ def classify_device_type(
         scores[SERVER] += 0.5
         scores[WORKSTATION] += 0.5
         evidence.append(bilingual(es=f'Fabricante IT genérico ("{vendor}")', en=f'Generic IT vendor ("{vendor}")'))
+
+    # Weighted slightly *above* the strongest direct signals above
+    # (cdp_lldp_announcement/has_ot_server_protocol, both 3.0): a
+    # self-reported product/platform string is a specific, direct
+    # statement about *what this device is*, not just who made it or what
+    # protocol it happened to be seen on -- e.g. it's what tells a
+    # SIMATIC-PC (a PC that runs TIA Portal, so it *will* speak PROFINET
+    # DCP) apart from a SCALANCE switch or an S7 PLC, three very different
+    # device types neither a "Siemens" vendor match nor "serves an OT
+    # protocol from a Windows/Linux host" (which alone would read as an
+    # HMI/engineering-tooling guess) can tell apart on their own.
+    model_cat = _model_category(model)
+    if model_cat == WORKSTATION:
+        scores[WORKSTATION] += 3.5
+        evidence.append(
+            bilingual(
+                es=f'El modelo autoreportado ("{model}") es una PC industrial, no un PLC ni un equipo de red',
+                en=f'The self-reported model ("{model}") is an industrial PC, not a PLC or network device',
+            )
+        )
+    elif model_cat == PLC:
+        scores[PLC] += 3.5
+        evidence.append(
+            bilingual(es=f'El modelo autoreportado ("{model}") es un PLC', en=f'The self-reported model ("{model}") is a PLC')
+        )
+    elif model_cat == NETWORK_DEVICE:
+        scores[NETWORK_DEVICE] += 3.5
+        evidence.append(
+            bilingual(
+                es=f'El modelo autoreportado ("{model}") es un equipo de red',
+                en=f'The self-reported model ("{model}") is networking gear',
+            )
+        )
 
     host_cat = _hostname_category(hostname)
     # Weighted slightly above a vendor-only match: a site's own naming

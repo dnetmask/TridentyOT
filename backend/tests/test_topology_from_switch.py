@@ -212,3 +212,56 @@ def test_apply_neighbor_table_auto_creates_unresolved_neighbor_and_links_it(db_s
 
     link = db_session.query(NetworkLink).one()
     assert {link.device_a_id, link.device_b_id} == {switch.id, created_id}
+
+
+def test_apply_neighbor_table_does_not_assume_every_neighbor_is_network_gear(db_session, org_id):
+    """Being on a switch's neighbor table only proves a link to that port,
+    not that the neighbor is itself a switch/router -- a real
+    misclassification this covers: a Siemens engineering PC (self-reported
+    platform "SIMATIC-PC" over CDP/LLDP) was auto-created as
+    NETWORK_DEVICE @ 100% confidence just for being an unresolved neighbor,
+    with no regard for what it actually reported about itself."""
+    from app.models import Device
+
+    switch = _make_device(db_session, org_id, custom_name="switch-b")
+
+    entries = [
+        SwitchNeighborEntry(
+            switch_table_import_id=0, protocol="cdp", local_port="Gi0/3",
+            remote_device_name="DESKTOP-DJPMFFV", remote_port="Ethernet0",
+            remote_mgmt_ip=None, remote_platform="SIMATIC-PC",
+        )
+    ]
+    result = apply_neighbor_table(db_session, switch, entries)
+    db_session.commit()
+
+    created_id = result["devices_created"][0]["id"]
+    created = db_session.get(Device, created_id)
+    assert created.model == "SIMATIC-PC"
+    assert created.display_device_type == "workstation"
+
+
+def test_apply_neighbor_table_falls_back_to_network_device_at_reduced_confidence(db_session, org_id):
+    """No name/platform evidence at all (a bare LLDP System Name with no
+    Platform TLV) still defaults to network_device -- the common case for
+    an unresolved neighbor on an uplink port -- but below full confidence,
+    unlike before, so a later real classification can still override it."""
+    from app.models import Device
+
+    switch = _make_device(db_session, org_id, custom_name="switch-c")
+
+    entries = [
+        SwitchNeighborEntry(
+            switch_table_import_id=0, protocol="lldp", local_port="Gi0/4",
+            remote_device_name="unlabeled-neighbor", remote_port="1",
+            remote_mgmt_ip=None, remote_platform=None,
+        )
+    ]
+    result = apply_neighbor_table(db_session, switch, entries)
+    db_session.commit()
+
+    created_id = result["devices_created"][0]["id"]
+    created = db_session.get(Device, created_id)
+    assert created.display_device_type == "network_device"
+    assert created.display_device_type_secondary == "switch_l2"
+    assert created.device_type_confidence < 1.0

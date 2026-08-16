@@ -602,6 +602,31 @@ informativo (sin seguimiento de progreso ni estado guardado) que resume qué se 
 arrastrar equipos, editar su tipo, crear enlaces a mano, revisar candidatos, o ir a Descubrimiento
 activo para importar más datos reales. Se abre y cierra libremente cuantas veces se quiera.
 
+#### Fix: el modelo autoreportado ahora corrige la clasificación de tipo de equipo
+
+Un caso real: una PC de ingeniería Siemens (una VM Windows con TIA Portal, vista solo por PROFINET
+DCP) se clasificaba como **Equipo de red** al 100% de confianza. La causa no era el clasificador de
+`device_classifier.py` en sí -- era `apply_neighbor_table` (`topology_from_switch.py`): cuando un
+vecino CDP/LLDP reportado por un switch no coincide con ningún `Device` ya conocido, se auto-crea
+uno nuevo, y ese auto-creado tenía **hardcodeado** `device_type=network_device` al 100% sin importar
+qué decía `remote_platform` (el nombre de producto que el propio vecino reportó, ej. "SIMATIC-PC")
+-- la suposición de fondo era "si el vecino de un switch no se puede identificar, es otro equipo de
+red", que vale para la mayoría de los puertos de uplink pero no para un puerto de acceso con una PC,
+un PLC o un teléfono IP del otro lado.
+
+El fix generaliza en vez de parchear solo este caso:
+
+- `classify_device_type` ahora también recibe `model` (el `Device.model` autoreportado -- CDP
+  Platform TLV, PROFINET DCP Type-of-Station, EtherNet/IP product name, ...) y lo pesa **por encima**
+  de las señales más fuertes que ya existían (anuncio CDP/LLDP, protocolo OT servido): un producto
+  autoreportado es más específico que "quién lo fabricó" o "en qué protocolo se lo vio" -- distingue
+  una SIMATIC-PC (PC) de una SCALANCE (switch) y de un S7 (PLC), tres tipos muy distintos que un
+  fabricante "Siemens" a secas no puede diferenciar.
+- `apply_neighbor_table` ya no hardcodea `network_device`: corre la misma clasificación con el
+  `remote_device_name`/`remote_platform` del vecino, y solo cae al viejo supuesto (equipo de red)
+  como *fallback* -- y con confianza reducida (0.5, no 1.0), para que una clasificación real
+  posterior (una vez que se vea tráfico genuino de esa MAC) todavía la pueda corregir.
+
 ### Ejecutar el escaneo de vulnerabilidades
 
 ```bash

@@ -12,7 +12,7 @@ this logic.
 
 from sqlalchemy.orm import Session
 
-from app.fingerprint.device_classifier import NETWORK_DEVICE, SWITCH_L2
+from app.fingerprint.device_classifier import NETWORK_DEVICE, SWITCH_L2, classify_device_type
 from app.i18n import bilingual, encode_i18n
 from app.models import LINK_CONFIRMED, LINK_SOURCE_CDP, LINK_SOURCE_LLDP, LINK_SOURCE_MAC_TABLE, LINK_SOURCE_MANUAL
 from app.models import Device, NetworkLink, SwitchArpEntry, SwitchMacTableEntry, SwitchNeighborEntry
@@ -140,10 +140,23 @@ def apply_neighbor_table(db: Session, switch: Device, entries: list[SwitchNeighb
     about *which* other switch it goes to). That's strong enough evidence
     to act on without a human confirming it first: a neighbor that can't
     be matched to an existing Device (by name/hostname or its reported
-    management IP) gets auto-created as a network_device -- inheriting the
-    switch's own capture_session_id so it shows up in the same Zona/Sitio-
-    scoped views the switch itself does -- and linked immediately, instead
-    of only being reported for the user to create manually and reimport."""
+    management IP) gets auto-created -- inheriting the switch's own
+    capture_session_id so it shows up in the same Zona/Sitio-scoped views
+    the switch itself does -- and linked immediately, instead of only
+    being reported for the user to create manually and reimport.
+
+    Being on a switch's neighbor table only proves *a link to this port*,
+    not that the neighbor is itself a switch/router -- CDP/LLDP is spoken
+    by end devices too (a PC, a PLC's engineering port, an IP phone, ...),
+    and entry.remote_platform (the neighbor's own self-reported product
+    string, e.g. a CDP Platform TLV) is exactly the kind of evidence
+    classify_device_type already knows how to read. network_device is
+    only the fallback when that evidence doesn't say otherwise -- still
+    the common case for an unresolved neighbor on an uplink port, but at
+    a deliberately lower confidence than a real match, so a later, better-
+    evidenced guess (apply_device_type_guess, once real traffic from this
+    MAC is seen) can still override it.
+    """
     links_created_or_updated = 0
     devices_created = []
     for entry in entries:
@@ -157,23 +170,42 @@ def apply_neighbor_table(db: Session, switch: Device, entries: list[SwitchNeighb
         ]
         other = candidates[0] if candidates else None
         if other is None:
+            guess = classify_device_type(
+                vendor=None,
+                hostname=entry.remote_device_name,
+                model=entry.remote_platform,
+                os_signature=None,
+                has_ot_server_protocol=False,
+                server_protocol_count=0,
+            )
+            if guess.confidence > 0:
+                device_type = guess.device_type
+                device_type_secondary = guess.device_type_secondary or (SWITCH_L2 if device_type == NETWORK_DEVICE else None)
+                device_type_confidence = guess.confidence
+                evidence_items = list(guess.evidence)
+            else:
+                device_type = NETWORK_DEVICE
+                device_type_secondary = SWITCH_L2
+                device_type_confidence = 0.5
+                evidence_items = []
+            evidence_items.append(
+                bilingual(
+                    es=f"Creado automáticamente: vecino {entry.protocol.upper()} de "
+                    f"{switch.display_name or f'device-{switch.id}'} ({entry.local_port or '?'})",
+                    en=f"Auto-created: {entry.protocol.upper()} neighbor of "
+                    f"{switch.display_name or f'device-{switch.id}'} ({entry.local_port or '?'})",
+                )
+            )
             other = Device(
                 organization_id=switch.organization_id,
                 capture_session_id=switch.capture_session_id,
                 custom_name=entry.remote_device_name,
                 ip=entry.remote_mgmt_ip,
                 model=entry.remote_platform,
-                device_type=NETWORK_DEVICE,
-                device_type_secondary=SWITCH_L2,
-                device_type_confidence=1.0,
-                device_type_evidence=encode_i18n(
-                    bilingual(
-                        es=f"Creado automáticamente: vecino {entry.protocol.upper()} de "
-                        f"{switch.display_name or f'device-{switch.id}'} ({entry.local_port or '?'})",
-                        en=f"Auto-created: {entry.protocol.upper()} neighbor of "
-                        f"{switch.display_name or f'device-{switch.id}'} ({entry.local_port or '?'})",
-                    )
-                ),
+                device_type=device_type,
+                device_type_secondary=device_type_secondary,
+                device_type_confidence=device_type_confidence,
+                device_type_evidence=encode_i18n(*evidence_items),
             )
             db.add(other)
             db.flush()  # need other.id before it can be a NetworkLink endpoint below

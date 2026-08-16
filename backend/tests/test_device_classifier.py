@@ -218,3 +218,55 @@ def test_industrial_software_co_vendor_loses_to_stronger_conflicting_evidence():
     )
     assert guess.device_type == PLC
     assert guess.device_type_secondary is None
+
+
+def test_simatic_pc_model_is_workstation_not_network_device():
+    """A real misclassification this rule fixes: a Siemens-made engineering
+    PC (self-reported model "SIMATIC-PC", e.g. via PROFINET DCP's Type of
+    Station block or a CDP Platform TLV) was reading as NETWORK_DEVICE on
+    vendor("Siemens")/OUI evidence alone. The model string is what a
+    generic vendor match can't tell apart: a SIMATIC-PC is a PC, not a
+    switch or a PLC."""
+    guess = classify_device_type(
+        vendor="Siemens AG",
+        hostname="DESKTOP-DJPMFFV",
+        model="SIMATIC-PC",
+        os_signature=None,
+        has_ot_server_protocol=False,
+        server_protocol_count=0,
+    )
+    assert guess.device_type == WORKSTATION
+    assert any("SIMATIC-PC" in e["es"] for e in guess.evidence)
+
+
+def test_simatic_pc_model_outweighs_ot_protocol_from_windows():
+    """Even when the same device also served PROFINET DCP (registered as
+    an OT server protocol -- see inventory_service.py) from what
+    fingerprints as a Windows host, which alone would read as HMI/
+    engineering tooling, the self-reported model should still win: it's
+    more specific evidence about what the device actually is."""
+    guess = classify_device_type(
+        vendor=None,
+        hostname=None,
+        model="SIMATIC-PC",
+        os_signature="windows",
+        has_ot_server_protocol=True,
+        server_protocol_count=0,
+    )
+    assert guess.device_type == WORKSTATION
+
+
+def test_scalance_model_suggests_network_device():
+    guess = classify_device_type(
+        vendor=None, hostname=None, model="SIMATIC NET SCALANCE X208",
+        os_signature=None, has_ot_server_protocol=False, server_protocol_count=0,
+    )
+    assert guess.device_type == NETWORK_DEVICE
+
+
+def test_s7_model_suggests_plc():
+    guess = classify_device_type(
+        vendor=None, hostname=None, model="6ES7 512-1DK01-0AB0 (S7-1500)",
+        os_signature=None, has_ot_server_protocol=False, server_protocol_count=0,
+    )
+    assert guess.device_type == PLC
