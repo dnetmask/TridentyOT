@@ -3559,6 +3559,27 @@ $('#topology-fullscreen-btn').addEventListener('click', () => {
   document.addEventListener(evt, () => { if (topologyCy) topologyCy.resize(); });
 });
 
+// The one-time resize() right after construction (see renderTopology)
+// only catches a stale bounding rect at THAT instant -- it does nothing
+// for a shift that happens afterward: the browser window resizing, or
+// (the diagonal-offset click bug reported on macOS) dragging the window
+// between displays with a different DPI/scale, which changes
+// devicePixelRatio without necessarily changing the container's CSS
+// size. Either one leaves Cytoscape's cached container bounds stale, so
+// every click after that lands offset by however much the canvas
+// actually moved/rescaled on screen. A plain window resize listener
+// plus a ResizeObserver on the whole card (which also fires for content
+// reflows a resize event wouldn't, e.g. web fonts loading late and
+// nudging the legend/toolbar's height) keeps it resynced continuously
+// instead of only right after the initial render.
+window.addEventListener('resize', () => { if (topologyCy) topologyCy.resize(); });
+if (window.ResizeObserver) {
+  const topologyCard = document.querySelector('#tab-topology .card');
+  if (topologyCard) {
+    new ResizeObserver(() => { if (topologyCy) topologyCy.resize(); }).observe(topologyCard);
+  }
+}
+
 $('#topology-palette-search').addEventListener('input', (e) => {
   topologyPaletteFilter = e.target.value;
   if (topologyLastData) renderTopologyPalette(topologyUnplacedNodes(topologyLastData));
