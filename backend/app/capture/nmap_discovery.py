@@ -67,6 +67,7 @@ from app.i18n import bilingual, encode_i18n
 from app.inventory.inventory_service import (
     IngestCache,
     apply_device_type_guess,
+    apply_flow_link_candidates,
     apply_gateway_detection,
     apply_hostname_hints,
     apply_identity_hints,
@@ -329,6 +330,7 @@ class _NmapScanWorker:
                     _ingest_nmap_host(db, host, capture_session.organization_id, capture_session.id, cache)
                 apply_gateway_detection(db, capture_session.organization_id)
                 apply_segment_classification(db, capture_session.organization_id)
+                apply_flow_link_candidates(db, capture_session.organization_id)
                 capture_session.packet_count = len(hosts)
             db.commit()
 
@@ -345,6 +347,7 @@ class _NmapScanWorker:
                         _ingest_nmap_host(db, host, capture_session.organization_id, capture_session.id, cache)
                     apply_gateway_detection(db, capture_session.organization_id)
                     apply_segment_classification(db, capture_session.organization_id)
+                    apply_flow_link_candidates(db, capture_session.organization_id)
                     capture_session.packet_count = len(hosts)
                 if status == "completed":
                     capture_session.bytes_processed = capture_session.total_bytes

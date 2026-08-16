@@ -20,7 +20,7 @@ from app.models import Device, NetworkLink, SwitchArpEntry, SwitchMacTableEntry,
 _NEIGHBOR_LINK_SOURCE = {"cdp": LINK_SOURCE_CDP, "lldp": LINK_SOURCE_LLDP}
 
 
-def _upsert_link(
+def upsert_link(
     db: Session, device_x: Device, port_x: str | None, device_y: Device, port_y: str | None, *, source: str, notes: str
 ) -> bool:
     """Upserts a NetworkLink for (device_x, device_y), normalizing a/b by
@@ -89,7 +89,7 @@ def apply_mac_table(db: Session, switch: Device, entries: list[SwitchMacTableEnt
         if other is None:
             unmatched_macs.append({"interface": interface_name, "mac": mac})
             continue
-        if _upsert_link(
+        if upsert_link(
             db, switch, interface_name, other, None,
             source=LINK_SOURCE_MAC_TABLE, notes="Detectado por tabla de direcciones MAC",
         ):
@@ -180,7 +180,7 @@ def apply_neighbor_table(db: Session, switch: Device, entries: list[SwitchNeighb
             devices_created.append({"id": other.id, "name": entry.remote_device_name})
         source = _NEIGHBOR_LINK_SOURCE[entry.protocol]
         notes = f"Detectado vía {entry.protocol.upper()}"
-        if _upsert_link(db, switch, entry.local_port, other, entry.remote_port, source=source, notes=notes):
+        if upsert_link(db, switch, entry.local_port, other, entry.remote_port, source=source, notes=notes):
             links_created_or_updated += 1
 
     return {"links_created_or_updated": links_created_or_updated, "devices_created": devices_created}

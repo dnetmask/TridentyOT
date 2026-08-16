@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.capture.packet_processor import process_packet
 from app.inventory.inventory_service import (
     IngestCache,
+    apply_flow_link_candidates,
     apply_gateway_detection,
     apply_segment_classification,
     ingest_packet_record,
@@ -89,6 +90,7 @@ def process_pcap_file(db_session: Session, filepath: str, capture_session: Captu
         # in full, not from any single packet.
         apply_gateway_detection(db_session, capture_session.organization_id)
         apply_segment_classification(db_session, capture_session.organization_id)
+        apply_flow_link_candidates(db_session, capture_session.organization_id)
         capture_session.packet_count = count
         capture_session.bytes_processed = capture_session.total_bytes
         capture_session.status = "completed"

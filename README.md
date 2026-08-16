@@ -558,6 +558,33 @@ documentada arriba (podría ser la IP propia del gateway, o un host real distint
 tráfico de vuelta este mismo par de routers reenvió) -- ahí solo se rellena `device_type_evidence`
 (y solo si nada más ya clasificó ese equipo), nunca se fuerza el tipo.
 
+#### Candidatos de enlace desde Flujos (con promoción manual obligatoria)
+
+Con lo anterior ya en pie, `apply_flow_link_candidates` genera una **sugerencia** -- nunca un
+`NetworkLink` -- para cada `Flow` entre dos equipos que fueron confirmados por ARP en el **mismo
+Sensor** (no solo "los dos son `same_segment`" por separado: eso podría ser en dos sitios distintos
+sin ninguna relación entre sí). Cada fila (`FlowLinkCandidate`) trae una confianza deliberadamente
+baja -- 0.4 base, +0.2 si además comparten VLAN -- muy por debajo del 1.0 que solo CDP/LLDP/tabla MAC
+se ganan, precisamente porque un Flow siempre puede tener un switch (administrado o no) de por medio.
+Un par que ya tiene un `NetworkLink` real (de cualquier origen) nunca genera un candidato.
+
+La promoción a enlace real **nunca es automática**: un admin decide.
+
+```bash
+curl "http://localhost:8000/api/topology/link-candidates?status=pending" -H "Authorization: Bearer $TOKEN"
+
+curl -X POST http://localhost:8000/api/topology/link-candidates/12/promote \
+  -H "Authorization: Bearer $TOKEN"   # crea el NetworkLink (source="flow_candidate")
+
+curl -X POST http://localhost:8000/api/topology/link-candidates/12/dismiss \
+  -H "Authorization: Bearer $TOKEN"   # descarta -- nunca se vuelve a sugerir sola
+```
+
+Un candidato ya confirmado o descartado nunca vuelve a tocarlo un pase posterior -- la decisión de
+un humano es definitiva, igual que un `NetworkLink` manual nunca se pisa. Este endpoint es la única
+pieza de la Fase 3; la revisión visual de la cola de candidatos queda para la Fase 4 (UI de
+Topología).
+
 ### Ejecutar el escaneo de vulnerabilidades
 
 ```bash

@@ -35,6 +35,7 @@ from app.db import session_scope
 from app.i18n import bilingual, encode_i18n
 from app.inventory.inventory_service import (
     IngestCache,
+    apply_flow_link_candidates,
     apply_gateway_detection,
     apply_segment_classification,
     ingest_packet_record,
@@ -187,6 +188,7 @@ class _CaptureWorker:
             # single packet's ingest can tell on its own.
             apply_gateway_detection(db, capture_session.organization_id)
             apply_segment_classification(db, capture_session.organization_id)
+            apply_flow_link_candidates(db, capture_session.organization_id)
             capture_session.packet_count += len(batch)
             capture_session.dropped_count += dropped
 

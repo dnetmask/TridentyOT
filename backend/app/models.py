@@ -410,6 +410,17 @@ LINK_SOURCE_MANUAL = "manual"
 LINK_SOURCE_MAC_TABLE = "mac_table"
 LINK_SOURCE_CDP = "cdp"
 LINK_SOURCE_LLDP = "lldp"
+# A human promoted a FlowLinkCandidate (see that model below) -- weaker
+# provenance than mac_table/cdp/lldp (a switch never confirmed this pair
+# directly), but still a human's explicit "yes, promote this" decision,
+# not something the app asserted on its own.
+LINK_SOURCE_FLOW_CANDIDATE = "flow_candidate"
+
+
+# FlowLinkCandidate.status.
+CANDIDATE_PENDING = "pending"
+CANDIDATE_CONFIRMED = "confirmed"
+CANDIDATE_DISMISSED = "dismissed"
 
 
 class NetworkLink(Base):
@@ -458,6 +469,48 @@ class NetworkLink(Base):
     source: Mapped[str] = mapped_column(String(20), default=LINK_SOURCE_MANUAL)
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+    device_a: Mapped[Device] = relationship(foreign_keys=[device_a_id])
+    device_b: Mapped[Device] = relationship(foreign_keys=[device_b_id])
+
+
+class FlowLinkCandidate(Base):
+    """Fase 3 of the topology-accuracy roadmap: a *suggestion* that two
+    devices might be directly cabled, derived from a Flow between them
+    where both ends were independently ARP-confirmed on the very same
+    Sensor (inventory_service.apply_flow_link_candidates) -- never a
+    NetworkLink itself, and never promoted to one automatically. Same
+    principle repeated throughout this schema: who-talked-to-whom is not
+    proof of a direct cable (a Flow can always have an unmanaged switch, or
+    even a managed one this deployment hasn't walked yet, sitting between
+    the two ends) -- confidence here tops out well below 1.0 for exactly
+    that reason, and reaching 1.0 is reserved for CDP/LLDP/MAC-table
+    evidence a switch itself reported (see NetworkLink/SwitchNeighborEntry).
+
+    A pending row is recomputed fresh on every apply_flow_link_candidates
+    pass (confidence/evidence/sensor_id may change as more data arrives,
+    same as Device.segment_relation). Once a human decides -- POST .../
+    promote (creates a real NetworkLink, source="flow_candidate") or
+    .../dismiss -- that decision is final and never touched again by a
+    later pass; a promoted pair also stops generating new candidate rows
+    at all, since a real NetworkLink for that pair now exists.
+    """
+
+    __tablename__ = "flow_link_candidates"
+    __table_args__ = (UniqueConstraint("device_a_id", "device_b_id", name="uq_flow_link_candidate_pair"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    device_a_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
+    device_b_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
+    # The Sensor both devices were ARP-confirmed on -- the segment this
+    # candidate is scoped to (see ArpObservation/Device.segment_relation).
+    sensor_id: Mapped[int | None] = mapped_column(ForeignKey("sensors.id"), nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default=CANDIDATE_PENDING)
     created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 

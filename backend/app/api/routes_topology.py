@@ -20,8 +20,21 @@ from app.auth.deps import get_current_user, is_super_admin, require_admin
 from app.db import get_db
 from app.fingerprint.device_classifier import HMI, NETWORK_DEVICE, PLC, ROUTER_NAT, SERVER, WORKSTATION
 from app.i18n import message
-from app.models import CaptureSession, Device, NetworkLink, Sensor, User, Zone
+from app.models import (
+    CANDIDATE_CONFIRMED,
+    CANDIDATE_DISMISSED,
+    CANDIDATE_PENDING,
+    LINK_SOURCE_FLOW_CANDIDATE,
+    CaptureSession,
+    Device,
+    FlowLinkCandidate,
+    NetworkLink,
+    Sensor,
+    User,
+    Zone,
+)
 from app.schemas import (
+    FlowLinkCandidateOut,
     NetworkLinkCreateRequest,
     NetworkLinkOut,
     NetworkLinkUpdateRequest,
@@ -29,6 +42,7 @@ from app.schemas import (
     TopologyNode,
     TopologyOut,
 )
+from app.topology_from_switch import upsert_link
 
 router = APIRouter(prefix="/api/topology", tags=["topology"])
 
@@ -224,3 +238,93 @@ def delete_network_link(link_id: int, db: Session = Depends(get_db), user: User 
     db.delete(link)
     db.commit()
     return None
+
+
+def _get_owned_candidate(db: Session, user: User, candidate_id: int) -> FlowLinkCandidate:
+    query = db.query(FlowLinkCandidate).filter(FlowLinkCandidate.id == candidate_id)
+    if not is_super_admin(user):
+        query = query.filter(FlowLinkCandidate.organization_id == user.organization_id)
+    candidate = query.one_or_none()
+    if candidate is None:
+        raise HTTPException(status_code=404, detail=message("topology.link_candidate_not_found", user.locale))
+    return candidate
+
+
+@router.get("/link-candidates", response_model=list[FlowLinkCandidateOut])
+def list_link_candidates(
+    status: str | None = None,
+    organization_id: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Fase 3 of the topology-accuracy roadmap -- see FlowLinkCandidate's
+    docstring. Defaults to every status; pass status=pending to get just
+    the review queue a UI would show."""
+    query = db.query(FlowLinkCandidate)
+    if is_super_admin(user):
+        if organization_id is not None:
+            query = query.filter(FlowLinkCandidate.organization_id == organization_id)
+    else:
+        query = query.filter(FlowLinkCandidate.organization_id == user.organization_id)
+    if status is not None:
+        query = query.filter(FlowLinkCandidate.status == status)
+    return query.order_by(FlowLinkCandidate.confidence.desc()).all()
+
+
+@router.post("/link-candidates/{candidate_id}/promote", response_model=NetworkLinkOut)
+def promote_link_candidate(
+    candidate_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin)
+):
+    """The only way a FlowLinkCandidate ever becomes a real NetworkLink --
+    always a human's explicit decision, never automatic (see
+    FlowLinkCandidate's docstring on why: a Flow can always have a switch
+    in the middle). Reuses topology_from_switch.upsert_link so a pre-
+    existing *manual* link for this pair (asserted by a human through some
+    other path in the meantime) still always wins -- that call returning
+    False means nothing was promoted, surfaced as a 409 rather than
+    silently marking this candidate confirmed for a link that didn't
+    actually change."""
+    candidate = _get_owned_candidate(db, user, candidate_id)
+    if candidate.status != CANDIDATE_PENDING:
+        raise HTTPException(status_code=409, detail=message("topology.link_candidate_already_resolved", user.locale))
+
+    device_a = db.get(Device, candidate.device_a_id)
+    device_b = db.get(Device, candidate.device_b_id)
+    promoted = upsert_link(
+        db,
+        device_a,
+        None,
+        device_b,
+        None,
+        source=LINK_SOURCE_FLOW_CANDIDATE,
+        notes="Promovido desde un candidato de enlace basado en Flow "
+        "(ambos equipos confirmados por ARP en el mismo Sensor)",
+    )
+    if not promoted:
+        raise HTTPException(status_code=409, detail=message("topology.link_candidate_already_resolved", user.locale))
+
+    candidate.status = CANDIDATE_CONFIRMED
+    db.commit()
+
+    link = (
+        db.query(NetworkLink)
+        .filter(NetworkLink.device_a_id == candidate.device_a_id, NetworkLink.device_b_id == candidate.device_b_id)
+        .one()
+    )
+    return link
+
+
+@router.post("/link-candidates/{candidate_id}/dismiss", response_model=FlowLinkCandidateOut)
+def dismiss_link_candidate(
+    candidate_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin)
+):
+    """A dismissed candidate is never resurrected by a later
+    apply_flow_link_candidates pass -- a human's "no" is final, same
+    principle as a manual NetworkLink always winning."""
+    candidate = _get_owned_candidate(db, user, candidate_id)
+    if candidate.status != CANDIDATE_PENDING:
+        raise HTTPException(status_code=409, detail=message("topology.link_candidate_already_resolved", user.locale))
+    candidate.status = CANDIDATE_DISMISSED
+    db.commit()
+    db.refresh(candidate)
+    return candidate

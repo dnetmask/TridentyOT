@@ -981,6 +981,86 @@ def test_segment_classification_upgrades_to_same_segment_once_arp_evidence_arriv
     assert device.segment_relation == SEGMENT_SAME
 
 
+def test_flow_link_candidates_requires_the_same_sensor_on_both_ends(db_session, org_id):
+    """Each device independently being SEGMENT_SAME isn't enough -- they
+    could be same-segment relative to two totally unrelated Sensors (e.g.
+    two different sites), which says nothing about whether those two
+    devices are anywhere near each other."""
+    from app.inventory.inventory_service import apply_flow_link_candidates, apply_segment_classification
+    from app.models import Flow, FlowLinkCandidate
+
+    sensor_a = _make_sensor(db_session, org_id, "Planta 10", "Linea 1", "Sensor J")
+    sensor_b = _make_sensor(db_session, org_id, "Planta 11", "Linea 1", "Sensor K")
+    cs_a = _make_capture_session(db_session, org_id, sensor_a.id)
+    cs_b = _make_capture_session(db_session, org_id, sensor_b.id)
+
+    device_a = Device(organization_id=org_id, ip="10.0.9.50", capture_session_id=cs_a.id)
+    device_b = Device(organization_id=org_id, ip="10.0.9.51", capture_session_id=cs_b.id)
+    db_session.add_all([device_a, device_b])
+    db_session.commit()
+
+    a_id, b_id = sorted((device_a.id, device_b.id))
+    db_session.add(
+        ArpObservation(organization_id=org_id, sensor_id=sensor_a.id, ip="10.0.9.50", mac="aa:bb:cc:00:08:01")
+    )
+    db_session.add(
+        ArpObservation(organization_id=org_id, sensor_id=sensor_b.id, ip="10.0.9.51", mac="aa:bb:cc:00:08:02")
+    )
+    db_session.add(
+        Flow(
+            device_a_id=a_id, device_b_id=b_id, server_device_id=b_id,
+            transport="tcp", port=502, protocol="modbus", category="OT",
+        )
+    )
+    db_session.commit()
+
+    apply_segment_classification(db_session, org_id)
+    db_session.commit()
+    apply_flow_link_candidates(db_session, org_id)
+    db_session.commit()
+
+    assert db_session.query(FlowLinkCandidate).count() == 0
+
+
+def test_flow_link_candidates_skips_a_pair_that_already_has_a_network_link(db_session, org_id):
+    """A real NetworkLink -- from any source -- always outranks this
+    weaker, circumstantial signal; no candidate should even be generated
+    for a pair that's already resolved."""
+    from app.inventory.inventory_service import apply_flow_link_candidates, apply_segment_classification
+    from app.models import Flow, FlowLinkCandidate, NetworkLink
+
+    sensor = _make_sensor(db_session, org_id, "Planta 12", "Linea 1", "Sensor L")
+    cs = _make_capture_session(db_session, org_id, sensor.id)
+
+    device_a = Device(organization_id=org_id, ip="10.0.9.60", capture_session_id=cs.id)
+    device_b = Device(organization_id=org_id, ip="10.0.9.61", capture_session_id=cs.id)
+    db_session.add_all([device_a, device_b])
+    db_session.commit()
+
+    a_id, b_id = sorted((device_a.id, device_b.id))
+    db_session.add(NetworkLink(organization_id=org_id, device_a_id=a_id, device_b_id=b_id))
+    db_session.add(
+        ArpObservation(organization_id=org_id, sensor_id=sensor.id, ip="10.0.9.60", mac="aa:bb:cc:00:09:01")
+    )
+    db_session.add(
+        ArpObservation(organization_id=org_id, sensor_id=sensor.id, ip="10.0.9.61", mac="aa:bb:cc:00:09:02")
+    )
+    db_session.add(
+        Flow(
+            device_a_id=a_id, device_b_id=b_id, server_device_id=b_id,
+            transport="tcp", port=502, protocol="modbus", category="OT",
+        )
+    )
+    db_session.commit()
+
+    apply_segment_classification(db_session, org_id)
+    db_session.commit()
+    apply_flow_link_candidates(db_session, org_id)
+    db_session.commit()
+
+    assert db_session.query(FlowLinkCandidate).count() == 0
+
+
 def _modbus_object(object_id: int, value: str) -> bytes:
     return bytes([object_id, len(value)]) + value.encode()
 

@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.capture.packet_processor import process_packet
 from app.inventory.inventory_service import (
     IngestCache,
+    apply_flow_link_candidates,
     apply_gateway_detection,
     apply_segment_classification,
     ingest_packet_record,
@@ -119,6 +120,7 @@ def run_profinet_dcp_scan(
                 )
         apply_gateway_detection(db_session, capture_session.organization_id)
         apply_segment_classification(db_session, capture_session.organization_id)
+        apply_flow_link_candidates(db_session, capture_session.organization_id)
         capture_session.packet_count = count
         capture_session.status = "completed"
     except Exception as exc:

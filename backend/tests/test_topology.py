@@ -313,3 +313,163 @@ def test_topology_site_id_unifies_every_zone_under_it(client, db_session, org_id
     assert zone_ids_by_device[device_b.id] == zone_b.id
     assert len(site_scoped["edges"]) == 1
     assert site_scoped["edges"][0]["kind"] == "confirmed"
+
+
+def _make_sensor_and_devices(db_session, org_id, site_name, zone_name, ip_a, ip_b, vlan=None):
+    """Two devices attributed to the *same* real Sensor (unlike
+    _make_device_in_zone, which mints a fresh Zone/Sensor per call), each
+    with a live ArpObservation on that Sensor -- the precondition
+    apply_segment_classification/apply_flow_link_candidates need to ever
+    consider a pair a same-segment link candidate."""
+    from app.models import ArpObservation
+
+    site = Site(organization_id=org_id, name=site_name)
+    db_session.add(site)
+    db_session.flush()
+    zone = Zone(site_id=site.id, name=zone_name)
+    db_session.add(zone)
+    db_session.flush()
+    sensor = Sensor(zone_id=zone.id, name=f"Sensor {zone_name}")
+    db_session.add(sensor)
+    db_session.flush()
+    capture_session = CaptureSession(
+        organization_id=org_id, sensor_id=sensor.id, source_type="pcap", source="test.pcap", status="completed",
+    )
+    db_session.add(capture_session)
+    db_session.flush()
+    device_a = _make_device(db_session, org_id, ip=ip_a, capture_session_id=capture_session.id, vlan=vlan)
+    device_b = _make_device(db_session, org_id, ip=ip_b, capture_session_id=capture_session.id, vlan=vlan)
+    db_session.add(ArpObservation(organization_id=org_id, sensor_id=sensor.id, ip=ip_a, mac="aa:bb:cc:00:01:01"))
+    db_session.add(ArpObservation(organization_id=org_id, sensor_id=sensor.id, ip=ip_b, mac="aa:bb:cc:00:01:02"))
+    db_session.commit()
+    return device_a, device_b, sensor
+
+
+def _seed_pending_candidate(db_session, org_id, ip_a="10.0.20.5", ip_b="10.0.20.6", vlan=None):
+    from app.inventory.inventory_service import apply_flow_link_candidates, apply_segment_classification
+    from app.models import FlowLinkCandidate
+
+    device_a, device_b, sensor = _make_sensor_and_devices(
+        db_session, org_id, "Planta Candidatos", "Linea 1", ip_a, ip_b, vlan=vlan
+    )
+    _make_flow(db_session, device_a, device_b)
+    apply_segment_classification(db_session, org_id)
+    db_session.commit()
+    apply_flow_link_candidates(db_session, org_id)
+    db_session.commit()
+
+    a_id, b_id = sorted((device_a.id, device_b.id))
+    candidate = (
+        db_session.query(FlowLinkCandidate)
+        .filter(FlowLinkCandidate.device_a_id == a_id, FlowLinkCandidate.device_b_id == b_id)
+        .one()
+    )
+    return device_a, device_b, candidate
+
+
+def test_list_link_candidates_shows_a_pending_candidate(client, db_session, org_id):
+    device_a, device_b, candidate = _seed_pending_candidate(db_session, org_id)
+
+    resp = client.get("/api/topology/link-candidates")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["id"] == candidate.id
+    assert body[0]["status"] == "pending"
+    assert {body[0]["device_a_id"], body[0]["device_b_id"]} == {device_a.id, device_b.id}
+    assert 0 < body[0]["confidence"] < 1.0
+
+
+def test_list_link_candidates_filters_by_status(client, db_session, org_id):
+    _, _, candidate = _seed_pending_candidate(db_session, org_id)
+
+    assert len(client.get("/api/topology/link-candidates?status=pending").json()) == 1
+    assert len(client.get("/api/topology/link-candidates?status=confirmed").json()) == 0
+
+    client.post(f"/api/topology/link-candidates/{candidate.id}/dismiss")
+    assert len(client.get("/api/topology/link-candidates?status=pending").json()) == 0
+    assert len(client.get("/api/topology/link-candidates?status=dismissed").json()) == 1
+
+
+def test_vlan_match_scores_higher_confidence_than_no_match(db_session, org_id):
+    from app.models import FlowLinkCandidate
+
+    _, _, unmatched = _seed_pending_candidate(db_session, org_id, ip_a="10.0.21.5", ip_b="10.0.21.6")
+    _, _, matched = _seed_pending_candidate(db_session, org_id, ip_a="10.0.22.5", ip_b="10.0.22.6", vlan=42)
+
+    unmatched_candidate = db_session.get(FlowLinkCandidate, unmatched.id)
+    matched_candidate = db_session.get(FlowLinkCandidate, matched.id)
+    assert matched_candidate.confidence > unmatched_candidate.confidence
+
+
+def test_promote_link_candidate_creates_a_network_link(client, db_session, org_id):
+    from app.models import NetworkLink
+
+    device_a, device_b, candidate = _seed_pending_candidate(db_session, org_id)
+
+    resp = client.post(f"/api/topology/link-candidates/{candidate.id}/promote")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["source"] == "flow_candidate"
+    assert body["status"] == "confirmed"
+    assert {body["device_a_id"], body["device_b_id"]} == {device_a.id, device_b.id}
+
+    assert db_session.query(NetworkLink).count() == 1
+    db_session.refresh(candidate)
+    assert candidate.status == "confirmed"
+
+    # the promoted pair now has a real link, so a later pass must not spin
+    # up a fresh pending candidate for the exact same devices.
+    from app.inventory.inventory_service import apply_flow_link_candidates
+    from app.models import FlowLinkCandidate
+
+    apply_flow_link_candidates(db_session, org_id)
+    db_session.commit()
+    assert db_session.query(FlowLinkCandidate).count() == 1
+
+
+def test_promote_already_resolved_candidate_409s(client, db_session, org_id):
+    _, _, candidate = _seed_pending_candidate(db_session, org_id)
+    client.post(f"/api/topology/link-candidates/{candidate.id}/promote")
+
+    resp = client.post(f"/api/topology/link-candidates/{candidate.id}/promote")
+    assert resp.status_code == 409
+
+
+def test_dismiss_link_candidate_is_not_resurrected_by_a_later_pass(client, db_session, org_id):
+    _, _, candidate = _seed_pending_candidate(db_session, org_id)
+
+    resp = client.post(f"/api/topology/link-candidates/{candidate.id}/dismiss")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "dismissed"
+
+    from app.inventory.inventory_service import apply_flow_link_candidates
+
+    apply_flow_link_candidates(db_session, org_id)
+    db_session.commit()
+    db_session.refresh(candidate)
+    assert candidate.status == "dismissed"
+
+
+def test_dismiss_already_resolved_candidate_409s(client, db_session, org_id):
+    _, _, candidate = _seed_pending_candidate(db_session, org_id)
+    client.post(f"/api/topology/link-candidates/{candidate.id}/dismiss")
+
+    resp = client.post(f"/api/topology/link-candidates/{candidate.id}/dismiss")
+    assert resp.status_code == 409
+
+
+def test_link_candidate_not_found_404s(client):
+    resp = client.post("/api/topology/link-candidates/999999/promote")
+    assert resp.status_code == 404
+    resp = client.post("/api/topology/link-candidates/999999/dismiss")
+    assert resp.status_code == 404
+
+
+def test_promote_and_dismiss_link_candidate_require_admin(client, make_client, db_session, org_id):
+    _, _, candidate = _seed_pending_candidate(db_session, org_id)
+    client.post("/api/users", json={"username": "viewer-candidates", "password": "secret1", "role": "viewer"})
+    viewer = make_client("viewer-candidates", "secret1")
+
+    assert viewer.post(f"/api/topology/link-candidates/{candidate.id}/promote").status_code == 403
+    assert viewer.post(f"/api/topology/link-candidates/{candidate.id}/dismiss").status_code == 403

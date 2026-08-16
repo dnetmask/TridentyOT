@@ -177,6 +177,14 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "Los dos dispositivos deben pertenecer a la misma organización",
         "en": "Both devices must belong to the same organization",
     },
+    "topology.link_candidate_not_found": {
+        "es": "Candidato de enlace no encontrado",
+        "en": "Link candidate not found",
+    },
+    "topology.link_candidate_already_resolved": {
+        "es": "Este candidato ya fue confirmado o descartado",
+        "en": "This candidate has already been confirmed or dismissed",
+    },
 }
 
 

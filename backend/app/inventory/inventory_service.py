@@ -24,7 +24,18 @@ from app.fingerprint.os_fingerprint import (
 from app.fingerprint.protocol_detect import OT, PROFINET_OTHER, ProtocolInfo, classify
 from app.fingerprint.vendor_lookup import lookup_vendor
 from app.i18n import bilingual, encode_i18n
-from app.models import ArpObservation, CaptureSession, Device, DeviceProtocol, Flow, VulnerabilityFinding, utcnow
+from app.models import (
+    CANDIDATE_PENDING,
+    ArpObservation,
+    CaptureSession,
+    Device,
+    DeviceProtocol,
+    Flow,
+    FlowLinkCandidate,
+    NetworkLink,
+    VulnerabilityFinding,
+    utcnow,
+)
 
 _PRINTABLE_BANNER_MIN_RATIO = 0.85
 
@@ -602,6 +613,131 @@ def apply_segment_classification(session: Session, organization_id: int) -> None
             device.segment_relation = SEGMENT_SAME
         else:
             device.segment_relation = SEGMENT_ROUTED_LOCAL
+
+
+# FlowLinkCandidate.confidence -- deliberately capped well below 1.0 (see
+# the model's own docstring): a Flow between two ARP-confirmed-same-segment
+# devices is real, but weak, evidence of a direct cable, never proof.
+_FLOW_CANDIDATE_BASE_CONFIDENCE = 0.4
+# Sharing a VLAN reinforces "same logical L2 domain" but still doesn't
+# prove adjacency -- an unmanaged switch on that same VLAN is still
+# invisible to this signal.
+_FLOW_CANDIDATE_VLAN_MATCH_BONUS = 0.2
+
+
+def apply_flow_link_candidates(session: Session, organization_id: int) -> None:
+    """Fase 3 of the topology-accuracy roadmap: for every Flow between two
+    devices that were BOTH ARP-confirmed on the exact same Sensor (see
+    Device.segment_relation/apply_segment_classification), upserts a
+    FlowLinkCandidate scored by how much (still circumstantial) evidence
+    backs it -- never a NetworkLink, never auto-promoted. A pair already
+    covered by a real NetworkLink (whatever its source) is skipped
+    entirely: that's already resolved, by a human or a switch, and always
+    outranks this weaker signal.
+
+    Sharing a sensor (not just each independently being SEGMENT_SAME) is
+    the actual precondition: a device confirmed same-segment on Sensor A
+    and one confirmed same-segment on unrelated Sensor B could easily be
+    two completely different physical locations that just happen to both
+    have *a* directly-attached ARP-confirmed neighbor -- nothing here says
+    those two neighbors are anywhere near each other.
+
+    A row already decided by a human (status confirmed/dismissed) is never
+    touched again by this pass -- confirmed candidates are moot anyway
+    (their pair now has a real NetworkLink, caught by the skip above);
+    dismissed ones stay dismissed until a human says otherwise.
+    """
+    same_segment_devices = (
+        session.query(Device)
+        .filter(Device.organization_id == organization_id, Device.segment_relation == SEGMENT_SAME)
+        .all()
+    )
+    if len(same_segment_devices) < 2:
+        return
+
+    device_by_id = {d.id: d for d in same_segment_devices}
+    device_ids = list(device_by_id)
+
+    capture_session_ids = {d.capture_session_id for d in same_segment_devices if d.capture_session_id is not None}
+    sensor_by_capture_session: dict[int, int | None] = {}
+    if capture_session_ids:
+        sensor_by_capture_session = dict(
+            session.query(CaptureSession.id, CaptureSession.sensor_id)
+            .filter(CaptureSession.id.in_(capture_session_ids))
+            .all()
+        )
+    sensor_by_device = {d.id: sensor_by_capture_session.get(d.capture_session_id) for d in same_segment_devices}
+
+    existing_link_pairs = set(
+        session.query(NetworkLink.device_a_id, NetworkLink.device_b_id)
+        .filter(NetworkLink.organization_id == organization_id)
+        .all()
+    )
+
+    flows = (
+        session.query(Flow)
+        .filter(Flow.device_a_id.in_(device_ids), Flow.device_b_id.in_(device_ids))
+        .all()
+    )
+
+    now = utcnow()
+    seen_pairs: set[tuple[int, int]] = set()
+    for flow in flows:
+        pair = (flow.device_a_id, flow.device_b_id)  # already normalized a < b, same as Flow itself
+        if pair in seen_pairs or pair in existing_link_pairs:
+            continue
+        seen_pairs.add(pair)
+
+        sensor_a = sensor_by_device.get(pair[0])
+        sensor_b = sensor_by_device.get(pair[1])
+        if sensor_a != sensor_b:
+            continue
+
+        device_a, device_b = device_by_id[pair[0]], device_by_id[pair[1]]
+        confidence = _FLOW_CANDIDATE_BASE_CONFIDENCE
+        vlan_match = device_a.vlan is not None and device_a.vlan == device_b.vlan
+        if vlan_match:
+            confidence += _FLOW_CANDIDATE_VLAN_MATCH_BONUS
+
+        existing = (
+            session.query(FlowLinkCandidate)
+            .filter(FlowLinkCandidate.device_a_id == pair[0], FlowLinkCandidate.device_b_id == pair[1])
+            .one_or_none()
+        )
+        if existing is not None and existing.status != CANDIDATE_PENDING:
+            continue
+
+        evidence = encode_i18n(
+            bilingual(
+                es="Ambos equipos fueron confirmados por ARP en el mismo Sensor"
+                + (f" y comparten la VLAN {device_a.vlan}" if vlan_match else "")
+                + " -- no es prueba de un cable directo, solo de que comparten el mismo segmento L2; "
+                "puede haber un switch no administrado de por medio",
+                en="Both devices were ARP-confirmed on the same Sensor"
+                + (f" and share VLAN {device_a.vlan}" if vlan_match else "")
+                + " -- not proof of a direct cable, only that they share the same L2 segment; "
+                "an unmanaged switch could still sit between them",
+            )
+        )
+
+        if existing is None:
+            session.add(
+                FlowLinkCandidate(
+                    organization_id=organization_id,
+                    device_a_id=pair[0],
+                    device_b_id=pair[1],
+                    sensor_id=sensor_a,
+                    confidence=confidence,
+                    evidence=evidence,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        else:
+            existing.sensor_id = sensor_a
+            existing.confidence = confidence
+            existing.evidence = evidence
+            existing.updated_at = now
 
 
 def upsert_protocol(

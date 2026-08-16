@@ -220,6 +220,25 @@ class NetworkLinkOut(BaseModel):
     updated_at: datetime.datetime
 
 
+class FlowLinkCandidateOut(BaseModel):
+    """See app/models.py's FlowLinkCandidate docstring -- a suggestion,
+    never a confirmed link. `evidence` is i18n-encoded the same way
+    Device.device_type_evidence is (the frontend decodes it for the
+    user's locale)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    device_a_id: int
+    device_b_id: int
+    sensor_id: int | None
+    confidence: float
+    evidence: str | None
+    status: str  # "pending" | "confirmed" | "dismissed"
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
 class NetworkLinkCreateRequest(BaseModel):
     """Records a human's claim about a real physical link -- see
     app/models.py's NetworkLink docstring for why this is never something
