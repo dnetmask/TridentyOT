@@ -417,8 +417,18 @@ import posterior para el mismo par de dispositivos; uno derivado (`mac_table`/`c
 actualiza si un hallazgo más nuevo trae datos distintos. Una interfaz con **más de una MAC** en su tabla
 es la señal clásica de un uplink a otro switch -- se reporta como "uplink sospechoso" pero nunca se
 dibuja un enlace ahí, porque la tabla MAC sola no dice a qué otro switch va (eso es lo que resuelve
-CDP/LLDP). Un vecino CDP/LLDP que no coincide con ningún Device del inventario tampoco crea un Device
-nuevo -- queda listado como "vecino sin identificar" para crear ese switch a mano y reimportar.
+CDP/LLDP).
+
+Una MAC de la tabla de direcciones (puerto con una sola MAC) o un vecino CDP/LLDP que **no** coincide
+con ningún `Device` del inventario ya no se descarta: se auto-provisiona un Device nuevo ahí mismo y
+se crea el enlace, en vez de solo reportarlo para crearlo a mano y reimportar. Para una MAC de tabla,
+la única evidencia propia que trae es el fabricante por OUI (`lookup_vendor`) -- se corre por el mismo
+`classify_device_type` que usa el resto de la app, así que un fabricante reconocido (Siemens, Rockwell,
+...) ya alcanza para una clasificación real (ej. PLC); sin fabricante reconocido queda sin tipo
+(`OTHER` a confianza 0, nunca un tipo adivinado). Un vecino CDP/LLDP sin coincidencia sí tiene un
+fallback: `network_device` a confianza reducida (0.5, no 1.0), ya que ser vecino directo de un switch
+es en sí una señal (débil) de que también es equipo de red -- una clasificación real posterior todavía
+lo puede corregir.
 
 Esto se controla desde **Descubrimiento activo → Topología por switch**: elegí un switch ya visto en
 Inventario o creá uno manual (`POST /api/inventory/devices` -- opcionalmente atribuido a un Sensor/Zona
@@ -441,7 +451,7 @@ en una consulta sin filtrar). Después:
   formato real de IOS) y **Siemens Scalance** (mejor esfuerzo: no hay una muestra real de un equipo
   todavía para calibrar el formato exacto -- se ajusta en cuanto se prueba contra uno real, el texto
   crudo queda guardado en `SwitchTableImport.raw_text` justo para eso). Devuelve un resumen: filas
-  leídas, enlaces creados/actualizados, uplinks sospechosos, vecinos sin identificar.
+  leídas, enlaces creados/actualizados, uplinks sospechosos, equipos nuevos auto-provisionados.
 
 ```bash
 curl -X POST http://localhost:8000/api/inventory/devices \

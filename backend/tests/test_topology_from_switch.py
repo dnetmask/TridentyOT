@@ -66,19 +66,57 @@ def test_apply_mac_table_flags_multi_mac_port_as_suspected_uplink_without_a_link
     assert db_session.query(NetworkLink).count() == 0
 
 
-def test_apply_mac_table_reports_unknown_mac_without_a_link(db_session, org_id):
-    """An unmatched MAC creates neither a Device nor a link (same "don't
-    invent one" stance as an unresolved neighbor), but must still be
-    reported back -- otherwise a real, correctly-parsed table with every
-    port pointing at gear that isn't in inventory yet reads as "0 links,
-    nothing happened" instead of "read fine, nothing to match against"."""
-    switch = _make_device(db_session, org_id, custom_name="switch-1")
-    entries = [SwitchMacTableEntry(switch_table_import_id=0, mac="aa:bb:cc:dd:ee:ff", interface_name="Gi0/3")]
-    result = apply_mac_table(db_session, switch, entries)
+def test_apply_mac_table_auto_creates_unresolved_single_mac_port(db_session, org_id):
+    """A single-MAC port is unambiguous (unlike the multi-MAC uplink case
+    above) -- there's exactly one real device wired to it -- so an unknown
+    MAC now gets auto-provisioned and linked immediately instead of only
+    being reported back for a human to create by hand and reimport (same
+    reasoning apply_neighbor_table already applies to unresolved CDP/LLDP
+    neighbors). The OUI vendor lookup is real, unlike the fully synthetic
+    MACs used elsewhere in this file, so classify_device_type has
+    something to actually work with."""
+    from app.models import Device
 
-    assert result["links_created_or_updated"] == 0
-    assert result["unmatched_macs"] == [{"interface": "Gi0/3", "mac": "aa:bb:cc:dd:ee:ff"}]
-    assert db_session.query(NetworkLink).count() == 0
+    switch = _make_device(db_session, org_id, custom_name="switch-1")
+    SIEMENS_MAC = "00:1b:1b:aa:bb:02"
+    entries = [SwitchMacTableEntry(switch_table_import_id=0, mac=SIEMENS_MAC, interface_name="Gi0/3")]
+    result = apply_mac_table(db_session, switch, entries)
+    db_session.commit()
+
+    assert result["links_created_or_updated"] == 1
+    assert len(result["devices_created"]) == 1
+    created_id = result["devices_created"][0]["id"]
+    assert result["devices_created"][0]["mac"] == SIEMENS_MAC
+
+    created = db_session.get(Device, created_id)
+    assert created.mac == SIEMENS_MAC
+    assert created.vendor == "Siemens AG"
+    assert created.display_device_type == "plc"  # vendor-only guess, see device_classifier.py
+    assert created.device_type_evidence  # non-empty: traceable back to this auto-creation
+
+    link = db_session.query(NetworkLink).one()
+    assert {link.device_a_id, link.device_b_id} == {switch.id, created_id}
+    assert link.source == LINK_SOURCE_MAC_TABLE
+
+
+def test_apply_mac_table_auto_created_device_with_unknown_vendor_stays_unclassified(db_session, org_id):
+    """No vendor match at all -- classify_device_type's own zero-confidence
+    result -- must never be persisted as a real device_type (same
+    never-downgrade convention apply_device_type_guess uses elsewhere):
+    the row still gets created and linked, just left untyped rather than
+    guessing wrong."""
+    from app.models import Device
+
+    switch = _make_device(db_session, org_id, custom_name="switch-2")
+    entries = [SwitchMacTableEntry(switch_table_import_id=0, mac="aa:bb:cc:dd:ee:ff", interface_name="Gi0/4")]
+    result = apply_mac_table(db_session, switch, entries)
+    db_session.commit()
+
+    assert result["links_created_or_updated"] == 1
+    created = db_session.get(Device, result["devices_created"][0]["id"])
+    assert created.device_type is None
+    assert created.device_type_confidence == 0.0
+    assert created.device_type_evidence  # still traceable, even with no type guess
 
 
 def test_apply_mac_table_never_overwrites_a_manual_link(db_session, org_id):

@@ -381,8 +381,8 @@ class SwitchTableImportOut(BaseModel):
     links_created_or_updated: int = 0
     devices_enriched: int = 0  # arp only -- Device.ip/mac filled in, never a link
     suspected_uplinks: list[dict] = []
-    unmatched_macs: list[dict] = []  # mac_table only -- MAC not in inventory, so no link either
-    devices_created: list[dict] = []  # neighbors only -- auto-provisioned from an unmatched CDP/LLDP neighbor
+    unmatched_macs: list[dict] = []  # unused going forward (kept for old stored result_summary rows -- see below)
+    devices_created: list[dict] = []  # mac_table (single-MAC port) or neighbors (unresolved CDP/LLDP neighbor)
 
 
 class SwitchTableImportHistoryOut(BaseModel):

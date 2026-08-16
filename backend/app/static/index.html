@@ -2387,13 +2387,9 @@ function switchImportResultHtml(result) {
     html += `<div style="margin-top:6px;">Uplinks sospechosos (múltiples MAC en el mismo puerto, sin enlace creado):<ul style="margin:4px 0 0 18px;">` +
       result.suspected_uplinks.map(u => `<li>${escapeHtml(u.interface)} -- ${u.mac_count} MACs</li>`).join('') + `</ul></div>`;
   }
-  if (result.unmatched_macs && result.unmatched_macs.length) {
-    html += `<div style="margin-top:6px;">MAC sin dispositivo coincidente en el inventario (sin enlace creado -- cargá o descubrí ese equipo primero y reimportá):<ul style="margin:4px 0 0 18px;">` +
-      result.unmatched_macs.map(m => `<li>${escapeHtml(m.interface)} -- ${escapeHtml(m.mac)}</li>`).join('') + `</ul></div>`;
-  }
   if (result.devices_created && result.devices_created.length) {
-    html += `<div style="margin-top:6px;">Equipos de red creados automáticamente a partir de vecinos CDP/LLDP (revisá/editá el tipo en Inventario si hace falta):<ul style="margin:4px 0 0 18px;">` +
-      result.devices_created.map(d => `<li>${escapeHtml(d.name)}</li>`).join('') + `</ul></div>`;
+    html += `<div style="margin-top:6px;">Equipos nuevos creados automáticamente en el inventario (un vecino CDP/LLDP o la única MAC de un puerto -- revisá/editá el tipo en Inventario si hace falta):<ul style="margin:4px 0 0 18px;">` +
+      result.devices_created.map(d => `<li>${escapeHtml(d.name || d.mac)}</li>`).join('') + `</ul></div>`;
   }
   return html;
 }

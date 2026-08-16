@@ -1,7 +1,8 @@
 """Turns a switch's own reported tables (MAC address table, ARP table,
 CDP/LLDP neighbors -- see app/models.py's SwitchMacTableEntry/
 SwitchArpEntry/SwitchNeighborEntry) into real topology data: NetworkLink
-rows for mac_table/neighbors, plain Device enrichment for arp.
+rows for mac_table/neighbors (auto-provisioning a Device first when the
+MAC/neighbor isn't in inventory yet), plain Device enrichment for arp.
 
 Fed by two callers that both land here after parsing their own input into
 the same child rows: a manual paste (app/switch_table_parsers.py, via
@@ -13,6 +14,7 @@ this logic.
 from sqlalchemy.orm import Session
 
 from app.fingerprint.device_classifier import NETWORK_DEVICE, SWITCH_L2, classify_device_type
+from app.fingerprint.vendor_lookup import lookup_vendor
 from app.i18n import bilingual, encode_i18n
 from app.models import LINK_CONFIRMED, LINK_SOURCE_CDP, LINK_SOURCE_LLDP, LINK_SOURCE_MAC_TABLE, LINK_SOURCE_MANUAL
 from app.models import Device, NetworkLink, SwitchArpEntry, SwitchMacTableEntry, SwitchNeighborEntry
@@ -59,23 +61,72 @@ def upsert_link(
     return True
 
 
+def _create_device_from_mac_table_entry(db: Session, switch: Device, interface_name: str, mac: str) -> Device:
+    """A MAC-table port showing exactly one address is, unlike the multi-MAC
+    "suspected uplink" case above, unambiguous: there's a single real
+    device wired directly to that port, worth auto-provisioning right away
+    instead of only reporting it back for a human to create by hand and
+    reimport (same reasoning as apply_neighbor_table's unresolved-neighbor
+    case below).
+
+    The OUI vendor lookup is the only self-reported evidence a bare MAC
+    carries; classify_device_type runs with just that (no hostname/model/
+    protocol to add) so a recognizable vendor (a PLC/HMI/network-gear
+    maker) still produces a real type guess. Deliberately no
+    network_device fallback the way an unresolved CDP/LLDP neighbor gets
+    (see apply_neighbor_table): a single-MAC port is the opposite signal
+    from that -- one real end device behind it, never a switch with many
+    MACs of its own downstream (that's exactly what the multi-MAC branch
+    already catches) -- so an unrecognized vendor is left OTHER at zero
+    confidence rather than guessing wrong."""
+    vendor = lookup_vendor(mac)
+    guess = classify_device_type(
+        vendor=vendor, hostname=None, model=None, os_signature=None,
+        has_ot_server_protocol=False, server_protocol_count=0,
+    )
+    device = Device(
+        organization_id=switch.organization_id,
+        capture_session_id=switch.capture_session_id,
+        mac=mac,
+        vendor=vendor,
+    )
+    if guess.confidence > 0:
+        device.device_type = guess.device_type
+        device.device_type_confidence = guess.confidence
+        device.device_type_secondary = guess.device_type_secondary
+    evidence_items = list(guess.evidence) if guess.confidence > 0 else []
+    evidence_items.append(
+        bilingual(
+            es=f"Creado automáticamente: única MAC vista en la tabla de direcciones de "
+            f"{switch.display_name or f'device-{switch.id}'} ({interface_name})",
+            en=f"Auto-created: only MAC seen in {switch.display_name or f'device-{switch.id}'}'s "
+            f"MAC address table ({interface_name})",
+        )
+    )
+    device.device_type_evidence = encode_i18n(*evidence_items)
+    db.add(device)
+    db.flush()  # need device.id before it can be a NetworkLink endpoint below
+    return device
+
+
 def apply_mac_table(db: Session, switch: Device, entries: list[SwitchMacTableEntry]) -> dict:
     """A port that shows exactly one MAC gets a NetworkLink to whatever
-    Device owns that MAC (if it's in inventory at all -- an unknown MAC
-    produces neither a Device nor a link, same "don't invent one" stance as
-    neighbors below, but IS reported back as unmatched so a 0-link result
-    doesn't read as "nothing happened" when the table was in fact read
-    correctly). A port with more than one MAC is the classic switch-to-
-    switch uplink signature -- reported as a suspected uplink instead of
-    guessed at, since a MAC table alone can't say *which* other switch it
-    goes to (that's what CDP/LLDP is for)."""
+    Device owns that MAC -- auto-provisioning one first (see
+    _create_device_from_mac_table_entry) if it isn't in inventory yet, so
+    the topology reflects it immediately instead of only being reported
+    for a human to create manually and reimport (mirrors
+    apply_neighbor_table's own unresolved-neighbor handling). A port with
+    more than one MAC is the classic switch-to-switch uplink signature --
+    reported as a suspected uplink instead of guessed at, since a MAC
+    table alone can't say *which* other switch it goes to (that's what
+    CDP/LLDP is for)."""
     by_interface: dict[str, set[str]] = {}
     for entry in entries:
         by_interface.setdefault(entry.interface_name, set()).add(entry.mac)
 
     links_created_or_updated = 0
     suspected_uplinks = []
-    unmatched_macs = []
+    devices_created = []
     for interface_name, macs in by_interface.items():
         if len(macs) > 1:
             suspected_uplinks.append({"interface": interface_name, "mac_count": len(macs)})
@@ -87,8 +138,8 @@ def apply_mac_table(db: Session, switch: Device, entries: list[SwitchMacTableEnt
             .one_or_none()
         )
         if other is None:
-            unmatched_macs.append({"interface": interface_name, "mac": mac})
-            continue
+            other = _create_device_from_mac_table_entry(db, switch, interface_name, mac)
+            devices_created.append({"id": other.id, "mac": mac})
         if upsert_link(
             db, switch, interface_name, other, None,
             source=LINK_SOURCE_MAC_TABLE, notes="Detectado por tabla de direcciones MAC",
@@ -98,7 +149,7 @@ def apply_mac_table(db: Session, switch: Device, entries: list[SwitchMacTableEnt
     return {
         "links_created_or_updated": links_created_or_updated,
         "suspected_uplinks": suspected_uplinks,
-        "unmatched_macs": unmatched_macs,
+        "devices_created": devices_created,
     }
 
 
