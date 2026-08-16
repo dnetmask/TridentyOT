@@ -549,20 +549,39 @@ class SwitchNeighborEntry(Base):
 
 class ArpObservation(Base):
     """A live IP<->MAC binding this sensor itself captured off the wire (an
-    ARP request or reply), upserted by (organization_id, ip) -- last_seen
-    wins, this is not an append-only log. Distinct from SwitchArpEntry
-    above, which is a point-in-time snapshot pasted/walked from a switch's
-    own ARP table: this one is continuously refreshed from passive capture.
-    ARP never routes past a default gateway, so two devices with an entry
-    for each other here are proof of sharing one L2 broadcast domain --
-    exactly the corroborating signal later topology-inference phases need
-    before treating a Flow as anything more than "these two IPs talked"."""
+    ARP request or reply), upserted by (organization_id, sensor_id, ip) --
+    last_seen wins, this is not an append-only log. Distinct from
+    SwitchArpEntry above, which is a point-in-time snapshot pasted/walked
+    from a switch's own ARP table: this one is continuously refreshed from
+    passive capture. ARP never routes past a default gateway, so two
+    devices with an entry for each other here are proof of sharing one L2
+    broadcast domain -- exactly the corroborating signal later
+    topology-inference phases need before treating a Flow as anything more
+    than "these two IPs talked".
+
+    Scoped by sensor, not just organization: a private IP range is
+    routinely reused across independent segments (two different sites, or
+    even two isolated lines within the same site -- a Zone can host more
+    than one Sensor, each on its own segment/VLAN, see Sensor's docstring),
+    so organization-wide (or even site-wide) uniqueness would let one
+    segment's binding silently overwrite an unrelated device elsewhere
+    that happens to share the same IP. Sensor is the closest thing this
+    schema has to "a specific broadcast domain", and unlike Zone/Site it
+    costs nothing extra to resolve: CaptureSession.sensor_id is already
+    loaded by every caller of ingest_packet_record before it ever reaches
+    here."""
 
     __tablename__ = "arp_observations"
-    __table_args__ = (UniqueConstraint("organization_id", "ip", name="uq_arp_observation_org_ip"),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "sensor_id", "ip", name="uq_arp_observation_org_sensor_ip"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    # Nullable: a caller without sensor context (a direct/manual call, or a
+    # pre-migration CaptureSession row) still gets a usable, if
+    # org-wide-degraded, binding rather than being rejected outright.
+    sensor_id: Mapped[int | None] = mapped_column(ForeignKey("sensors.id"), nullable=True, index=True)
     ip: Mapped[str] = mapped_column(String(45), index=True)
     mac: Mapped[str] = mapped_column(String(17), index=True)
     last_seen: Mapped[datetime.datetime] = mapped_column(default=utcnow)

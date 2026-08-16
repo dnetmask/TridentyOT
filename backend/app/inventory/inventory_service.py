@@ -82,7 +82,7 @@ class IngestCache:
         self.devices_by_mac: dict[tuple[int, str], Device] = {}
         self.protocols: dict[tuple[int, str, int | None, str], DeviceProtocol] = {}
         self.flows: dict[tuple[int, int, str, int | None], Flow] = {}
-        self.arp_observations: dict[tuple[int, str], ArpObservation] = {}
+        self.arp_observations: dict[tuple[int, int | None, str], ArpObservation] = {}
 
 
 def _is_real_unicast_mac(mac: str | None) -> bool:
@@ -219,6 +219,7 @@ def upsert_arp_observation(
     ip: str,
     mac: str,
     organization_id: int,
+    sensor_id: int | None = None,
     cache: IngestCache | None = None,
 ) -> ArpObservation:
     """Live IP<->MAC binding straight off the wire -- see ArpObservation's
@@ -226,22 +227,36 @@ def upsert_arp_observation(
     just reading device.ip/device.mac (a switch/router can sit between the
     sensor and a device, so a Device's own ip/mac don't necessarily reflect
     what's on this particular segment's ARP cache right now). Upserted by
-    (organization_id, ip): both mac and last_seen are overwritten on every
-    call, since an IP that now resolves to a different mac (NIC swap, DHCP
-    lease turnover) should reflect what the segment says *now*, not
-    whichever binding this sensor happened to see first."""
-    key = (organization_id, ip)
+    (organization_id, sensor_id, ip) -- see the model docstring for why
+    sensor, not just organization: both mac and last_seen are overwritten
+    on every call, since an IP that now resolves to a different mac (NIC
+    swap, DHCP lease turnover) should reflect what the segment says *now*,
+    not whichever binding this sensor happened to see first."""
+    key = (organization_id, sensor_id, ip)
     existing = cache.arp_observations.get(key) if cache is not None else None
     if existing is None:
         existing = (
             session.query(ArpObservation)
-            .filter(ArpObservation.organization_id == organization_id, ArpObservation.ip == ip)
+            .filter(
+                ArpObservation.organization_id == organization_id,
+                ArpObservation.sensor_id == sensor_id,
+                ArpObservation.ip == ip,
+            )
             .one_or_none()
         )
     now = utcnow()
     if existing is None:
-        existing = ArpObservation(organization_id=organization_id, ip=ip, mac=mac, last_seen=now)
+        existing = ArpObservation(
+            organization_id=organization_id, sensor_id=sensor_id, ip=ip, mac=mac, last_seen=now
+        )
         session.add(existing)
+        # Autoflush is off (see db.py's SessionLocal) -- without an explicit
+        # flush here, a second ARP packet for this same (org, sensor, ip)
+        # later in the same uncommitted batch would find nothing via the
+        # query above (this row isn't visible yet) and attempt a second
+        # INSERT, hitting the unique constraint at commit time. Mirrors
+        # get_or_create_device's own self-flush on creation, just above.
+        session.flush()
     else:
         existing.mac = mac
         existing.last_seen = now
@@ -607,6 +622,7 @@ def ingest_packet_record(
     organization_id: int,
     capture_session_id: int | None = None,
     cache: IngestCache | None = None,
+    sensor_id: int | None = None,
 ) -> None:
     if record.transport == "arp":
         device = get_or_create_device(
@@ -626,7 +642,9 @@ def ingest_packet_record(
             and is_real_unicast_ip(record.src_ip)
             and _is_real_unicast_mac(record.src_mac)
         ):
-            upsert_arp_observation(session, record.src_ip, record.src_mac, organization_id, cache=cache)
+            upsert_arp_observation(
+                session, record.src_ip, record.src_mac, organization_id, sensor_id=sensor_id, cache=cache
+            )
         return
 
     if record.transport in ("cdp", "lldp"):

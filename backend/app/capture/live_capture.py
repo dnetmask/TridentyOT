@@ -174,6 +174,7 @@ class _CaptureWorker:
                     organization_id=capture_session.organization_id,
                     capture_session_id=self.capture_session_id,
                     cache=cache,
+                    sensor_id=capture_session.sensor_id,
                 )
             # Whole-table pass, not per-packet: the router/NAT gateway
             # pattern (one MAC shared by several public IPs) only shows up

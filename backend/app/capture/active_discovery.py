@@ -110,6 +110,7 @@ def run_profinet_dcp_scan(
                     organization_id=capture_session.organization_id,
                     capture_session_id=capture_session.id,
                     cache=cache,
+                    sensor_id=capture_session.sensor_id,
                 )
         apply_gateway_detection(db_session, capture_session.organization_id)
         capture_session.packet_count = count

@@ -941,3 +941,74 @@ def test_broadcast_arp_never_creates_an_arp_observation(db_session, org_id):
     db_session.commit()
 
     assert db_session.query(ArpObservation).filter(ArpObservation.ip == "0.0.0.0").one_or_none() is None
+
+
+def _make_sensor(db_session, org_id, site_name, zone_name, sensor_name):
+    from app.models import Sensor, Site, Zone
+
+    site = Site(organization_id=org_id, name=site_name)
+    db_session.add(site)
+    db_session.commit()
+    zone = Zone(site_id=site.id, name=zone_name)
+    db_session.add(zone)
+    db_session.commit()
+    sensor = Sensor(zone_id=zone.id, name=sensor_name)
+    db_session.add(sensor)
+    db_session.commit()
+    return sensor
+
+
+def test_arp_observation_scoped_by_sensor_not_shared_across_segments(db_session, org_id):
+    """A private IP range is routinely reused across independent segments
+    (two different sites, or even two isolated lines within the same site --
+    a Zone can host more than one Sensor, each on its own segment/VLAN). The
+    same IP seen by two different Sensors must produce two separate rows,
+    not one silently overwriting the other (see ArpObservation's docstring
+    on why this is scoped by sensor, not just organization)."""
+    sensor_a = _make_sensor(db_session, org_id, "Planta 1", "Linea 1", "Sensor A")
+    sensor_b = _make_sensor(db_session, org_id, "Planta 2", "Linea 1", "Sensor B")
+
+    pkt_a = Ether() / ARP(psrc="192.168.1.50", pdst="192.168.1.1", hwsrc="aa:bb:cc:00:01:01")
+    pkt_b = Ether() / ARP(psrc="192.168.1.50", pdst="192.168.1.1", hwsrc="aa:bb:cc:00:02:02")
+    ingest_packet_record(db_session, process_packet(pkt_a), org_id, sensor_id=sensor_a.id)
+    ingest_packet_record(db_session, process_packet(pkt_b), org_id, sensor_id=sensor_b.id)
+    db_session.commit()
+
+    rows = db_session.query(ArpObservation).filter(ArpObservation.ip == "192.168.1.50").all()
+    assert len(rows) == 2
+    assert {row.mac for row in rows} == {"aa:bb:cc:00:01:01", "aa:bb:cc:00:02:02"}
+    assert {row.sensor_id for row in rows} == {sensor_a.id, sensor_b.id}
+
+
+def test_arp_observation_upserts_within_the_same_sensor(db_session, org_id):
+    """Same sensor, same ip, new mac (NIC swap/DHCP lease turnover) -- still
+    one row, updated in place, unlike the cross-sensor case above."""
+    sensor = _make_sensor(db_session, org_id, "Planta 3", "Linea 1", "Sensor C")
+
+    first = Ether() / ARP(psrc="192.168.2.50", pdst="192.168.2.1", hwsrc="aa:bb:cc:00:03:01")
+    second = Ether() / ARP(psrc="192.168.2.50", pdst="192.168.2.1", hwsrc="aa:bb:cc:00:03:99")
+    ingest_packet_record(db_session, process_packet(first), org_id, sensor_id=sensor.id)
+    ingest_packet_record(db_session, process_packet(second), org_id, sensor_id=sensor.id)
+    db_session.commit()
+
+    rows = db_session.query(ArpObservation).filter(ArpObservation.ip == "192.168.2.50").all()
+    assert len(rows) == 1
+    assert rows[0].mac == "aa:bb:cc:00:03:99"
+
+
+def test_arp_observation_upserts_with_a_shared_cache_across_the_same_batch(db_session, org_id):
+    """Same scenario as test_arp_observation_upserts_within_the_same_sensor,
+    but with an IngestCache shared across calls -- exactly how live_capture.py
+    processes a whole batch before its one commit at the end."""
+    sensor = _make_sensor(db_session, org_id, "Planta 4", "Linea 1", "Sensor D")
+    cache = IngestCache()
+
+    first = Ether() / ARP(psrc="192.168.3.50", pdst="192.168.3.1", hwsrc="aa:bb:cc:00:04:01")
+    second = Ether() / ARP(psrc="192.168.3.50", pdst="192.168.3.1", hwsrc="aa:bb:cc:00:04:99")
+    ingest_packet_record(db_session, process_packet(first), org_id, sensor_id=sensor.id, cache=cache)
+    ingest_packet_record(db_session, process_packet(second), org_id, sensor_id=sensor.id, cache=cache)
+    db_session.commit()
+
+    rows = db_session.query(ArpObservation).filter(ArpObservation.ip == "192.168.3.50").all()
+    assert len(rows) == 1
+    assert rows[0].mac == "aa:bb:cc:00:04:99"

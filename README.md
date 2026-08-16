@@ -507,9 +507,13 @@ esas señales al inventario, sin dibujar todavía ningún `NetworkLink` a partir
   débil por sí sola.
 - **Tabla ARP en vivo** (`arp_observations`): a diferencia de `SwitchArpEntry` (una foto pegada/
   caminada de la tabla ARP *del switch*), esta es la tabla ARP que el propio sensor arma en vivo
-  capturando ARP pasivamente, upsertada por (organización, IP) -- gana el binding más reciente, no es
-  un log que crece sin límite. El ARP nunca cruza un gateway, así que dos equipos con entradas mutuas
-  acá son prueba de que comparten el mismo dominio de broadcast L2.
+  capturando ARP pasivamente, upsertada por (organización, **Sensor**, IP) -- gana el binding más
+  reciente, no es un log que crece sin límite. Escopada por Sensor y no solo por organización porque un
+  rango privado se reutiliza todo el tiempo entre segmentos independientes (dos sitios distintos, o
+  incluso dos líneas aisladas del mismo sitio -- una Zona admite más de un Sensor, cada uno en su propio
+  segmento/VLAN); sin ese scope, la misma IP vista en dos segmentos distintos pisaría un binding con el
+  otro. El ARP nunca cruza un gateway, así que dos equipos con entradas mutuas acá son prueba de que
+  comparten el mismo dominio de broadcast L2.
 - **Huella DHCP (opción 55)**: además de la huella TCP/IP existente (estilo p0f, `os_fingerprint.py`),
   `dhcp_fingerprint.py` identifica familia de SO a partir de la Parameter Request List que pide el
   cliente DHCP -- una señal independiente que llega aunque el equipo nunca mande un SYN que el sensor

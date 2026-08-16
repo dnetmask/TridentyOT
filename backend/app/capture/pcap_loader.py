@@ -64,6 +64,7 @@ def process_pcap_file(db_session: Session, filepath: str, capture_session: Captu
                         organization_id=capture_session.organization_id,
                         capture_session_id=capture_session.id,
                         cache=cache,
+                        sensor_id=capture_session.sensor_id,
                     )
                 count += 1
                 now = time.monotonic()
