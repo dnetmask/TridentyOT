@@ -645,6 +645,19 @@ que haya quedado en `network_device`, se re-deriva la clasificación **sin** el 
 que no es confiable para esa fila) -- cualquier otra evidencia independiente (hostname, modelo,
 protocolos servidos) se sigue contando normalmente, solo se descarta el voto de vendor engañoso.
 
+#### Topología: quitar un equipo del lienzo sin borrarlo del Inventario
+
+El área donde se arrastran y dibujan los equipos en la pestaña Topología se llama **el lienzo**
+(`#topology-cy`) -- así se la nombra ya en el propio texto de ayuda de la paleta ("Arrastrá un equipo
+al lienzo para ubicarlo..."). Si un equipo se arrastró ahí por error, la ficha de un dispositivo *sin
+ningún enlace real* (NetworkLink/Flow) ahora tiene un botón **Quitar del lienzo**: lo saca del
+Cytoscape en vivo y limpia su posición cacheada (`topologyPositions`), así que vuelve a aparecer en
+el panel "Sin enlace" -- pero no toca el registro de `Device` en el Inventario ni nada en el backend
+(la posición nunca se persistió del lado del servidor, solo vive en memoria del navegador durante la
+sesión). Un equipo que sí tiene un enlace real no muestra este botón: pertenece al lienzo
+independientemente de cómo llegó ahí, así que "quitarlo" solo lo haría reaparecer en el próximo
+refresh en vez de mandarlo a "Sin enlace".
+
 ### Ejecutar el escaneo de vulnerabilidades
 
 ```bash

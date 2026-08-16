@@ -3583,6 +3583,13 @@ function openTopologyDeviceCard(deviceId, renderedPos) {
   if (!node.length) return;
   const d = node.data();
   const admin = isAdmin();
+  // "Quitar del lienzo" only makes sense for a device sitting on the
+  // canvas purely from a manual drag-and-drop placement (no real
+  // NetworkLink/Flow edge) -- one that's actually wired into the topology
+  // belongs on the canvas regardless of how it first got there, so
+  // removing it would just have it reappear (still linked) on the next
+  // reload rather than going back to the "Sin enlace" palette.
+  const hasLinks = node.connectedEdges().length > 0;
   panel.innerHTML = `
     <h3>${escapeHtml(d.label)}</h3>
     ${d.ip ? `<div class="row-line">IP: ${escapeHtml(d.ip)}</div>` : ''}
@@ -3593,10 +3600,26 @@ function openTopologyDeviceCard(deviceId, renderedPos) {
       <button onclick="jumpToDevice(${deviceId})">Ver en Inventario</button>
       ${admin ? `<button onclick="jumpToDeviceAndEditType(${deviceId})">Editar tipo</button>` : ''}
       ${admin ? `<button onclick="startTopologyLinkFromCard(${deviceId})">Crear enlace</button>` : ''}
+      ${admin && !hasLinks ? `<button onclick="removeDeviceFromCanvas(${deviceId})" title="Lo saca del lienzo y lo devuelve al panel 'Sin enlace' -- el equipo sigue en el Inventario">Quitar del lienzo</button>` : ''}
     </div>
   `;
   panel.classList.remove('hidden');
   topologyPositionPanel(panel, renderedPos);
+}
+
+// Undoes a manual drag-and-drop placement (see placeDeviceOnCanvas) --
+// purely a client-side canvas concern, same as topologyPositions itself:
+// no API call, nothing in Inventario/the Device row is touched. The node
+// just goes back to being "unplaced" (topologyUnplacedNodes) and
+// reappears in the "Sin enlace" palette on the next render.
+function removeDeviceFromCanvas(deviceId) {
+  closeTopologyPanel();
+  if (topologyCy) {
+    const node = topologyCy.getElementById(String(deviceId));
+    if (node.length) node.remove();
+  }
+  delete topologyPositions[deviceId];
+  if (topologyLastData) renderTopologyPalette(topologyUnplacedNodes(topologyLastData));
 }
 
 // Third option on a device's info card: marks it as the pending source
