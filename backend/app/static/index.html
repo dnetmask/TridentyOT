@@ -365,6 +365,20 @@
   .topology-palette-item:active { cursor: grabbing; }
   .topology-palette-item img { width: 20px; height: 20px; flex-shrink: 0; }
   .topology-palette-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topology-palette-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+  .topology-palette-tab {
+    flex: 1; padding: 6px 4px; font-size: 11.5px; text-align: center; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--muted);
+  }
+  .topology-palette-tab.active { background: var(--panel); color: var(--text); border-color: var(--accent); font-weight: 600; }
+  .topology-candidate-item {
+    padding: 8px; margin-bottom: 6px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--panel); font-size: 12px; cursor: pointer;
+  }
+  .topology-candidate-item .pair { font-weight: 600; margin-bottom: 2px; }
+  .topology-candidate-item .evidence { color: var(--muted); font-size: 11px; margin: 4px 0; }
+  .topology-candidate-item .actions { display: flex; gap: 6px; margin-top: 6px; }
+  .topology-candidate-item .actions button { flex: 1; padding: 4px 6px; font-size: 11px; }
   /* Fills the whole fullscreen viewport instead of guessing a fixed
      px offset to subtract (which always left a gap at the bottom for
      some browsers/window chrome combos): the wrapper becomes a 100vh
@@ -904,6 +918,19 @@
           <span data-i18n="topology.edit_mode">Modo edición</span>
         </label>
       </div>
+      <div id="topology-guide-panel" class="card hidden" style="margin-bottom:12px; border-color:var(--accent);">
+        <div class="flex-between">
+          <h3 data-i18n="topology.guide_title" style="margin:0;">Así se construye tu topología</h3>
+          <button type="button" class="action secondary" id="topology-guide-close-btn" data-i18n="topology.guide_close_btn">Cerrar</button>
+        </div>
+        <ul style="margin:8px 0 0; padding-left:20px; font-size:13px; line-height:1.7;">
+          <li data-i18n="topology.guide_item_drag">Arrastrá equipos desde el panel "Sin enlace" al lienzo para empezar a ubicarlos.</li>
+          <li data-i18n="topology.guide_item_edit">Hacé clic en cualquier equipo para ver su ficha, cambiar su tipo o iniciar un enlace.</li>
+          <li data-i18n="topology.guide_item_link">En Modo edición, unís dos equipos con un clic para dejar registrado el cableado real.</li>
+          <li data-i18n="topology.guide_item_candidates">La pestaña "Candidatos" te muestra pares de equipos que probablemente están conectados -- vos decidís si confirmarlos.</li>
+          <li data-i18n="topology.guide_item_discovery">¿Te falta información? Desde Descubrimiento activo podés importar tablas de switches (MAC/ARP/CDP-LLDP) o escanear por SNMP para que la topología se arme sola con datos reales.</li>
+        </ul>
+      </div>
       <div class="topology-legend">
         <span><span class="swatch" style="border-color:var(--accent)"></span><span data-i18n="topology.legend_confirmed">Confirmado</span></span>
         <span><span class="swatch" style="border-color:var(--med); border-top-style:dashed;"></span><span data-i18n="topology.legend_uncertain">Dudoso / sin confirmar</span></span>
@@ -913,6 +940,7 @@
         Modo edición activo: hacé click en un dispositivo y luego en otro para crear un enlace entre ambos.
       </div>
       <div class="topology-toolbar">
+        <button type="button" class="action secondary" id="topology-guide-btn" data-i18n="topology.guide_btn">Guía de creación de topología</button>
         <button type="button" class="action secondary" id="topology-reset-view-btn" title="Restablecer posiciones y volver a acomodar" data-i18n="topology.reset_view_btn">↺ Restablecer vista</button>
         <button type="button" class="action secondary" id="topology-fit-btn" title="Ajustar todo a la pantalla" data-i18n="topology.fit_btn">⤢ Ajustar</button>
         <button type="button" class="action secondary" id="topology-zoom-in-btn" title="Acercar">Zoom +</button>
@@ -924,11 +952,26 @@
         <div id="topology-container" style="position:relative; display:flex; gap:10px; align-items:flex-start;">
           <div id="topology-cy" style="flex:1; min-width:0; height:560px; border:1px solid var(--border); border-radius:8px;"></div>
           <div id="topology-palette" class="topology-palette admin-only hidden">
-            <input id="topology-palette-search" type="text" placeholder="Buscar equipo por nombre, IP o MAC..." />
-            <div class="muted" style="font-size:11px; margin:6px 0;" data-i18n="topology.palette_hint">
-              Arrastrá un equipo al lienzo para ubicarlo en la topología.
+            <div class="topology-palette-tabs">
+              <button type="button" class="topology-palette-tab active" id="topology-tab-unlinked" data-i18n="topology.palette_tab_unlinked">Sin enlace</button>
+              <button type="button" class="topology-palette-tab" id="topology-tab-candidates">
+                <span data-i18n="topology.palette_tab_candidates">Candidatos</span>
+                <span id="topology-candidates-count" class="pill hidden"></span>
+              </button>
             </div>
-            <div id="topology-palette-list"></div>
+            <div id="topology-palette-unlinked">
+              <input id="topology-palette-search" type="text" placeholder="Buscar equipo por nombre, IP o MAC..." />
+              <div class="muted" style="font-size:11px; margin:6px 0;" data-i18n="topology.palette_hint">
+                Arrastrá un equipo al lienzo para ubicarlo en la topología.
+              </div>
+              <div id="topology-palette-list"></div>
+            </div>
+            <div id="topology-palette-candidates" class="hidden">
+              <div class="muted" style="font-size:11px; margin:6px 0;" data-i18n="topology.candidates_hint">
+                Equipos confirmados por ARP en el mismo Sensor que además hablaron entre sí -- no es prueba de un cable directo, revisá antes de confirmar.
+              </div>
+              <div id="topology-candidates-list"></div>
+            </div>
           </div>
           <div id="topology-tooltip" class="topology-tooltip"></div>
           <div id="topology-panel" class="topology-panel hidden"></div>
@@ -1395,6 +1438,40 @@ const I18N = {
   'topology.palette_hint': {
     es: 'Arrastrá un equipo al lienzo para ubicarlo en la topología.',
     en: 'Drag a device onto the canvas to place it in the topology.',
+  },
+  'topology.palette_tab_unlinked': { es: 'Sin enlace', en: 'Unlinked' },
+  'topology.palette_tab_candidates': { es: 'Candidatos', en: 'Candidates' },
+  'topology.candidates_hint': {
+    es: 'Equipos confirmados por ARP en el mismo Sensor que además hablaron entre sí -- no es prueba de un cable directo, revisá antes de confirmar.',
+    en: 'Devices ARP-confirmed on the same Sensor that were also seen talking to each other -- not proof of a direct cable, review before confirming.',
+  },
+  'topology.candidates_empty': { es: 'No hay candidatos pendientes.', en: 'No pending candidates.' },
+  'topology.candidate_confidence_label': { es: 'Confianza', en: 'Confidence' },
+  'topology.candidate_promote_btn': { es: 'Promover a enlace', en: 'Promote to link' },
+  'topology.candidate_dismiss_btn': { es: 'Descartar', en: 'Dismiss' },
+  'topology.candidate_action_error': { es: 'No se pudo completar la acción', en: 'Could not complete the action' },
+  'topology.guide_btn': { es: 'Guía de creación de topología', en: 'Topology creation guide' },
+  'topology.guide_title': { es: 'Así se construye tu topología', en: 'Here’s how you build your topology' },
+  'topology.guide_close_btn': { es: 'Cerrar', en: 'Close' },
+  'topology.guide_item_drag': {
+    es: 'Arrastrá equipos desde el panel "Sin enlace" al lienzo para empezar a ubicarlos.',
+    en: 'Drag devices from the "Unlinked" panel onto the canvas to start placing them.',
+  },
+  'topology.guide_item_edit': {
+    es: 'Hacé clic en cualquier equipo para ver su ficha, cambiar su tipo o iniciar un enlace.',
+    en: 'Click any device to see its card, change its type, or start a link.',
+  },
+  'topology.guide_item_link': {
+    es: 'En Modo edición, unís dos equipos con un clic para dejar registrado el cableado real.',
+    en: 'In Edit mode, click two devices to record the real cabling between them.',
+  },
+  'topology.guide_item_candidates': {
+    es: 'La pestaña "Candidatos" te muestra pares de equipos que probablemente están conectados -- vos decidís si confirmarlos.',
+    en: 'The "Candidates" tab shows device pairs that are likely connected -- you decide whether to confirm them.',
+  },
+  'topology.guide_item_discovery': {
+    es: '¿Te falta información? Desde Descubrimiento activo podés importar tablas de switches (MAC/ARP/CDP-LLDP) o escanear por SNMP para que la topología se arme sola con datos reales.',
+    en: 'Missing data? From Active Discovery you can import switch tables (MAC/ARP/CDP-LLDP) or run an SNMP scan so the topology builds itself from real data.',
   },
   'capture.live_title': { es: 'Captura en vivo', en: 'Live capture' },
   'capture.sensor': { es: 'Sensor', en: 'Sensor' },
@@ -2854,6 +2931,10 @@ let topologyPaletteFilter = '';
 // the edit, or the full link before deletion) without needing it threaded
 // through their own params.
 let topologyPanelExistingLink = null;
+// Last /api/topology/link-candidates?status=pending response -- see
+// loadTopologyCandidates/renderTopologyCandidatesList (Fase 3's suggestion
+// queue, reviewed here but never auto-applied).
+let topologyCandidates = [];
 
 // A device counts as "placed" once it has a real link (source or target
 // of any edge) OR a cached position from a previous manual drag/drop --
@@ -2875,9 +2956,21 @@ function topologyUnplacedNodes(data) {
 // filenames), not device_type directly, since network_device splits into
 // router/switch here.
 const TOPOLOGY_TYPE_GROUP_LABELS = {
-  plc: 'PLC', hmi: 'HMI', server: 'Servidor/VM', pc: 'PC',
-  router: 'Router', switch: 'Switch', other: 'Otro',
+  switch: 'Switch', router: 'Router', plc: 'PLC', hmi: 'HMI',
+  server: 'Servidor/VM', pc: 'PC', other: 'Otro',
 };
+
+// Switches/routers first, everywhere a device list or grouping is ordered
+// by type (the palette, the type-based cluster layout below) -- they're
+// the equipment a real topology gets built around (plug everything else
+// into them), so putting them first is what actually makes "reorder by
+// type" useful rather than just cosmetic. Anything not in this list (a
+// future icon key) sorts after everything named here, not before.
+const TOPOLOGY_TYPE_ORDER = Object.keys(TOPOLOGY_TYPE_GROUP_LABELS);
+function topologyTypeRank(icon) {
+  const idx = TOPOLOGY_TYPE_ORDER.indexOf(icon);
+  return idx === -1 ? TOPOLOGY_TYPE_ORDER.length : idx;
+}
 
 function topologyIconUrl(icon) {
   return `/vendor/icons/${icon || 'other'}.svg`;
@@ -2902,17 +2995,18 @@ function topologyPanelOpen() {
 
 // The palette is admin-only (placing a device is an editing action, same
 // gate as "Modo edición") and hides itself entirely once there's nothing
-// left to place, rather than sitting there empty.
+// left to place NOR any pending link candidate to review, rather than
+// sitting there empty -- see updateTopologyPaletteVisibility, which also
+// accounts for the Candidatos tab (loaded/rendered independently, see
+// loadTopologyCandidates).
 function renderTopologyPalette(devices) {
-  const wrap = $('#topology-palette');
-  if (!wrap) return;
-  if (!isAdmin() || devices.length === 0) { wrap.classList.add('hidden'); return; }
-  wrap.classList.remove('hidden');
-  const term = topologyPaletteFilter.trim().toLowerCase();
-  const filtered = term
-    ? devices.filter(d => [d.label, d.ip, d.mac, d.vendor].some(v => v && String(v).toLowerCase().includes(term)))
-    : devices;
   const list = $('#topology-palette-list');
+  if (!list) return;
+  const term = topologyPaletteFilter.trim().toLowerCase();
+  const filtered = (term
+    ? devices.filter(d => [d.label, d.ip, d.mac, d.vendor].some(v => v && String(v).toLowerCase().includes(term)))
+    : devices
+  ).slice().sort((a, b) => topologyTypeRank(a.icon) - topologyTypeRank(b.icon));
   list.innerHTML = filtered.length
     ? filtered.map(d => `
         <div class="topology-palette-item" draggable="true" data-device-id="${d.id}">
@@ -2926,6 +3020,143 @@ function renderTopologyPalette(devices) {
       evt.dataTransfer.setData('text/plain', el.dataset.deviceId);
     });
   });
+  updateTopologyPaletteVisibility();
+}
+
+// Combines both tabs' emptiness (unplaced devices + pending candidates,
+// see renderTopologyPalette/renderTopologyCandidatesList) into the one
+// "is there anything to review here at all" decision for the outer panel.
+function updateTopologyPaletteVisibility() {
+  const wrap = $('#topology-palette');
+  if (!wrap) return;
+  const hasUnlinked = topologyLastData ? topologyUnplacedNodes(topologyLastData).length > 0 : false;
+  const hasCandidates = topologyCandidates.length > 0;
+  if (!isAdmin() || (!hasUnlinked && !hasCandidates)) wrap.classList.add('hidden');
+  else wrap.classList.remove('hidden');
+}
+
+function setTopologyPaletteTab(tab) {
+  $('#topology-tab-unlinked').classList.toggle('active', tab === 'unlinked');
+  $('#topology-tab-candidates').classList.toggle('active', tab === 'candidates');
+  $('#topology-palette-unlinked').classList.toggle('hidden', tab !== 'unlinked');
+  $('#topology-palette-candidates').classList.toggle('hidden', tab !== 'candidates');
+}
+$('#topology-tab-unlinked').addEventListener('click', () => setTopologyPaletteTab('unlinked'));
+$('#topology-tab-candidates').addEventListener('click', () => setTopologyPaletteTab('candidates'));
+
+// Evidence text (FlowLinkCandidate.evidence, same as Device.
+// device_type_evidence) is stored server-side as JSON from
+// app.i18n.encode_i18n -- a single bilingual({es, en}) object in the
+// common case, or a list of them. Decoded here (unlike device_type_
+// evidence elsewhere in this file, which is only ever shown as a raw
+// debug hint) because evidence is the actual basis for a human's
+// promote/dismiss decision here, worth showing properly localized.
+function decodeI18nField(raw) {
+  if (!raw) return '';
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch (e) { return raw; }
+  const pick = (item) => (item && typeof item === 'object') ? (item[currentLocale()] || item.es || '') : String(item);
+  if (Array.isArray(parsed)) return parsed.map(pick).join(' ');
+  if (parsed && typeof parsed === 'object') return pick(parsed);
+  return String(parsed);
+}
+
+// Distinct from the pre-existing topologyDeviceLabel below (which reads a
+// *live* Cytoscape element's data, so it only ever works for a device
+// already rendered on canvas): a candidate's two devices are frequently
+// still sitting unplaced in the "sin enlace" palette, so this reads
+// straight from the last /api/topology payload instead.
+function topologyNodeLabel(id) {
+  const node = topologyLastData && topologyLastData.nodes.find(n => n.id === id);
+  return node ? (node.label || node.ip || node.mac || `#${id}`) : `#${id}`;
+}
+
+function topologyCandidatesQuery() {
+  const params = ['status=pending'];
+  const orgId = currentOrgId();
+  if (isSuperAdmin() && orgId != null) params.push(`organization_id=${orgId}`);
+  return `?${params.join('&')}`;
+}
+
+async function loadTopologyCandidates() {
+  if (!isAdmin()) { topologyCandidates = []; renderTopologyCandidatesList(); return; }
+  try {
+    topologyCandidates = await api(`/api/topology/link-candidates${topologyCandidatesQuery()}`);
+  } catch (e) {
+    topologyCandidates = [];
+  }
+  renderTopologyCandidatesList();
+}
+
+function renderTopologyCandidatesList() {
+  const badge = $('#topology-candidates-count');
+  if (badge) {
+    if (topologyCandidates.length > 0) {
+      badge.textContent = String(topologyCandidates.length);
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+  }
+  const list = $('#topology-candidates-list');
+  if (list) {
+    list.innerHTML = topologyCandidates.length
+      ? topologyCandidates.map(c => `
+          <div class="topology-candidate-item" data-device-a="${c.device_a_id}" data-device-b="${c.device_b_id}">
+            <div class="pair">${escapeHtml(topologyNodeLabel(c.device_a_id))} ↔ ${escapeHtml(topologyNodeLabel(c.device_b_id))}</div>
+            <div class="muted" style="font-size:11px;">${escapeHtml(i18nText('topology.candidate_confidence_label'))}: ${Math.round(c.confidence * 100)}%</div>
+            <div class="evidence">${escapeHtml(decodeI18nField(c.evidence))}</div>
+            <div class="actions">
+              <button type="button" class="action" onclick="promoteTopologyCandidate(${c.id})">${escapeHtml(i18nText('topology.candidate_promote_btn'))}</button>
+              <button type="button" class="action secondary" onclick="dismissTopologyCandidate(${c.id})">${escapeHtml(i18nText('topology.candidate_dismiss_btn'))}</button>
+            </div>
+          </div>`).join('')
+      : `<div class="muted" style="font-size:12px;">${escapeHtml(i18nText('topology.candidates_empty'))}</div>`;
+    list.querySelectorAll('.topology-candidate-item').forEach(el => {
+      el.addEventListener('click', (evt) => {
+        if (evt.target.closest('button')) return;
+        centerTopologyOnDevices(Number(el.dataset.deviceA), Number(el.dataset.deviceB));
+      });
+    });
+  }
+  updateTopologyPaletteVisibility();
+}
+
+async function promoteTopologyCandidate(candidateId) {
+  try {
+    await api(`/api/topology/link-candidates/${candidateId}/promote`, { method: 'POST' });
+  } catch (e) { alert(i18nText('topology.candidate_action_error') + ': ' + e.message); return; }
+  await loadTopologyCandidates();
+  loadTopology();
+}
+
+async function dismissTopologyCandidate(candidateId) {
+  try {
+    await api(`/api/topology/link-candidates/${candidateId}/dismiss`, { method: 'POST' });
+  } catch (e) { alert(i18nText('topology.candidate_action_error') + ': ' + e.message); return; }
+  await loadTopologyCandidates();
+}
+
+// Pans/zooms the canvas to frame both of a candidate's devices, placing
+// either one that isn't on the canvas yet (still sitting in the "sin
+// enlace" palette) at the viewport's own center first -- same mechanism
+// placeDeviceOnCanvas's drag-and-drop already uses, just computing a
+// model-space position from the container's center instead of a mouse
+// event's clientX/clientY.
+function centerTopologyOnDevices(idA, idB) {
+  if (!topologyCy || !topologyLastData) return;
+  const cyContainer = $('#topology-cy');
+  const rect = cyContainer.getBoundingClientRect();
+  const pan = topologyCy.pan();
+  const zoom = topologyCy.zoom();
+  const centerPos = { x: (rect.width / 2 - pan.x) / zoom, y: (rect.height / 2 - pan.y) / zoom };
+  [[idA, -60], [idB, 60]].forEach(([id, dx]) => {
+    if (!topologyCy.getElementById(String(id)).length) {
+      placeDeviceOnCanvas(id, { x: centerPos.x + dx, y: centerPos.y });
+    }
+  });
+  const eles = topologyCy.getElementById(String(idA)).union(topologyCy.getElementById(String(idB)));
+  if (eles.length) topologyCy.animate({ fit: { eles, padding: 100 } }, { duration: 300 });
 }
 
 // Places a palette device directly onto the live Cytoscape instance --
@@ -2988,6 +3219,7 @@ async function loadTopology() {
     data = await api(`/api/topology${topologyScopeQuery()}`);
   } catch (e) { return; }
   renderTopology(data);
+  loadTopologyCandidates(); // independent fetch; renders its own tab regardless of the main graph's outcome
 }
 
 function renderTopology(data) {
@@ -3039,7 +3271,14 @@ function renderTopology(data) {
   // exactly what building a real topology out of this needs. This is only
   // an initial-position hint (see clusterSeed below); nothing keeps a node
   // "inside" its type group once the layout runs.
-  const iconGroups = [...new Set(placedNodes.map(n => n.icon))];
+  // Sorted by topologyTypeRank (switches/routers first) rather than
+  // whatever order distinct icons first appear in placedNodes -- so the
+  // grid-cell assignment below always seeds network gear into the first
+  // cell(s), consistently, regardless of how this particular capture
+  // happened to order its devices.
+  const iconGroups = [...new Set(placedNodes.map(n => n.icon))].sort(
+    (a, b) => topologyTypeRank(a) - topologyTypeRank(b)
+  );
   const groupByType = !groupByZone && iconGroups.length > 1;
 
   const nodeParentOf = (n) => (groupByZone && n.zone_id != null ? `zone-${n.zone_id}` : null);
@@ -3507,6 +3746,16 @@ $('#topology-edit-mode').addEventListener('change', () => {
 });
 
 $('#topology-undo-btn').addEventListener('click', undoLastTopologyAction);
+
+// Purely informational, no progress tracking or saved state -- just a
+// closeable/reopenable summary of what this screen can do, shown only
+// when the user asks for it.
+$('#topology-guide-btn').addEventListener('click', () => {
+  $('#topology-guide-panel').classList.remove('hidden');
+});
+$('#topology-guide-close-btn').addEventListener('click', () => {
+  $('#topology-guide-panel').classList.add('hidden');
+});
 
 $('#topology-fit-btn').addEventListener('click', () => {
   if (topologyCy) topologyCy.fit(undefined, 40);

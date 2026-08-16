@@ -581,9 +581,26 @@ curl -X POST http://localhost:8000/api/topology/link-candidates/12/dismiss \
 ```
 
 Un candidato ya confirmado o descartado nunca vuelve a tocarlo un pase posterior -- la decisión de
-un humano es definitiva, igual que un `NetworkLink` manual nunca se pisa. Este endpoint es la única
-pieza de la Fase 3; la revisión visual de la cola de candidatos queda para la Fase 4 (UI de
-Topología).
+un humano es definitiva, igual que un `NetworkLink` manual nunca se pisa.
+
+#### UI de Topología (Fase 4): pestañas, orden por tipo y guía
+
+El panel lateral de la pestaña Topología ahora tiene dos pestañas: **Sin enlace** (la paleta de
+arrastrar-y-soltar que ya existía) y **Candidatos** (la cola de `FlowLinkCandidate` de arriba, con
+un contador de pendientes). Cada candidato muestra el par de equipos, el % de confianza, la
+evidencia (en el idioma de la cuenta) y los botones **Promover a enlace**/**Descartar** -- al hacer
+clic en una fila (fuera de los botones) el lienzo se centra en ambos equipos, ubicándolos
+automáticamente si todavía estaban en "Sin enlace".
+
+Tanto esa paleta como el agrupamiento visual por tipo (`groupByType`, cuando no hay más de una Zona
+en la vista) ahora ordenan primero **switches y routers** -- son el equipo con el que realmente se
+arma una topología, así que aparecen arriba de la lista y en la primera celda del layout en vez de
+en un orden arbitrario.
+
+**Guía de creación de topología**: un botón en la barra de herramientas abre un panel puramente
+informativo (sin seguimiento de progreso ni estado guardado) que resume qué se puede hacer acá --
+arrastrar equipos, editar su tipo, crear enlaces a mano, revisar candidatos, o ir a Descubrimiento
+activo para importar más datos reales. Se abre y cierra libremente cuantas veces se quiera.
 
 ### Ejecutar el escaneo de vulnerabilidades
 
