@@ -513,28 +513,71 @@ def apply_gateway_detection(session: Session, organization_id: int) -> None:
                             "own IP, or a different host on another subnet routed through it",
                         )
                     )
-
-        if len(group) < _GATEWAY_MIN_PUBLIC_IPS:
+            # Already handled above on its own, unconditional terms (an FHRP
+            # virtual MAC is never a real host's NIC, full stop) -- skip the
+            # generic shared-MAC correction below so it doesn't second-guess
+            # that with a weaker, vendor-based re-derivation.
             continue
+
+        if len(group) < 2:
+            continue  # a MAC used by only one device row is never this pattern
+
+        # Only ever a router/gateway's own address when 2+ *public* IPs
+        # share it (see this function's docstring on why a private-IP-only
+        # group never gets a "primary" -- there's no reliable way to tell
+        # the gateway's own LAN address apart from a distinct real host on
+        # another subnet whose *returning* traffic this same gateway
+        # forwarded). Every other member of this MAC's group, public or
+        # private, is definitely NOT this NIC's real owner either way --
+        # a MAC belongs to exactly one real device, and 2+ distinct IPs
+        # sharing one here is proof this MAC is whatever forwarded their
+        # traffic, not their own.
         public_members = [d for d in group if not is_lan_ip(d.ip)]
-        if len(public_members) < _GATEWAY_MIN_PUBLIC_IPS:
-            continue
+        primary = min(public_members, key=lambda d: d.id) if len(public_members) >= _GATEWAY_MIN_PUBLIC_IPS else None
 
-        primary = min(public_members, key=lambda d: d.id)
-
-        if primary.device_type != NETWORK_DEVICE or primary.device_type_confidence < 1.0:
-            primary.device_type = NETWORK_DEVICE
-            primary.device_type_confidence = 1.0
-            primary.device_type_evidence = encode_i18n(
-                bilingual(
-                    es=f"Una misma MAC ({mac}) aparece en {len(public_members)} IPs públicas distintas -- "
-                    "consistente con un equipo que enruta/NATea tráfico hacia internet",
-                    en=f"The same MAC ({mac}) appears on {len(public_members)} distinct public IPs -- "
-                    "consistent with a device routing/NAT-ing traffic to the internet",
+        if primary is not None:
+            if primary.device_type != NETWORK_DEVICE or primary.device_type_confidence < 1.0:
+                primary.device_type = NETWORK_DEVICE
+                primary.device_type_confidence = 1.0
+                primary.device_type_evidence = encode_i18n(
+                    bilingual(
+                        es=f"Una misma MAC ({mac}) aparece en {len(public_members)} IPs públicas distintas -- "
+                        "consistente con un equipo que enruta/NATea tráfico hacia internet",
+                        en=f"The same MAC ({mac}) appears on {len(public_members)} distinct public IPs -- "
+                        "consistent with a device routing/NAT-ing traffic to the internet",
+                    )
                 )
+            if not primary.device_type_secondary:
+                primary.device_type_secondary = ROUTER_NAT
+
+        # Every other member almost always reads as NETWORK_DEVICE too, but
+        # only because it inherited the *gateway's* NIC vendor (e.g.
+        # "Fortinet, Inc.") along with its MAC -- vendor_category has no way
+        # to know that vendor describes whoever forwarded the frame, not
+        # this row's own (nonexistent, for this purpose) NIC. Re-derive
+        # without that misleading vendor signal; any other independent
+        # evidence this row has (hostname, model, protocols served) is
+        # unaffected and still counted normally.
+        for member in group:
+            if member is primary or member.device_type != NETWORK_DEVICE:
+                continue
+            server_protocols = (
+                session.query(DeviceProtocol)
+                .filter(DeviceProtocol.device_id == member.id, DeviceProtocol.role == "server")
+                .all()
             )
-        if not primary.device_type_secondary:
-            primary.device_type_secondary = ROUTER_NAT
+            guess = classify_device_type(
+                vendor=None,
+                hostname=member.display_name,
+                model=member.model,
+                os_signature=member.os_signature,
+                has_ot_server_protocol=any(p.category == OT for p in server_protocols),
+                server_protocol_count=len({p.protocol for p in server_protocols}),
+            )
+            member.device_type = guess.device_type
+            member.device_type_confidence = guess.confidence
+            member.device_type_evidence = encode_i18n(*guess.evidence) if guess.evidence else None
+            member.device_type_secondary = guess.device_type_secondary
 
 
 # Device.segment_relation values -- see apply_segment_classification.

@@ -743,6 +743,59 @@ def test_gateway_detection_ignores_a_single_shared_public_ip(db_session, org_id)
     assert pub_device.display_device_type != "network_device"
 
 
+def test_gateway_detection_corrects_vendor_driven_network_device_on_other_members(db_session, org_id):
+    """A real misclassification this covers: a Fortinet firewall routing
+    traffic to several public IPs *and* to another internal VLAN had every
+    one of those destination rows read as "Equipo de red" too, not just the
+    one row picked to represent the firewall itself -- each inherited the
+    firewall's own vendor OUI ("Fortinet, Inc.") along with its MAC when
+    classify_device_type ran per-packet, and that generic pass has no way
+    to know the vendor describes the firewall, never the actual remote
+    host on the other end of routed/NATed traffic."""
+    from app.inventory.inventory_service import apply_gateway_detection
+
+    FORTINET_MAC = "00:09:0f:09:43:02"  # a real Fortinet OUI, unlike the synthetic MACs above
+    packets = [
+        Ether(src=FORTINET_MAC) / IP(src="34.209.79.111", dst="10.35.0.5", ttl=64) / TCP(
+            sport=443, dport=51000, flags="SA", window=8192
+        ),
+        Ether(src=FORTINET_MAC) / IP(src="35.166.20.122", dst="10.35.0.5", ttl=64) / TCP(
+            sport=443, dport=51001, flags="SA", window=8192
+        ),
+        # a real internal host on another VLAN, reached through the same firewall
+        Ether(src=FORTINET_MAC) / IP(src="172.16.11.10", dst="10.35.0.5", ttl=63) / TCP(
+            sport=445, dport=51002, flags="SA", window=8192
+        ),
+    ]
+    for pkt in packets:
+        ingest_packet_record(db_session, process_packet(pkt), org_id)
+    db_session.commit()
+
+    pub1 = db_session.query(Device).filter(Device.ip == "34.209.79.111").one()
+    pub2 = db_session.query(Device).filter(Device.ip == "35.166.20.122").one()
+    routed = db_session.query(Device).filter(Device.ip == "172.16.11.10").one()
+    # before this function's own pass, per-packet classification already
+    # (wrongly) voted network_device on all three from vendor alone
+    assert pub1.display_device_type == "network_device"
+    assert pub2.display_device_type == "network_device"
+    assert routed.display_device_type == "network_device"
+
+    apply_gateway_detection(db_session, org_id)
+    db_session.commit()
+    db_session.refresh(pub1)
+    db_session.refresh(pub2)
+    db_session.refresh(routed)
+
+    primary, other_pub = (pub1, pub2) if pub1.id < pub2.id else (pub2, pub1)
+    assert primary.display_device_type == "network_device"
+    assert primary.display_device_type_secondary == "router_nat"
+    # neither the other public duplicate nor the routed internal host keep
+    # the misleading "equipo de red" label -- vendor alone isn't enough
+    # once it's known this MAC is shared by 2+ distinct IPs.
+    assert other_pub.display_device_type != "network_device"
+    assert routed.display_device_type != "network_device"
+
+
 def test_hsrp_mac_flags_public_ip_gateway_from_a_single_observation(db_session, org_id):
     """Unlike the multi-public-IP pattern above, a First-Hop Redundancy
     Protocol virtual MAC (HSRP here) is recognized as a router identity

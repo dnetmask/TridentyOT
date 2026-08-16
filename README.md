@@ -627,6 +627,24 @@ El fix generaliza en vez de parchear solo este caso:
   como *fallback* -- y con confianza reducida (0.5, no 1.0), para que una clasificación real
   posterior (una vez que se vea tráfico genuino de esa MAC) todavía la pueda corregir.
 
+#### Fix: los destinos enrutados por un firewall/gateway ya no heredan "Equipo de red"
+
+Otro caso real de la misma familia de bug: una planta con un firewall Fortinet enrutando tráfico
+hacia varias IPs públicas (internet) y hacia otra VLAN interna mostraba **cada una de esas IPs
+destino** como su propia fila "Equipo de red" en Inventario -- no solo la fila que efectivamente
+representa al firewall. La causa: todas esas filas comparten la MAC del firewall (es quien reenvía
+el tráfico, ver el docstring de `apply_gateway_detection`), y por lo tanto también heredan su vendor
+por OUI (`"Fortinet, Inc."`) -- que sí figura en `_NETWORK_VENDOR_KEYWORDS`, así que
+`classify_device_type` vota "equipo de red" para *todas* ellas, sin saber que ese vendor describe al
+firewall, nunca al host real del otro lado.
+
+`apply_gateway_detection` ya sabe distinguir esto (agrupa por MAC compartida para elegir la fila que
+representa al gateway) pero antes solo tocaba a esa fila elegida; el resto quedaba con lo que el
+clasificador genérico ya le hubiera puesto. Ahora, para cualquier otro miembro del mismo grupo de MAC
+que haya quedado en `network_device`, se re-deriva la clasificación **sin** el vendor (que ya sabemos
+que no es confiable para esa fila) -- cualquier otra evidencia independiente (hostname, modelo,
+protocolos servidos) se sigue contando normalmente, solo se descarta el voto de vendor engañoso.
+
 ### Ejecutar el escaneo de vulnerabilidades
 
 ```bash
