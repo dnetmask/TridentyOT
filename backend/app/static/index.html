@@ -1489,6 +1489,10 @@ const I18N = {
   'topology.annotation_width': { es: 'Ancho', en: 'Width' },
   'topology.annotation_height': { es: 'Alto', en: 'Height' },
   'topology.annotation_send_to_back': { es: 'Enviar al fondo', en: 'Send to back' },
+  'topology.annotation_handle_hint': {
+    es: 'Arrastrar para mover · Tocar para editar',
+    en: 'Drag to move · Tap to edit',
+  },
   'topology.annotation_delete_confirm': { es: '¿Eliminar esta anotación?', en: 'Delete this annotation?' },
   'topology.annotation_default_box_label': { es: 'Nuevo recuadro', en: 'New box' },
   'topology.annotation_default_text_label': { es: 'Nueva nota', en: 'New note' },
@@ -3007,6 +3011,11 @@ let topologyEdgehandles = null;
 function topologyEdgeStyle() {
   return localStorage.getItem('topologyEdgeStyle') || 'bezier';
 }
+
+// How far outside an annotation's top-left corner its drag/edit handle
+// sits (see annotationHandleEls) -- shared by the element-construction code
+// and the 'drag' listener that keeps the real box/text glued to it.
+const ANNOTATION_HANDLE_OFFSET = 6;
 // Last /api/topology response -- the palette (topologyUnplacedNodes) and
 // the canvas-drop handler (placeDeviceOnCanvas) both need the full node
 // list, not just whatever's already a live Cytoscape element.
@@ -3278,10 +3287,14 @@ function topologyUndoPush(action) {
 }
 
 // Reverses exactly one action per click -- a link create/update/delete
-// (round-tripped through the same API a human editing it would use) or a
+// (round-tripped through the same API a human editing it would use), a
 // palette placement (purely client-side, so just drops its cached
-// position). loadTopology() re-syncs the canvas either way, since a link
-// change also affects which devices count as "placed".
+// position), a device/annotation drag, or an annotation create/edit/
+// send-to-back/delete. topologyUndoStack is a plain array with no size
+// cap, so clicking "Deshacer" repeatedly walks back through as many past
+// actions as were made this session, not just the last one.
+// loadTopology() re-syncs the canvas either way, since a link change also
+// affects which devices count as "placed".
 async function undoLastTopologyAction() {
   const action = topologyUndoStack.pop();
   const btn = $('#topology-undo-btn');
@@ -3300,6 +3313,17 @@ async function undoLastTopologyAction() {
       });
     } else if (action.type === 'place_device') {
       delete topologyPositions[action.deviceId];
+    } else if (action.type === 'move_device') {
+      topologyPositions[action.deviceId] = { pos: action.previous, parent: null };
+      await persistDevicePosition(action.deviceId, action.previous);
+    } else if (action.type === 'move_annotation' || action.type === 'update_annotation') {
+      await saveTopologyAnnotation(action.annotationId, action.previous);
+    } else if (action.type === 'create_annotation') {
+      await api(`/api/topology/annotations/${action.annotationId}`, { method: 'DELETE' });
+    } else if (action.type === 'delete_annotation') {
+      await api('/api/topology/annotations', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action.payload),
+      });
     }
     loadTopology();
   } catch (e) { alert('No se pudo deshacer: ' + e.message); }
@@ -3460,9 +3484,13 @@ function renderTopology(data) {
   const annotationHandleEls = (data.annotations || []).map(a => ({
     data: {
       id: annotationHandleId(a), annotationId: a.id, topologyKind: 'annotation-handle',
-      kind: a.kind, label: a.label, width: a.width, height: a.height, zOrder: a.z_order,
+      kind: a.kind, label: '✥', width: a.width, height: a.height, zOrder: a.z_order,
     },
-    position: { x: a.x + 9, y: a.y + 9 },
+    // Just outside the top-left corner (not inside it, like an earlier
+    // version had) -- inside put it right where a device dragged into a
+    // box's corner would sit, making the handle itself hard to grab
+    // without grabbing the device underneath instead.
+    position: { x: a.x - ANNOTATION_HANDLE_OFFSET, y: a.y - ANNOTATION_HANDLE_OFFSET },
     classes: 'annotation annotation-handle',
   }));
 
@@ -3536,11 +3564,17 @@ function renderTopology(data) {
       } },
       { selector: 'node.ot-suspected', style: { 'border-width': 2.5, 'border-color': critColor, 'border-opacity': 0.85 } },
       { selector: 'node.topology-pending', style: { 'overlay-color': accentColor, 'overlay-opacity': 0.35, 'overlay-padding': 8 } },
-      // 'taxi'/'taxi-direction'/'taxi-turn' only take effect when
-      // curve-style is actually 'taxi' -- harmless to always set them so
-      // switching topologyEdgeStyle() doesn't need a second style rebuild.
+      // 'taxi-direction'/'taxi-turn'/'control-point-step-size' only take
+      // effect for their own curve-style ('taxi'/'bezier' respectively) --
+      // harmless to always set them so switching topologyEdgeStyle() never
+      // needs a second style rebuild. The bumped step-size (cytoscape's own
+      // default is 40) matters because a single, unbundled edge between two
+      // nodes barely bends at all under the default -- "Curva" looked
+      // visually identical to "Recta" until this was raised, which is
+      // exactly what got reported as "selecting Curva does nothing".
       { selector: 'edge', style: {
-          'curve-style': topologyEdgeStyle(), 'taxi-direction': 'auto', 'taxi-turn': '20%', 'font-size': 10,
+          'curve-style': topologyEdgeStyle(), 'taxi-direction': 'auto', 'taxi-turn': '20%',
+          'control-point-step-size': 80, 'font-size': 10,
       } },
       { selector: 'edge[kind = "confirmed"]', style: {
           width: 2.5, 'line-color': accentColor,
@@ -3581,14 +3615,17 @@ function renderTopology(data) {
           events: 'no',
       } },
       // The one interactive part of an annotation -- see annotationHandleEls'
-      // comment above for why the box/text body itself is events:'no'. Kept
-      // small and pinned to the top-left corner, with no visible label of
-      // its own (the box/text's own label already shows what it is).
+      // comment above for why the box/text body itself is events:'no'.
+      // Deliberately conspicuous (a move-arrows glyph, high z-index, a
+      // visible border) rather than a small blank square -- an earlier,
+      // more subtle version of this handle read as decorative noise in a
+      // real, busy topology and nobody found it draggable.
       { selector: '.annotation-handle', style: {
-          shape: 'round-rectangle', width: 14, height: 14,
-          'background-color': accentColor, 'background-opacity': 0.9,
-          'border-width': 1, 'border-color': textColor,
-          label: '', 'z-index': 5000,
+          shape: 'round-rectangle', width: 22, height: 22,
+          'background-color': accentColor, 'background-opacity': 0.95,
+          'border-width': 2, 'border-color': textColor,
+          label: 'data(label)', color: '#ffffff', 'font-size': 13, 'text-halign': 'center', 'text-valign': 'center',
+          'z-index': 5000,
       } },
       // cytoscape-edgehandles' own style hooks (see /vendor/cytoscape-
       // edgehandles.js) -- the small hover handle, the source/target
@@ -3678,17 +3715,52 @@ function renderTopology(data) {
     if (!box.length) return;
     const width = box.data('width'), height = box.data('height');
     const hp = handle.position();
-    box.position({ x: hp.x - 9 + width / 2, y: hp.y - 9 + height / 2 });
+    box.position({
+      x: hp.x + ANNOTATION_HANDLE_OFFSET + width / 2,
+      y: hp.y + ANNOTATION_HANDLE_OFFSET + height / 2,
+    });
   });
+  // Captures where a device/annotation was BEFORE this drag, on the
+  // gesture's very first frame -- dragfree only sees the position
+  // *after*, so undoing a move needs this saved separately (see
+  // undoLastTopologyAction's 'move_device'/'move_annotation' cases).
+  topologyCy.on('grab', 'node[topologyKind = "device"]', evt => {
+    evt.target.scratch('_prevPos', { ...evt.target.position() });
+  });
+  topologyCy.on('grab', 'node.annotation-handle', evt => {
+    const box = topologyCy.getElementById(`ann-${evt.target.data('annotationId')}`);
+    if (box.length) box.scratch('_prevGeometry', { ...box.position(), width: box.data('width'), height: box.data('height') });
+  });
+  // A tap that technically fires 'grab'/'dragfree' without any real
+  // movement (an imprecise click) shouldn't push a no-op onto the undo
+  // stack -- only a drag that actually went somewhere counts.
+  const movedMeaningfully = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) > 0.5;
   topologyCy.on('dragfree', 'node', evt => {
     const node = evt.target;
     if (node.isParent()) return;
     if (node.data('topologyKind') === 'annotation-handle') {
+      const box = topologyCy.getElementById(`ann-${node.data('annotationId')}`);
+      const prev = box.length ? box.scratch('_prevGeometry') : null;
+      if (prev && movedMeaningfully(prev, box.position())) {
+        topologyUndoPush({
+          type: 'move_annotation',
+          annotationId: node.data('annotationId'),
+          previous: {
+            label: box.data('label'), width: prev.width, height: prev.height,
+            x: prev.x - prev.width / 2, y: prev.y - prev.height / 2,
+            z_order: box.data('zOrder') || 0,
+          },
+        });
+      }
       if (isAdmin()) persistAnnotationGeometry(node);
       return;
     }
     if (node.hasClass('annotation')) return; // the box/text body itself never drags (events:'no')
     topologyPositions[node.data('id')] = { pos: node.position(), parent: node.data('parent') || null };
+    const prevPos = node.scratch('_prevPos');
+    if (prevPos && movedMeaningfully(prevPos, node.position())) {
+      topologyUndoPush({ type: 'move_device', deviceId: Number(node.data('id')), previous: prevPos });
+    }
     if (isAdmin()) persistDevicePosition(Number(node.data('id')), node.position());
   });
   if (topologyPendingSourceId) {
@@ -3792,6 +3864,20 @@ function wireTopologyEvents() {
     tooltip.style.display = 'block';
   });
   cy.on('mouseout', 'node:childless[topologyKind = "device"]', () => { tooltip.style.display = 'none'; });
+
+  // The handle's own glyph (✥) hints at "draggable", but a tooltip spells
+  // it out -- the earlier, unlabeled version of this handle went
+  // unnoticed in a real, busy topology (reported live: "the box/note
+  // won't move").
+  cy.on('mouseover', 'node.annotation-handle', evt => {
+    const node = evt.target;
+    const p = node.renderedPosition();
+    tooltip.innerHTML = i18nText('topology.annotation_handle_hint');
+    tooltip.style.left = `${p.x + 20}px`;
+    tooltip.style.top = `${p.y - 10}px`;
+    tooltip.style.display = 'block';
+  });
+  cy.on('mouseout', 'node.annotation-handle', () => { tooltip.style.display = 'none'; });
 
   // Only the small corner handle is tappable -- the box/text body itself
   // is 'events: no' (see annotationHandleEls' comment above).
@@ -4065,6 +4151,21 @@ async function saveTopologyAnnotation(annotationId, body) {
   });
 }
 
+// The full PATCH-shaped state of an annotation right now, read off the
+// live cytoscape element -- captured before an edit/send-to-back/delete
+// so undoLastTopologyAction can PATCH (or recreate) it back exactly.
+function topologyAnnotationSnapshot(annotationId) {
+  const node = topologyCy.getElementById(`ann-${annotationId}`);
+  if (!node.length) return null;
+  const width = node.data('width'), height = node.data('height');
+  const pos = node.position();
+  return {
+    label: node.data('label'), width, height,
+    x: pos.x - width / 2, y: pos.y - height / 2,
+    z_order: node.data('zOrder') || 0,
+  };
+}
+
 function openAnnotationPanel(annotationId, renderedPos) {
   const panel = $('#topology-panel');
   const node = topologyCy.getElementById(`ann-${annotationId}`);
@@ -4097,6 +4198,7 @@ function openAnnotationPanel(annotationId, renderedPos) {
 
 async function saveAnnotationForm(annotationId) {
   const node = topologyCy.getElementById(`ann-${annotationId}`);
+  const previous = topologyAnnotationSnapshot(annotationId);
   const label = $('#annotation-form-label').value;
   const width = parseFloat($('#annotation-form-width').value) || node.data('width');
   const height = parseFloat($('#annotation-form-height').value) || node.data('height');
@@ -4108,6 +4210,7 @@ async function saveAnnotationForm(annotationId) {
     await saveTopologyAnnotation(annotationId, {
       label, width, height, x: pos.x - width / 2, y: pos.y - height / 2, z_order: node.data('zOrder') || 0,
     });
+    if (previous) topologyUndoPush({ type: 'update_annotation', annotationId, previous });
     closeTopologyPanel();
     loadTopology();
   } catch (e) { alert('No se pudo guardar: ' + e.message); }
@@ -4115,6 +4218,7 @@ async function saveAnnotationForm(annotationId) {
 
 async function sendAnnotationToBack(annotationId) {
   const node = topologyCy.getElementById(`ann-${annotationId}`);
+  const previous = topologyAnnotationSnapshot(annotationId);
   const allZ = (topologyLastData.annotations || []).map(a => a.z_order);
   const minZ = allZ.length ? Math.min(...allZ) : 0;
   const width = node.data('width'), height = node.data('height');
@@ -4124,6 +4228,7 @@ async function sendAnnotationToBack(annotationId) {
       label: node.data('label'), width, height,
       x: pos.x - width / 2, y: pos.y - height / 2, z_order: minZ - 1,
     });
+    if (previous) topologyUndoPush({ type: 'update_annotation', annotationId, previous });
     closeTopologyPanel();
     loadTopology();
   } catch (e) { alert('No se pudo enviar al fondo: ' + e.message); }
@@ -4131,34 +4236,49 @@ async function sendAnnotationToBack(annotationId) {
 
 async function deleteAnnotationForm(annotationId) {
   if (!confirm(i18nText('topology.annotation_delete_confirm'))) return;
+  const node = topologyCy.getElementById(`ann-${annotationId}`);
+  const payload = {
+    kind: node.data('kind'),
+    zone_id: (topologyLastData.annotations || []).find(a => a.id === annotationId)?.zone_id ?? null,
+    site_id: (topologyLastData.annotations || []).find(a => a.id === annotationId)?.site_id ?? null,
+    ...topologyAnnotationSnapshot(annotationId),
+  };
   try {
     await api(`/api/topology/annotations/${annotationId}`, { method: 'DELETE' });
+    topologyUndoPush({ type: 'delete_annotation', payload });
     closeTopologyPanel();
     loadTopology();
   } catch (e) { alert('No se pudo eliminar: ' + e.message); }
 }
 
 // Toolbar entry points ("+ Recuadro"/"+ Texto") -- drops a new annotation
-// roughly centered on whatever's currently in view (topologyCy.extent(),
-// model-space, not screen pixels) so it starts somewhere visible instead
-// of at (0, 0) regardless of how far the user has panned/zoomed.
+// near the top-left of whatever's currently in view (topologyCy.extent(),
+// model-space, not screen pixels), not dead center: on a real, already-
+// populated topology the center of the view is exactly where the busiest
+// cluster of devices already sits (reported live: a brand-new box/note
+// landed directly on top of existing equipment, reading as "stuck" since
+// its drag handle was hidden under them too). A corner starts it
+// somewhere empty enough to actually grab the handle and drag it into
+// place, and it's never at literal (0, 0) regardless of how far the user
+// has panned/zoomed.
 async function createTopologyAnnotation(kind) {
   if (!topologyCy) return;
   const extent = topologyCy.extent();
   const width = kind === 'box' ? 260 : 160;
   const height = kind === 'box' ? 160 : 40;
-  const cx = (extent.x1 + extent.x2) / 2;
-  const cy = (extent.y1 + extent.y2) / 2;
+  const x = extent.x1 + extent.w * 0.08;
+  const y = extent.y1 + extent.h * 0.08;
   const body = {
     zone_id: selectedZoneId, site_id: selectedZoneId ? null : selectedSiteId,
     kind,
     label: kind === 'box' ? i18nText('topology.annotation_default_box_label') : i18nText('topology.annotation_default_text_label'),
-    x: cx - width / 2, y: cy - height / 2, width, height,
+    x, y, width, height,
   };
   try {
-    await api('/api/topology/annotations', {
+    const created = await api('/api/topology/annotations', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
+    topologyUndoPush({ type: 'create_annotation', annotationId: created.id });
     loadTopology();
   } catch (e) { alert('No se pudo crear: ' + e.message); }
 }

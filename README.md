@@ -520,13 +520,19 @@ Cytoscape.js ya usado, sin cambiar de motor:
   draw.io). Preferencia puramente visual, guardada en `localStorage`, no en el servidor.
 - **Recuadros de fondo y notas de texto libre**: botones "+ Recuadro"/"+ Texto" crean un
   `TopologyAnnotation` (rectángulo agrupador o nota, sin ningún significado de dispositivo) que siempre
-  se dibuja detrás de todo equipo/enlace. Cada anotación tiene un pequeño tirador cuadrado en su esquina
-  superior izquierda -- es la única parte "clickeable"; el cuerpo del recuadro/texto es
-  `events: 'no'` a propósito, para que arrastrar un dispositivo que quedó visualmente adentro nunca
-  termine moviendo el recuadro en su lugar (bug real encontrado durante la verificación de este mismo
-  cambio: sin el tirador, un recuadro grande le "robaba" el gesto de arrastre a cualquier equipo dentro
-  suyo). Tocar el tirador abre un panel para renombrar, redimensionar, **"Enviar al fondo"** (baja su
-  `z_order` por debajo del mínimo actual, para resolver recuadros anidados/superpuestos) o eliminar.
+  se dibuja detrás de todo equipo/enlace, apareciendo cerca de la esquina superior izquierda de lo que
+  esté a la vista (no en el centro -- en una topología real y poblada el centro es justo donde ya está
+  el clúster de equipos más denso, así que un recuadro nuevo ahí arriba nace tapado y sin espacio para
+  agarrarlo). Cada anotación tiene un tirador con ícono de mover (✥) justo afuera de su esquina superior
+  izquierda -- es la única parte "clickeable"; el cuerpo del recuadro/texto es `events: 'no'` a propósito,
+  para que arrastrar un dispositivo que quedó visualmente adentro nunca termine moviendo el recuadro en
+  su lugar (bug real encontrado durante la verificación de este mismo cambio: sin el tirador, un recuadro
+  grande le "robaba" el gesto de arrastre a cualquier equipo dentro suyo). Una primera versión del
+  tirador -- chico, sin ícono, pegado adentro de la esquina -- pasó desapercibida en una topología real
+  ("el recuadro queda fijo, no deja moverlo"); el tirador actual es más grande, con el ícono de mover y
+  un tooltip al pasar el mouse. Tocar el tirador abre un panel para renombrar, redimensionar, **"Enviar
+  al fondo"** (baja su `z_order` por debajo del mínimo actual, para resolver recuadros anidados/
+  superpuestos) o eliminar.
 - **Las posiciones ahora sobreviven a un refresco**: antes de esto, dónde quedaba cada dispositivo en el
   lienzo vivía solo en una variable del navegador (`topologyPositions`) -- se perdía al recargar la
   página o para cualquier otro usuario. `Device.topology_x`/`topology_y` (nulos = "todavía sin ubicar a
@@ -535,6 +541,10 @@ Cytoscape.js ya usado, sin cambiar de motor:
   el mismo todo-o-nada de antes: si *algún* dispositivo de la vista no tiene posición guardada, se
   vuelve a correr el layout automático para todos -- ubicar manualmente todos los equipos de una vista
   es lo que la deja realmente fija entre recargas.
+- **Deshacer cubre movimientos, no solo enlaces**: arrastrar un dispositivo o una anotación, crear un
+  recuadro/nota, editarlo o enviarlo al fondo -- todo eso ahora empuja una entrada a la misma pila de
+  deshacer que ya usaban los enlaces (sin límite de tamaño; "Deshacer" repetido retrocede tantos pasos
+  como se hayan hecho en la sesión, no solo el último).
 
 ```bash
 curl -X PATCH http://localhost:8000/api/topology/positions \
