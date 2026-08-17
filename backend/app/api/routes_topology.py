@@ -30,6 +30,8 @@ from app.models import (
     FlowLinkCandidate,
     NetworkLink,
     Sensor,
+    Site,
+    TopologyAnnotation,
     User,
     Zone,
 )
@@ -38,9 +40,13 @@ from app.schemas import (
     NetworkLinkCreateRequest,
     NetworkLinkOut,
     NetworkLinkUpdateRequest,
+    TopologyAnnotationCreateRequest,
+    TopologyAnnotationOut,
+    TopologyAnnotationUpdateRequest,
     TopologyEdge,
     TopologyNode,
     TopologyOut,
+    TopologyPositionsUpdateRequest,
 )
 from app.topology_from_switch import upsert_link
 
@@ -94,7 +100,23 @@ def _node(device: Device, zone_by_session_id: dict[int, tuple[int, str]]) -> Top
         is_external=device.is_external,
         zone_id=zone_id,
         zone_name=zone_name,
+        x=device.topology_x,
+        y=device.topology_y,
     )
+
+
+def _filter_annotations_by_zone_or_site(query, zone_id: int | None, site_id: int | None):
+    """Mirrors _filter_by_zone_or_site's contract (routes_inventory.py) but
+    directly on TopologyAnnotation's own zone_id/site_id columns instead of
+    joining through a capture -- an annotation isn't captured by a sensor,
+    it's drawn by a human directly into whichever scope was on screen (see
+    TopologyAnnotation's docstring), so it only ever carries the one scope
+    it was created under."""
+    if zone_id is not None:
+        return query.filter(TopologyAnnotation.zone_id == zone_id)
+    if site_id is not None:
+        return query.filter(TopologyAnnotation.site_id == site_id)
+    return query
 
 
 def _manual_edge(link: NetworkLink) -> TopologyEdge:
@@ -141,7 +163,13 @@ def get_topology(
     ]
     edges = [_manual_edge(link) for link in manual_links]
 
-    return TopologyOut(nodes=nodes, edges=edges)
+    annotation_query = db.query(TopologyAnnotation)
+    if not is_super_admin(user):
+        annotation_query = annotation_query.filter(TopologyAnnotation.organization_id == user.organization_id)
+    annotation_query = _filter_annotations_by_zone_or_site(annotation_query, zone_id, site_id)
+    annotations = annotation_query.order_by(TopologyAnnotation.z_order).all()
+
+    return TopologyOut(nodes=nodes, edges=edges, annotations=annotations)
 
 
 def _get_owned_devices_pair(db: Session, user: User, device_a_id: int, device_b_id: int) -> tuple[Device, Device]:
@@ -236,6 +264,145 @@ def update_network_link(
 def delete_network_link(link_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     link = _get_owned_link(db, user, link_id)
     db.delete(link)
+    db.commit()
+    return None
+
+
+@router.patch("/positions", status_code=204)
+def update_topology_positions(
+    payload: TopologyPositionsUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """Persists where a human dragged one or more devices to -- see
+    Device.topology_x/topology_y's docstring for why this exists at all
+    (before it, every manual arrangement of a big topology was lost on the
+    next reload). Silently skips any device_id outside the caller's
+    organization rather than 404ing the whole batch -- a drag is a
+    best-effort save, not a transaction the frontend needs to roll back
+    on a single stale id."""
+    device_ids = [p.device_id for p in payload.positions]
+    if not device_ids:
+        return None
+    query = db.query(Device).filter(Device.id.in_(device_ids))
+    if not is_super_admin(user):
+        query = query.filter(Device.organization_id == user.organization_id)
+    devices_by_id = {d.id: d for d in query.all()}
+    for pos in payload.positions:
+        device = devices_by_id.get(pos.device_id)
+        if device is None:
+            continue
+        device.topology_x = pos.x
+        device.topology_y = pos.y
+    db.commit()
+    return None
+
+
+def _resolve_annotation_organization_id(
+    db: Session, user: User, zone_id: int | None, site_id: int | None
+) -> int:
+    """Same org-scoping question NetworkLinkCreateRequest answers by
+    looking at the two devices being linked -- an annotation has no device
+    to borrow an organization_id from, so it's resolved from whichever
+    scope (zone_id/site_id) it was drawn under instead. A regular admin
+    always has their own organization_id regardless of scope; only
+    Super Admin (no organization of their own) needs one of the two to
+    resolve which org this annotation belongs to."""
+    if not is_super_admin(user):
+        return user.organization_id
+    if zone_id is not None:
+        zone = db.get(Zone, zone_id)
+        site = db.get(Site, zone.site_id) if zone else None
+        if site is None:
+            raise HTTPException(status_code=404, detail=message("topology.zone_not_found", user.locale))
+        return site.organization_id
+    if site_id is not None:
+        site = db.get(Site, site_id)
+        if site is None:
+            raise HTTPException(status_code=404, detail=message("topology.site_not_found", user.locale))
+        return site.organization_id
+    raise HTTPException(status_code=400, detail=message("topology.annotation_scope_required", user.locale))
+
+
+def _validate_annotation_scope(db: Session, user: User, organization_id: int, zone_id: int | None, site_id: int | None) -> None:
+    if zone_id is not None:
+        zone = (
+            db.query(Zone)
+            .join(Site, Zone.site_id == Site.id)
+            .filter(Zone.id == zone_id, Site.organization_id == organization_id)
+            .one_or_none()
+        )
+        if zone is None:
+            raise HTTPException(status_code=404, detail=message("topology.zone_not_found", user.locale))
+    if site_id is not None:
+        site = db.query(Site).filter(Site.id == site_id, Site.organization_id == organization_id).one_or_none()
+        if site is None:
+            raise HTTPException(status_code=404, detail=message("topology.site_not_found", user.locale))
+
+
+def _get_owned_annotation(db: Session, user: User, annotation_id: int) -> TopologyAnnotation:
+    query = db.query(TopologyAnnotation).filter(TopologyAnnotation.id == annotation_id)
+    if not is_super_admin(user):
+        query = query.filter(TopologyAnnotation.organization_id == user.organization_id)
+    annotation = query.one_or_none()
+    if annotation is None:
+        raise HTTPException(status_code=404, detail=message("topology.annotation_not_found", user.locale))
+    return annotation
+
+
+@router.post("/annotations", response_model=TopologyAnnotationOut)
+def create_topology_annotation(
+    payload: TopologyAnnotationCreateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """A background group box or a plain text note -- see
+    app/models.py's TopologyAnnotation docstring. Regular admins may only
+    ever draw one for their own organization; Super Admin must specify
+    zone_id or site_id so the organization can be resolved from it."""
+    organization_id = _resolve_annotation_organization_id(db, user, payload.zone_id, payload.site_id)
+    _validate_annotation_scope(db, user, organization_id, payload.zone_id, payload.site_id)
+    annotation = TopologyAnnotation(
+        organization_id=organization_id,
+        zone_id=payload.zone_id,
+        site_id=payload.site_id,
+        kind=payload.kind,
+        label=payload.label,
+        x=payload.x,
+        y=payload.y,
+        width=payload.width,
+        height=payload.height,
+        created_by_user_id=user.id,
+    )
+    db.add(annotation)
+    db.commit()
+    db.refresh(annotation)
+    return annotation
+
+
+@router.patch("/annotations/{annotation_id}", response_model=TopologyAnnotationOut)
+def update_topology_annotation(
+    annotation_id: int,
+    payload: TopologyAnnotationUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    annotation = _get_owned_annotation(db, user, annotation_id)
+    annotation.label = payload.label
+    annotation.x = payload.x
+    annotation.y = payload.y
+    annotation.width = payload.width
+    annotation.height = payload.height
+    annotation.z_order = payload.z_order
+    db.commit()
+    db.refresh(annotation)
+    return annotation
+
+
+@router.delete("/annotations/{annotation_id}", status_code=204)
+def delete_topology_annotation(annotation_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    annotation = _get_owned_annotation(db, user, annotation_id)
+    db.delete(annotation)
     db.commit()
     return None
 

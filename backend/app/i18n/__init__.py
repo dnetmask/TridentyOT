@@ -193,6 +193,13 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "Este candidato ya fue confirmado o descartado",
         "en": "This candidate has already been confirmed or dismissed",
     },
+    "topology.zone_not_found": {"es": "Zona no encontrada", "en": "Zone not found"},
+    "topology.site_not_found": {"es": "Sitio no encontrado", "en": "Site not found"},
+    "topology.annotation_scope_required": {
+        "es": "Se requiere una zona o un sitio para crear esta anotación",
+        "en": "A zone or a site is required to create this annotation",
+    },
+    "topology.annotation_not_found": {"es": "Anotación no encontrada", "en": "Annotation not found"},
 }
 
 

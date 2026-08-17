@@ -280,6 +280,18 @@ class Device(Base):
     # as the gateway's own address keeps this False.
     is_mac_shared: Mapped[bool] = mapped_column(default=False)
 
+    # Where a human dragged this device to on the Topología canvas --
+    # nullable (not a scalar default like is_mac_shared above) because
+    # "never placed" is a real, distinct state from "placed at (0, 0)":
+    # a null pair means the frontend's auto layout ('cose'/'grid', see
+    # renderTopologyGraph) still owns this node's position, exactly as it
+    # did before these columns existed, when placement lived only in the
+    # browser's topologyPositions cache and vanished on every reload. Once
+    # set (PATCH /api/topology/positions, on a real drag), it sticks across
+    # reloads and other users' sessions, same as a NetworkLink.
+    topology_x: Mapped[float | None] = mapped_column(Float, nullable=True)
+    topology_y: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     # The capture session that *most recently* confirmed this device (see
     # inventory_service.get_or_create_device) -- also used to remove it when
     # that session is deleted, provided no other session's protocols/flows
@@ -499,6 +511,52 @@ class NetworkLink(Base):
 
     device_a: Mapped[Device] = relationship(foreign_keys=[device_a_id])
     device_b: Mapped[Device] = relationship(foreign_keys=[device_b_id])
+
+
+ANNOTATION_BOX = "box"
+ANNOTATION_TEXT = "text"
+
+
+class TopologyAnnotation(Base):
+    """A freeform object a human adds directly on the Topología canvas,
+    with no device semantics at all -- inspired by draw.io's grouping
+    rectangles and text notes, for giving a big topology visual structure
+    (an "this whole area is the DMZ" box, a caption) beyond what devices
+    and links alone can show.
+
+    - "box": a background rectangle, always rendered behind every device
+      (see routes_topology.py's z_order docstring below) so it reads as a
+      labeled area rather than an interactive node competing for clicks.
+    - "text": a plain caption with no border/fill.
+
+    Scoped by zone_id/site_id exactly like the topology view itself (see
+    get_topology's zone_id/site_id query params) -- an annotation drawn
+    while looking at one Zona/Sitio only ever reappears in that same view,
+    same as how devices are filtered.
+    """
+
+    __tablename__ = "topology_annotations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    zone_id: Mapped[int | None] = mapped_column(ForeignKey("zones.id"), nullable=True, index=True)
+    site_id: Mapped[int | None] = mapped_column(ForeignKey("sites.id"), nullable=True, index=True)
+    kind: Mapped[str] = mapped_column(String(8))  # ANNOTATION_BOX | ANNOTATION_TEXT
+    label: Mapped[str] = mapped_column(Text, default="")
+    x: Mapped[float] = mapped_column(Float, default=0.0)
+    y: Mapped[float] = mapped_column(Float, default=0.0)
+    width: Mapped[float] = mapped_column(Float, default=220.0)
+    height: Mapped[float] = mapped_column(Float, default=140.0)
+    # Lower always draws first (further back) -- "Enviar al fondo" just
+    # sets this below whatever the lowest value currently on screen is.
+    # Devices/links have no z_order of their own; they're implicitly drawn
+    # in front of every annotation regardless of this value (see
+    # renderTopologyGraph, which always adds annotation elements to
+    # Cytoscape before device/link elements).
+    z_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
 
 class FlowLinkCandidate(Base):

@@ -502,6 +502,56 @@ de una sola Zona no tiene nada que agrupar y se ve exactamente igual que antes.
 curl "http://localhost:8000/api/topology?site_id=3" -H "Authorization: Bearer $TOKEN"
 ```
 
+#### Creación de enlaces al estilo draw.io + anotaciones para topologías grandes
+
+Inspirado en cómo [draw.io](https://www.diagrams.net/) (motor `mxGraph`) deja crear un enlace
+arrastrando desde el borde de una figura, tres mejoras a la Topología -- todas sobre el mismo
+Cytoscape.js ya usado, sin cambiar de motor:
+
+- **Crear enlaces arrastrando** (rol admin, "Modo edición" activo): además del flujo de dos clics ya
+  existente, al pasar el mouse por un dispositivo aparece un pequeño círculo -- arrastrarlo hasta otro
+  dispositivo dibuja una línea de vista previa en vivo y, al soltar, abre el mismo formulario de enlace
+  de siempre (puerto/estado/notas). Extensión vendorizada `cytoscape-edgehandles` (`backend/app/static/
+  vendor/cytoscape-edgehandles.js`, MIT, v3.6.0 -- la última con el círculo real sobre el borde; la 4.x
+  lo reemplazó por un interruptor global de "modo dibujo", que no es la interacción pedida). Requiere un
+  shim mínimo de `lodash.memoize`/`throttle` (`vendor/lodash-shim.js`) en vez de vendorizar todo lodash.
+- **Estilo de línea** (`Enlaces:` en la barra de herramientas): Curva (bezier, la de siempre), Recta, u
+  Ortogonal (quiebres en ángulo recto -- el estilo `taxi` de Cytoscape, equivalente al ruteo ortogonal de
+  draw.io). Preferencia puramente visual, guardada en `localStorage`, no en el servidor.
+- **Recuadros de fondo y notas de texto libre**: botones "+ Recuadro"/"+ Texto" crean un
+  `TopologyAnnotation` (rectángulo agrupador o nota, sin ningún significado de dispositivo) que siempre
+  se dibuja detrás de todo equipo/enlace. Cada anotación tiene un pequeño tirador cuadrado en su esquina
+  superior izquierda -- es la única parte "clickeable"; el cuerpo del recuadro/texto es
+  `events: 'no'` a propósito, para que arrastrar un dispositivo que quedó visualmente adentro nunca
+  termine moviendo el recuadro en su lugar (bug real encontrado durante la verificación de este mismo
+  cambio: sin el tirador, un recuadro grande le "robaba" el gesto de arrastre a cualquier equipo dentro
+  suyo). Tocar el tirador abre un panel para renombrar, redimensionar, **"Enviar al fondo"** (baja su
+  `z_order` por debajo del mínimo actual, para resolver recuadros anidados/superpuestos) o eliminar.
+- **Las posiciones ahora sobreviven a un refresco**: antes de esto, dónde quedaba cada dispositivo en el
+  lienzo vivía solo en una variable del navegador (`topologyPositions`) -- se perdía al recargar la
+  página o para cualquier otro usuario. `Device.topology_x`/`topology_y` (nulos = "todavía sin ubicar a
+  mano", el layout automático sigue mandando) ahora guardan esa posición en el servidor
+  (`PATCH /api/topology/positions`, en lote), igual que ya pasa con los `NetworkLink`. Sigue existiendo
+  el mismo todo-o-nada de antes: si *algún* dispositivo de la vista no tiene posición guardada, se
+  vuelve a correr el layout automático para todos -- ubicar manualmente todos los equipos de una vista
+  es lo que la deja realmente fija entre recargas.
+
+```bash
+curl -X PATCH http://localhost:8000/api/topology/positions \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"positions": [{"device_id": 10, "x": 120.5, "y": 300}]}'
+
+curl -X POST http://localhost:8000/api/topology/annotations \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"kind": "box", "label": "Zona DMZ", "x": 0, "y": 0, "width": 320, "height": 220, "zone_id": 3}'
+
+curl -X PATCH http://localhost:8000/api/topology/annotations/1 \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"label": "Zona DMZ", "x": 0, "y": 0, "width": 320, "height": 220, "z_order": -1}'
+
+curl -X DELETE http://localhost:8000/api/topology/annotations/1 -H "Authorization: Bearer $TOKEN"
+```
+
 #### Cimientos de datos para una topología más real (VLAN, TTL, ARP en vivo, DHCP)
 
 Un `Flow` (quién habló con quién) nunca es prueba de un cable directo: siempre puede haber un switch

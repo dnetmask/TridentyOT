@@ -947,6 +947,16 @@
         <button type="button" class="action secondary" id="topology-zoom-out-btn" title="Alejar">Zoom −</button>
         <button type="button" class="action secondary admin-only" id="topology-undo-btn" title="Deshacer la última acción" data-i18n="topology.undo_btn" disabled>Deshacer</button>
         <button type="button" class="action secondary" id="topology-fullscreen-btn" title="Pantalla completa" data-i18n="topology.fullscreen_btn">Pantalla completa</button>
+        <label style="display:inline-flex;align-items:center;gap:4px;margin:0;font-size:12px;" title="Estilo de las líneas de enlace">
+          <span data-i18n="topology.edge_style_label">Enlaces:</span>
+          <select id="topology-edge-style-select" style="width:auto;">
+            <option value="bezier" data-i18n="topology.edge_style_curve">Curva</option>
+            <option value="straight" data-i18n="topology.edge_style_straight">Recta</option>
+            <option value="taxi" data-i18n="topology.edge_style_orthogonal">Ortogonal</option>
+          </select>
+        </label>
+        <button type="button" class="action secondary admin-only" id="topology-add-box-btn" title="Agregar un recuadro para agrupar visualmente un área" data-i18n="topology.add_box_btn">+ Recuadro</button>
+        <button type="button" class="action secondary admin-only" id="topology-add-text-btn" title="Agregar una nota de texto libre" data-i18n="topology.add_text_btn">+ Texto</button>
       </div>
       <div id="topology-fullscreen-wrapper">
         <div id="topology-container" style="position:relative; display:flex; gap:10px; align-items:flex-start;">
@@ -1310,6 +1320,14 @@
      every script this dashboard needs has to ship inside the app itself
      (see backend/app/static/vendor/). MIT-licensed, unmodified. -->
 <script src="/vendor/cytoscape.min.js"></script>
+<!-- cytoscape-edgehandles needs a global lodash.memoize/throttle when
+     loaded as a plain script (no CommonJS/AMD) -- this tiny shim covers
+     just those two functions instead of vendoring all of lodash. Pinned
+     to 3.6.0 (not the newer 4.x) because that's the last version with a
+     real per-node hover handle; 4.x replaced it with a global "draw mode"
+     toggle, which isn't the hover-then-drag-from-the-border UX asked for. -->
+<script src="/vendor/lodash-shim.js"></script>
+<script src="/vendor/cytoscape-edgehandles.js"></script>
 <script>
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -1459,6 +1477,21 @@ const I18N = {
   'topology.fit_btn': { es: '⤢ Ajustar', en: '⤢ Fit' },
   'topology.undo_btn': { es: 'Deshacer', en: 'Undo' },
   'topology.fullscreen_btn': { es: 'Pantalla completa', en: 'Fullscreen' },
+  'topology.edge_style_label': { es: 'Enlaces:', en: 'Links:' },
+  'topology.edge_style_curve': { es: 'Curva', en: 'Curved' },
+  'topology.edge_style_straight': { es: 'Recta', en: 'Straight' },
+  'topology.edge_style_orthogonal': { es: 'Ortogonal', en: 'Orthogonal' },
+  'topology.add_box_btn': { es: '+ Recuadro', en: '+ Box' },
+  'topology.add_text_btn': { es: '+ Texto', en: '+ Text' },
+  'topology.annotation_box_title': { es: 'Recuadro', en: 'Box' },
+  'topology.annotation_text_title': { es: 'Nota de texto', en: 'Text note' },
+  'topology.annotation_label': { es: 'Texto', en: 'Text' },
+  'topology.annotation_width': { es: 'Ancho', en: 'Width' },
+  'topology.annotation_height': { es: 'Alto', en: 'Height' },
+  'topology.annotation_send_to_back': { es: 'Enviar al fondo', en: 'Send to back' },
+  'topology.annotation_delete_confirm': { es: '¿Eliminar esta anotación?', en: 'Delete this annotation?' },
+  'topology.annotation_default_box_label': { es: 'Nuevo recuadro', en: 'New box' },
+  'topology.annotation_default_text_label': { es: 'Nueva nota', en: 'New note' },
   'topology.palette_hint': {
     es: 'Arrastrá un equipo al lienzo para ubicarlo en la topología.',
     en: 'Drag a device onto the canvas to place it in the topology.',
@@ -2959,6 +2992,21 @@ let allFlows = [];
 let topologyCy = null;
 let topologyPositions = {};
 let topologyPendingSourceId = null;
+// The cytoscape-edgehandles instance bound to the current topologyCy --
+// recreated (implicitly, via topologyCy.destroy()) on every render;
+// enabled/disabled in lockstep with #topology-edit-mode so the hover
+// handle only ever appears while editing is on (see wireTopologyEvents'
+// device tap handler for the exact same gating on the click-based flow).
+let topologyEdgehandles = null;
+
+// Display-only preference (never sent to the backend, unlike node/
+// annotation positions) -- how a link's line is drawn: 'bezier' (curved,
+// the long-standing default), 'straight', or 'taxi' (orthogonal jogs, the
+// draw.io-style "quiebres rectangulares" a big topology can use to avoid
+// diagonal lines criss-crossing a dense canvas).
+function topologyEdgeStyle() {
+  return localStorage.getItem('topologyEdgeStyle') || 'bezier';
+}
 // Last /api/topology response -- the palette (topologyUnplacedNodes) and
 // the canvas-drop handler (placeDeviceOnCanvas) both need the full node
 // list, not just whatever's already a live Cytoscape element.
@@ -3337,10 +3385,22 @@ function renderTopology(data) {
   // a new grouping always needs a fresh layout pass; dragging nodes around
   // after that persists normally across the 15s auto-refresh, since the
   // grouping (and therefore the cache key) hasn't changed.
-  const hasAllPositions = placedNodes.length > 0 && placedNodes.every(n => {
+  //
+  // Falls back to the server-persisted Device.topology_x/topology_y (see
+  // routes_topology.py's _node()) when there's no in-session cache entry
+  // yet -- e.g. the very first render after a reload, or on a different
+  // browser/user -- so a manually-arranged layout survives beyond just
+  // this one tab's lifetime, unlike before these columns existed. Same
+  // ungrouped-only restriction as the cache above: a server position was
+  // saved as an absolute canvas coordinate, which only means the same
+  // thing again outside a compound Zona box.
+  const positionOf = (n) => {
     const cached = topologyPositions[n.id];
-    return cached && cached.parent === nodeParentOf(n);
-  });
+    if (cached && cached.parent === nodeParentOf(n)) return cached.pos;
+    if (nodeParentOf(n) == null && n.x != null && n.y != null) return { x: n.x, y: n.y };
+    return null;
+  };
+  const hasAllPositions = placedNodes.length > 0 && placedNodes.every(n => positionOf(n) != null);
 
   const zoneParents = groupByZone
     ? zoneIds.map(zid => {
@@ -3370,17 +3430,55 @@ function renderTopology(data) {
     return seeded;
   })() : null;
 
+  // Background annotations (draw.io-style grouping boxes / free text
+  // notes -- see app/models.py's TopologyAnnotation) are added to the
+  // elements array before anything else, and their 'z-index' style
+  // (below) is always a large negative offset from their own z_order --
+  // together that guarantees every one of them draws behind every real
+  // device/link regardless of z_order's raw value, while still respecting
+  // relative order *among* annotations (what "Enviar al fondo" changes).
+  // Each annotation is actually TWO cytoscape elements: the box/text body
+  // itself (below, 'events: no' so it never steals a tap/drag meant for a
+  // device that happens to sit visually inside/on top of it -- exactly
+  // the scenario a grouping box exists for), and a small square "handle"
+  // pinned to its top-left corner that's the ONLY way to select, drag, or
+  // open the edit panel for it. A plain full-size hit area (no handle)
+  // was tried first and confirmed broken live: dragging a device sitting
+  // inside a box intermittently grabbed the box instead, since a big
+  // rectangle's hit area has no notion of "yield to whatever's on top of
+  // me" the way a real compound (:parent) node does for its children.
+  const annotationNodeId = (a) => `ann-${a.id}`;
+  const annotationHandleId = (a) => `ann-handle-${a.id}`;
+  const annotationEls = (data.annotations || []).map(a => ({
+    data: {
+      id: annotationNodeId(a), annotationId: a.id, topologyKind: 'annotation',
+      kind: a.kind, label: a.label, width: a.width, height: a.height, zOrder: a.z_order,
+    },
+    position: { x: a.x + a.width / 2, y: a.y + a.height / 2 },
+    classes: `annotation annotation-${a.kind}`,
+  }));
+  const annotationHandleEls = (data.annotations || []).map(a => ({
+    data: {
+      id: annotationHandleId(a), annotationId: a.id, topologyKind: 'annotation-handle',
+      kind: a.kind, label: a.label, width: a.width, height: a.height, zOrder: a.z_order,
+    },
+    position: { x: a.x + 9, y: a.y + 9 },
+    classes: 'annotation annotation-handle',
+  }));
+
   const elements = [
+    ...annotationEls,
+    ...annotationHandleEls,
     ...zoneParents,
     ...placedNodes.map(n => {
       const parent = nodeParentOf(n);
       return {
-        data: { id: String(n.id), ...n, ...(parent ? { parent } : {}) },
+        data: { id: String(n.id), ...n, topologyKind: 'device', ...(parent ? { parent } : {}) },
         // A literal `position: undefined` key (as opposed to no key at
         // all) makes Cytoscape treat the node as already positioned at
         // its default (0,0) instead of letting the layout place it --
         // omit the key entirely rather than pass an empty value.
-        ...(hasAllPositions ? { position: topologyPositions[n.id].pos }
+        ...(hasAllPositions ? { position: positionOf(n) }
           : clusterSeed ? { position: clusterSeed[n.id] } : {}),
         classes: n.is_ot_suspected ? 'ot-suspected' : '',
       };
@@ -3438,7 +3536,12 @@ function renderTopology(data) {
       } },
       { selector: 'node.ot-suspected', style: { 'border-width': 2.5, 'border-color': critColor, 'border-opacity': 0.85 } },
       { selector: 'node.topology-pending', style: { 'overlay-color': accentColor, 'overlay-opacity': 0.35, 'overlay-padding': 8 } },
-      { selector: 'edge', style: { 'curve-style': 'bezier', 'font-size': 10 } },
+      // 'taxi'/'taxi-direction'/'taxi-turn' only take effect when
+      // curve-style is actually 'taxi' -- harmless to always set them so
+      // switching topologyEdgeStyle() doesn't need a second style rebuild.
+      { selector: 'edge', style: {
+          'curve-style': topologyEdgeStyle(), 'taxi-direction': 'auto', 'taxi-turn': '20%', 'font-size': 10,
+      } },
       { selector: 'edge[kind = "confirmed"]', style: {
           width: 2.5, 'line-color': accentColor,
           'source-label': 'data(source_port)', 'target-label': 'data(target_port)',
@@ -3449,6 +3552,58 @@ function renderTopology(data) {
           'source-label': 'data(source_port)', 'target-label': 'data(target_port)',
           'source-text-offset': 24, 'target-text-offset': 24, color: mutedColor,
       } },
+      // Draw.io-inspired background objects (see TopologyAnnotation) --
+      // always behind every device/link, see annotationEls' own comment
+      // on why the offset is unconditional rather than relying on
+      // z_order's raw value alone.
+      { selector: '.annotation', style: {
+          // Without this, the base 'node' selector's device-icon mapper
+          // above still applies (annotations are plain cytoscape nodes
+          // too) -- topologyIconUrl(undefined) falls back to other.svg,
+          // stretched to fill the annotation's whole width/height. Same
+          // fix as ':parent' uses for the exact same reason.
+          'background-image': 'none',
+          'z-index': (ele) => (ele.data('zOrder') || 0) - 100000,
+          label: 'data(label)', 'font-size': 12, color: textColor,
+      } },
+      { selector: '.annotation-box', style: {
+          shape: 'round-rectangle', width: 'data(width)', height: 'data(height)',
+          'background-color': mutedColor, 'background-opacity': 0.10,
+          'border-width': 1.5, 'border-color': mutedColor, 'border-style': 'dashed',
+          'text-valign': 'top', 'text-halign': 'center', 'text-margin-y': -8, 'font-weight': 600,
+          events: 'no',
+      } },
+      { selector: '.annotation-text', style: {
+          shape: 'round-rectangle', width: 'data(width)', height: 'data(height)',
+          'background-opacity': 0, 'border-width': 0,
+          'text-valign': 'center', 'text-halign': 'center',
+          'text-wrap': 'wrap', 'text-max-width': 'data(width)', 'font-style': 'italic',
+          events: 'no',
+      } },
+      // The one interactive part of an annotation -- see annotationHandleEls'
+      // comment above for why the box/text body itself is events:'no'. Kept
+      // small and pinned to the top-left corner, with no visible label of
+      // its own (the box/text's own label already shows what it is).
+      { selector: '.annotation-handle', style: {
+          shape: 'round-rectangle', width: 14, height: 14,
+          'background-color': accentColor, 'background-opacity': 0.9,
+          'border-width': 1, 'border-color': textColor,
+          label: '', 'z-index': 5000,
+      } },
+      // cytoscape-edgehandles' own style hooks (see /vendor/cytoscape-
+      // edgehandles.js) -- the small hover handle, the source/target
+      // highlight while dragging, and the dashed preview line.
+      { selector: '.eh-handle', style: {
+          'background-color': accentColor, width: 10, height: 10, shape: 'ellipse',
+          'border-width': 2, 'border-color': textColor, 'background-opacity': 0.95,
+      } },
+      { selector: '.eh-hover', style: { 'background-color': accentColor } },
+      { selector: '.eh-source, .eh-target', style: { 'border-width': 3, 'border-color': accentColor } },
+      { selector: '.eh-preview, .eh-ghost-edge', style: {
+          'line-color': accentColor, 'line-style': 'dashed',
+          'target-arrow-color': accentColor, 'target-arrow-shape': 'triangle',
+      } },
+      { selector: '.eh-ghost-node', style: { opacity: 0 } },
     ],
     // Constructed with 'preset' (a no-op); the real layout runs explicitly
     // right below via cy.layout().run().
@@ -3467,6 +3622,11 @@ function renderTopology(data) {
   // instead of waiting for a zoom to paper over it.
   topologyCy.resize();
 
+  // Every layout below runs on devices/Zona-boxes only (.not('.annotation'))
+  // -- a background box/text annotation already has its own explicit,
+  // human-placed position (see annotationEls above) and must never get
+  // reshuffled by a force/grid layout meant for devices.
+  const layoutEles = topologyCy.elements().not('.annotation');
   if (hasAllPositions) {
     // Nothing to do -- every node already has an explicit position (set
     // above) and 'preset' just keeps it.
@@ -3479,13 +3639,13 @@ function renderTopology(data) {
     // nodes -- Zona boxes included -- into non-overlapping cells and lays
     // out each compound's own children within its cell, which is exactly
     // the guarantee a grouped view needs.
-    topologyCy.layout({ name: 'grid', condense: false, avoidOverlap: true, avoidOverlapPadding: 40 }).run();
+    layoutEles.layout({ name: 'grid', condense: false, avoidOverlap: true, avoidOverlapPadding: 40 }).run();
   } else if (groupByType) {
     // No compound boxes to protect here -- clusterSeed above already
     // placed same-type nodes near each other, so 'cose' just needs
     // randomize:false to refine (spread out, straighten edges) from that
     // starting arrangement instead of discarding it for a random scatter.
-    topologyCy.layout({
+    layoutEles.layout({
       name: 'cose', animate: false, randomize: false,
       nodeRepulsion: () => 9000, idealEdgeLength: () => 100,
     }).run();
@@ -3493,26 +3653,108 @@ function renderTopology(data) {
     // An ungrouped view (one Zona, one device type) has nothing to seed
     // clustering from, so it keeps the plain force layout that reads
     // better for a handful of freely-connected devices.
-    topologyCy.layout({ name: 'cose', animate: false, nodeRepulsion: () => 9000, idealEdgeLength: () => 100 }).run();
+    layoutEles.layout({ name: 'cose', animate: false, nodeRepulsion: () => 9000, idealEdgeLength: () => 100 }).run();
   }
 
   // Parent (compound) nodes never get their own cached position -- their
   // box is always an automatic bounding box around their children, in
   // every layout, so there's nothing meaningful to persist for them.
+  // Annotations aren't cached here either -- topologyLastData.annotations
+  // (the server response) is their own source of truth, not this
+  // device-position cache.
   topologyCy.nodes().forEach(n => {
-    if (n.isParent()) return;
+    if (n.isParent() || n.hasClass('annotation')) return;
     topologyPositions[n.data('id')] = { pos: n.position(), parent: n.data('parent') || null };
   });
+  // The box/text body itself is 'events: no' (see annotationHandleEls'
+  // comment above) so it never fires 'drag'/'dragfree' at all -- only its
+  // small corner handle does. Moving the handle live-updates the real
+  // box/text's position on every step (so the box visibly follows the
+  // handle instead of jumping once at the end), then persists once the
+  // gesture completes.
+  topologyCy.on('drag', 'node.annotation-handle', evt => {
+    const handle = evt.target;
+    const box = topologyCy.getElementById(`ann-${handle.data('annotationId')}`);
+    if (!box.length) return;
+    const width = box.data('width'), height = box.data('height');
+    const hp = handle.position();
+    box.position({ x: hp.x - 9 + width / 2, y: hp.y - 9 + height / 2 });
+  });
   topologyCy.on('dragfree', 'node', evt => {
-    if (evt.target.isParent()) return;
-    topologyPositions[evt.target.data('id')] = { pos: evt.target.position(), parent: evt.target.data('parent') || null };
+    const node = evt.target;
+    if (node.isParent()) return;
+    if (node.data('topologyKind') === 'annotation-handle') {
+      if (isAdmin()) persistAnnotationGeometry(node);
+      return;
+    }
+    if (node.hasClass('annotation')) return; // the box/text body itself never drags (events:'no')
+    topologyPositions[node.data('id')] = { pos: node.position(), parent: node.data('parent') || null };
+    if (isAdmin()) persistDevicePosition(Number(node.data('id')), node.position());
   });
   if (topologyPendingSourceId) {
     const pending = topologyCy.getElementById(topologyPendingSourceId);
     if (pending.length) pending.addClass('topology-pending');
     else topologyPendingSourceId = null;
   }
+
+  // cytoscape-edgehandles: a hover-then-drag-from-the-border way to start
+  // a link, alongside (not instead of) the existing click-two-devices
+  // flow below -- see /vendor/cytoscape-edgehandles.js. Admin-only and
+  // gated by #topology-edit-mode exactly like the click flow (see the
+  // 'change' listener near the bottom of this file), via enable()/
+  // disable() rather than never creating it, so toggling the checkbox
+  // mid-session doesn't need a full re-render.
+  if (isAdmin()) {
+    topologyEdgehandles = topologyCy.edgehandles({
+      handleNodes: 'node[topologyKind = "device"]',
+      canConnect: (sourceNode, targetNode) =>
+        sourceNode.data('topologyKind') === 'device' &&
+        targetNode.data('topologyKind') === 'device' &&
+        !sourceNode.same(targetNode),
+      // The real link (ports/status/notes) is only ever created through
+      // openTopologyLinkForm/saveTopologyLink below -- this placeholder
+      // edge is removed immediately in the 'ehcomplete' handler, same
+      // principle as the click-based flow never persisting anything
+      // until the form is actually saved.
+      edgeParams: () => ({ data: { id: `eh-preview-${Math.floor(Math.random() * 1e9)}` } }),
+    });
+    if (!$('#topology-edit-mode').checked) topologyEdgehandles.disable();
+    topologyCy.on('ehcomplete', (evt, sourceNode, targetNode, addedEles) => {
+      addedEles.remove();
+      openTopologyLinkForm(Number(sourceNode.id()), Number(targetNode.id()), null, targetNode.renderedPosition());
+    });
+  }
+
   wireTopologyEvents();
+}
+
+async function persistDevicePosition(deviceId, pos) {
+  // Best-effort: a failed save just means this drag falls back to being
+  // session-local (topologyPositions already has it either way) rather
+  // than surfacing an alert for something this minor.
+  try {
+    await api('/api/topology/positions', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ positions: [{ device_id: deviceId, x: pos.x, y: pos.y }] }),
+    });
+  } catch (e) { /* best-effort, see above */ }
+}
+
+async function persistAnnotationGeometry(handleNode) {
+  // handleNode is the small corner handle, not the box/text body -- the
+  // 'drag' listener above already moved the real body element live during
+  // the gesture, so its position() here is already the final one to save.
+  const annotationId = handleNode.data('annotationId');
+  const box = topologyCy.getElementById(`ann-${annotationId}`);
+  const width = box.data('width'), height = box.data('height');
+  const pos = box.position();
+  try {
+    await saveTopologyAnnotation(annotationId, {
+      label: box.data('label'), width, height,
+      x: pos.x - width / 2, y: pos.y - height / 2,
+      z_order: box.data('zOrder') || 0,
+    });
+  } catch (e) { /* best-effort, same as persistDevicePosition above */ }
 }
 
 function topologyTooltipHtml(nodeData) {
@@ -3537,8 +3779,11 @@ function wireTopologyEvents() {
   // all outside any real device icon -- masquerade as tapping a device.
   // That silently corrupted the pending-link-source id with the box's own
   // "type-switch"/"zone-3" id, which is what made "click device A, click
-  // device B" occasionally fail to open the link form at all.
-  cy.on('mouseover', 'node:childless', evt => {
+  // device B" occasionally fail to open the link form at all. The added
+  // `[topologyKind = "device"]` excludes the other kind of childless node
+  // this graph can now have -- a background box/text annotation, which
+  // gets its own tap handler (openAnnotationPanel) below instead.
+  cy.on('mouseover', 'node:childless[topologyKind = "device"]', evt => {
     const node = evt.target;
     const p = node.renderedPosition();
     tooltip.innerHTML = topologyTooltipHtml(node.data());
@@ -3546,9 +3791,16 @@ function wireTopologyEvents() {
     tooltip.style.top = `${p.y - 10}px`;
     tooltip.style.display = 'block';
   });
-  cy.on('mouseout', 'node:childless', () => { tooltip.style.display = 'none'; });
+  cy.on('mouseout', 'node:childless[topologyKind = "device"]', () => { tooltip.style.display = 'none'; });
 
-  cy.on('tap', 'node:childless', evt => {
+  // Only the small corner handle is tappable -- the box/text body itself
+  // is 'events: no' (see annotationHandleEls' comment above).
+  cy.on('tap', 'node.annotation-handle', evt => {
+    const node = evt.target;
+    openAnnotationPanel(node.data('annotationId'), node.renderedPosition());
+  });
+
+  cy.on('tap', 'node:childless[topologyKind = "device"]', evt => {
     const node = evt.target;
     const id = node.data('id');
     // A pending source always wins the tap and completes (or cancels) the
@@ -3804,11 +4056,133 @@ async function deleteTopologyLink(linkId) {
   } catch (e) { alert('No se pudo eliminar: ' + e.message); }
 }
 
+// ---- Draw.io-inspired canvas annotations (background boxes / free text,
+// see app/models.py's TopologyAnnotation) -- reuses #topology-panel, same
+// as the device/link panels above, since only one is ever open at once.
+async function saveTopologyAnnotation(annotationId, body) {
+  await api(`/api/topology/annotations/${annotationId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+}
+
+function openAnnotationPanel(annotationId, renderedPos) {
+  const panel = $('#topology-panel');
+  const node = topologyCy.getElementById(`ann-${annotationId}`);
+  if (!node.length) return;
+  const d = node.data();
+  const admin = isAdmin();
+  const kindLabel = d.kind === 'box'
+    ? i18nText('topology.annotation_box_title')
+    : i18nText('topology.annotation_text_title');
+  panel.innerHTML = `
+    <h3>${escapeHtml(kindLabel)}</h3>
+    ${admin ? `
+      <label>${escapeHtml(i18nText('topology.annotation_label'))}</label>
+      <input id="annotation-form-label" value="${escapeHtml(d.label || '')}" />
+      <label>${escapeHtml(i18nText('topology.annotation_width'))}</label>
+      <input id="annotation-form-width" type="number" min="20" value="${d.width}" />
+      <label>${escapeHtml(i18nText('topology.annotation_height'))}</label>
+      <input id="annotation-form-height" type="number" min="20" value="${d.height}" />
+      <div class="actions">
+        <button onclick="saveAnnotationForm(${annotationId})">${escapeHtml(i18nText('topology.save_btn'))}</button>
+        <button onclick="sendAnnotationToBack(${annotationId})">${escapeHtml(i18nText('topology.annotation_send_to_back'))}</button>
+        <button onclick="deleteAnnotationForm(${annotationId})">${escapeHtml(i18nText('topology.delete_btn'))}</button>
+        <button onclick="closeTopologyPanel()">${escapeHtml(i18nText('topology.cancel_btn'))}</button>
+      </div>
+    ` : `<div class="row-line">${escapeHtml(d.label || '')}</div>`}
+  `;
+  panel.classList.remove('hidden');
+  topologyPositionPanel(panel, renderedPos || node.renderedPosition());
+}
+
+async function saveAnnotationForm(annotationId) {
+  const node = topologyCy.getElementById(`ann-${annotationId}`);
+  const label = $('#annotation-form-label').value;
+  const width = parseFloat($('#annotation-form-width').value) || node.data('width');
+  const height = parseFloat($('#annotation-form-height').value) || node.data('height');
+  // Resizing keeps the same center rather than the same top-left corner --
+  // simpler than also exposing x/y in the form, and matches how a drag
+  // already repositions by center (see persistAnnotationGeometry).
+  const pos = node.position();
+  try {
+    await saveTopologyAnnotation(annotationId, {
+      label, width, height, x: pos.x - width / 2, y: pos.y - height / 2, z_order: node.data('zOrder') || 0,
+    });
+    closeTopologyPanel();
+    loadTopology();
+  } catch (e) { alert('No se pudo guardar: ' + e.message); }
+}
+
+async function sendAnnotationToBack(annotationId) {
+  const node = topologyCy.getElementById(`ann-${annotationId}`);
+  const allZ = (topologyLastData.annotations || []).map(a => a.z_order);
+  const minZ = allZ.length ? Math.min(...allZ) : 0;
+  const width = node.data('width'), height = node.data('height');
+  const pos = node.position();
+  try {
+    await saveTopologyAnnotation(annotationId, {
+      label: node.data('label'), width, height,
+      x: pos.x - width / 2, y: pos.y - height / 2, z_order: minZ - 1,
+    });
+    closeTopologyPanel();
+    loadTopology();
+  } catch (e) { alert('No se pudo enviar al fondo: ' + e.message); }
+}
+
+async function deleteAnnotationForm(annotationId) {
+  if (!confirm(i18nText('topology.annotation_delete_confirm'))) return;
+  try {
+    await api(`/api/topology/annotations/${annotationId}`, { method: 'DELETE' });
+    closeTopologyPanel();
+    loadTopology();
+  } catch (e) { alert('No se pudo eliminar: ' + e.message); }
+}
+
+// Toolbar entry points ("+ Recuadro"/"+ Texto") -- drops a new annotation
+// roughly centered on whatever's currently in view (topologyCy.extent(),
+// model-space, not screen pixels) so it starts somewhere visible instead
+// of at (0, 0) regardless of how far the user has panned/zoomed.
+async function createTopologyAnnotation(kind) {
+  if (!topologyCy) return;
+  const extent = topologyCy.extent();
+  const width = kind === 'box' ? 260 : 160;
+  const height = kind === 'box' ? 160 : 40;
+  const cx = (extent.x1 + extent.x2) / 2;
+  const cy = (extent.y1 + extent.y2) / 2;
+  const body = {
+    zone_id: selectedZoneId, site_id: selectedZoneId ? null : selectedSiteId,
+    kind,
+    label: kind === 'box' ? i18nText('topology.annotation_default_box_label') : i18nText('topology.annotation_default_text_label'),
+    x: cx - width / 2, y: cy - height / 2, width, height,
+  };
+  try {
+    await api('/api/topology/annotations', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    loadTopology();
+  } catch (e) { alert('No se pudo crear: ' + e.message); }
+}
+
+$('#topology-add-box-btn').addEventListener('click', () => createTopologyAnnotation('box'));
+$('#topology-add-text-btn').addEventListener('click', () => createTopologyAnnotation('text'));
+
+$('#topology-edge-style-select').addEventListener('change', evt => {
+  localStorage.setItem('topologyEdgeStyle', evt.target.value);
+  if (topologyCy) topologyCy.style().selector('edge').style({ 'curve-style': evt.target.value }).update();
+});
+// Reflect the stored preference in the <select> itself on first paint --
+// the cytoscape style array already reads topologyEdgeStyle() directly,
+// so this only needs to keep the control in sync, not drive the graph.
+$('#topology-edge-style-select').value = topologyEdgeStyle();
+
 $('#topology-edit-mode').addEventListener('change', () => {
   const editing = $('#topology-edit-mode').checked;
   if (!editing && topologyPendingSourceId && topologyCy) {
     topologyCy.getElementById(topologyPendingSourceId).removeClass('topology-pending');
     topologyPendingSourceId = null;
+  }
+  if (topologyEdgehandles) {
+    if (editing) topologyEdgehandles.enable(); else topologyEdgehandles.disable();
   }
   updateTopologyEditHint();
 });

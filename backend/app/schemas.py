@@ -180,6 +180,11 @@ class TopologyNode(BaseModel):
     is_external: bool
     zone_id: int | None = None
     zone_name: str | None = None
+    # Device.topology_x/topology_y -- null means "never manually placed",
+    # letting the frontend's auto layout own the position exactly as it did
+    # before these columns existed (see Device.topology_x's docstring).
+    x: float | None = None
+    y: float | None = None
 
 
 class TopologyEdge(BaseModel):
@@ -201,9 +206,68 @@ class TopologyEdge(BaseModel):
     link_source: str | None = None
 
 
+class TopologyAnnotationOut(BaseModel):
+    """See app/models.py's TopologyAnnotation docstring. Returned as part
+    of GET /api/topology (same single round-trip as nodes/edges) and also
+    reachable on its own under /api/topology/annotations for the create/
+    update/delete actions below."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    zone_id: int | None
+    site_id: int | None
+    kind: str  # "box" | "text"
+    label: str
+    x: float
+    y: float
+    width: float
+    height: float
+    z_order: int
+
+
 class TopologyOut(BaseModel):
     nodes: list[TopologyNode]
     edges: list[TopologyEdge]
+    annotations: list[TopologyAnnotationOut] = []
+
+
+class TopologyAnnotationCreateRequest(BaseModel):
+    zone_id: int | None = None
+    site_id: int | None = None
+    kind: Literal["box", "text"]
+    label: str = Field(default="", max_length=2000)
+    x: float = 0.0
+    y: float = 0.0
+    width: float = Field(default=220.0, gt=0)
+    height: float = Field(default=140.0, gt=0)
+
+
+class TopologyAnnotationUpdateRequest(BaseModel):
+    """Same "always send the full desired state" convention as
+    NetworkLinkUpdateRequest -- a drag/resize/rename/send-to-back all just
+    PATCH the whole object back."""
+
+    label: str = Field(max_length=2000)
+    x: float
+    y: float
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
+    z_order: int
+
+
+class TopologyPosition(BaseModel):
+    device_id: int
+    x: float
+    y: float
+
+
+class TopologyPositionsUpdateRequest(BaseModel):
+    """Batched, not one PATCH per device -- a drag typically moves one
+    node, but a future "auto-arrange then save" action could move many at
+    once; this shape supports both without changing the endpoint."""
+
+    positions: list[TopologyPosition]
 
 
 class NetworkLinkOut(BaseModel):
