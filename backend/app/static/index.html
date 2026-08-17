@@ -985,6 +985,7 @@
           </div>
           <div id="topology-tooltip" class="topology-tooltip"></div>
           <div id="topology-panel" class="topology-panel hidden"></div>
+          <div id="topology-annotation-menu" class="topology-panel hidden" style="padding:6px; min-width:150px;"></div>
         </div>
       </div>
     </div>
@@ -1489,6 +1490,10 @@ const I18N = {
   'topology.annotation_width': { es: 'Ancho', en: 'Width' },
   'topology.annotation_height': { es: 'Alto', en: 'Height' },
   'topology.annotation_send_to_back': { es: 'Enviar al fondo', en: 'Send to back' },
+  'topology.annotation_bring_to_front': { es: 'Traer al frente', en: 'Bring to front' },
+  'topology.annotation_color': { es: 'Color de relleno', en: 'Fill color' },
+  'topology.annotation_custom_color': { es: 'Personalizado…', en: 'Custom…' },
+  'topology.annotation_edit_ellipsis': { es: 'Editar…', en: 'Edit…' },
   'topology.annotation_handle_hint': {
     es: 'Arrastrar para mover · Tocar para editar',
     en: 'Drag to move · Tap to edit',
@@ -3016,6 +3021,13 @@ function topologyEdgeStyle() {
 // sits (see annotationHandleEls) -- shared by the element-construction code
 // and the 'drag' listener that keeps the real box/text glued to it.
 const ANNOTATION_HANDLE_OFFSET = 6;
+
+// A plain <input type="color"> needs a real hex value, not null/empty --
+// this is only ever the *starting* value shown for a box with no custom
+// color yet (matches --muted's own '#8ea0c0' fallback, see renderTopology's
+// cssVar() calls); picking any other color always overwrites it via
+// setAnnotationColor, same as everywhere else color is applied.
+const TOPOLOGY_DEFAULT_ANNOTATION_COLOR = '#8ea0c0';
 // Last /api/topology response -- the palette (topologyUnplacedNodes) and
 // the canvas-drop handler (placeDeviceOnCanvas) both need the full node
 // list, not just whatever's already a live Cytoscape element.
@@ -3477,6 +3489,7 @@ function renderTopology(data) {
     data: {
       id: annotationNodeId(a), annotationId: a.id, topologyKind: 'annotation',
       kind: a.kind, label: a.label, width: a.width, height: a.height, zOrder: a.z_order,
+      color: a.color,
     },
     position: { x: a.x + a.width / 2, y: a.y + a.height / 2 },
     classes: `annotation annotation-${a.kind}`,
@@ -3600,10 +3613,16 @@ function renderTopology(data) {
           'z-index': (ele) => (ele.data('zOrder') || 0) - 100000,
           label: 'data(label)', 'font-size': 12, color: textColor,
       } },
+      // 'data(color)' is TopologyAnnotation.color (a "#rrggbb" hex string
+      // or null) -- set via the box's right-click context menu. Falls
+      // back to the same neutral muted tone every box used before that
+      // existed. Opacity is bumped a bit over the old constant (0.10) so
+      // a deliberately chosen color actually reads as that color instead
+      // of a near-invisible tint.
       { selector: '.annotation-box', style: {
           shape: 'round-rectangle', width: 'data(width)', height: 'data(height)',
-          'background-color': mutedColor, 'background-opacity': 0.10,
-          'border-width': 1.5, 'border-color': mutedColor, 'border-style': 'dashed',
+          'background-color': (ele) => ele.data('color') || mutedColor, 'background-opacity': 0.18,
+          'border-width': 1.5, 'border-color': (ele) => ele.data('color') || mutedColor, 'border-style': 'dashed',
           'text-valign': 'top', 'text-halign': 'center', 'text-margin-y': -8, 'font-weight': 600,
           events: 'no',
       } },
@@ -3824,7 +3843,7 @@ async function persistAnnotationGeometry(handleNode) {
     await saveTopologyAnnotation(annotationId, {
       label: box.data('label'), width, height,
       x: pos.x - width / 2, y: pos.y - height / 2,
-      z_order: box.data('zOrder') || 0,
+      z_order: box.data('zOrder') || 0, color: box.data('color') || null,
     });
   } catch (e) { /* best-effort, same as persistDevicePosition above */ }
 }
@@ -3886,6 +3905,15 @@ function wireTopologyEvents() {
     openAnnotationPanel(node.data('annotationId'), node.renderedPosition());
   });
 
+  // Right-click / long-press -- draw.io's own quick-actions menu
+  // (z-order, fill color) one gesture away, instead of the full rename/
+  // resize panel above. 'cxttap' is cytoscape's own name for this
+  // gesture (right mouse button, or a long tap on touch).
+  cy.on('cxttap', 'node.annotation-handle', evt => {
+    const node = evt.target;
+    openAnnotationContextMenu(node.data('annotationId'), node.renderedPosition());
+  });
+
   cy.on('tap', 'node:childless[topologyKind = "device"]', evt => {
     const node = evt.target;
     const id = node.data('id');
@@ -3927,7 +3955,20 @@ function wireTopologyEvents() {
     openTopologyLinkForm(Number(data.source), Number(data.target), data, pos);
   });
 
-  cy.on('tap', evt => { if (evt.target === cy) closeTopologyPanel(); });
+  cy.on('tap', evt => { if (evt.target === cy) { closeTopologyPanel(); closeAnnotationContextMenu(); } });
+  // Cytoscape's own 'cxttap' fires on right-click, but the BROWSER's
+  // native context menu still shows up on top of the canvas underneath
+  // unless suppressed separately -- unlike 'tap', dom-level contextmenu
+  // isn't something cytoscape's gesture system swallows for you. Guarded
+  // by a dataset flag since wireTopologyEvents() reruns on every render
+  // (a fresh topologyCy each time), but the DOM container element itself
+  // persists across renders -- without the guard this listener would
+  // stack a new copy on every 15s auto-refresh.
+  const cyContainer = $('#topology-cy');
+  if (cyContainer && !cyContainer.dataset.contextMenuSuppressed) {
+    cyContainer.dataset.contextMenuSuppressed = '1';
+    cyContainer.addEventListener('contextmenu', evt => evt.preventDefault());
+  }
 }
 
 function closeTopologyPanel() {
@@ -3961,6 +4002,7 @@ function topologyPositionPanel(panel, pos) {
 // same one openTopologyLinkForm uses) since only one of the two is ever
 // open at a time.
 function openTopologyDeviceCard(deviceId, renderedPos) {
+  closeAnnotationContextMenu();
   const panel = $('#topology-panel');
   const node = topologyCy.getElementById(String(deviceId));
   if (!node.length) return;
@@ -4042,6 +4084,7 @@ async function jumpToDeviceAndEditType(deviceId) {
 }
 
 function openTopologyLinkForm(deviceAId, deviceBId, existing, renderedPos) {
+  closeAnnotationContextMenu();
   const panel = $('#topology-panel');
   const pos = renderedPos || topologyCy.getElementById(String(deviceBId)).renderedPosition();
   const admin = isAdmin();
@@ -4163,10 +4206,12 @@ function topologyAnnotationSnapshot(annotationId) {
     label: node.data('label'), width, height,
     x: pos.x - width / 2, y: pos.y - height / 2,
     z_order: node.data('zOrder') || 0,
+    color: node.data('color') || null,
   };
 }
 
 function openAnnotationPanel(annotationId, renderedPos) {
+  closeAnnotationContextMenu();
   const panel = $('#topology-panel');
   const node = topologyCy.getElementById(`ann-${annotationId}`);
   if (!node.length) return;
@@ -4184,8 +4229,14 @@ function openAnnotationPanel(annotationId, renderedPos) {
       <input id="annotation-form-width" type="number" min="20" value="${d.width}" />
       <label>${escapeHtml(i18nText('topology.annotation_height'))}</label>
       <input id="annotation-form-height" type="number" min="20" value="${d.height}" />
+      ${d.kind === 'box' ? `
+        <label>${escapeHtml(i18nText('topology.annotation_color'))}</label>
+        <input id="annotation-form-color" type="color" value="${escapeHtml(d.color || TOPOLOGY_DEFAULT_ANNOTATION_COLOR)}"
+               onchange="setAnnotationColor(${annotationId}, this.value)" style="height:28px; padding:2px;" />
+      ` : ''}
       <div class="actions">
         <button onclick="saveAnnotationForm(${annotationId})">${escapeHtml(i18nText('topology.save_btn'))}</button>
+        <button onclick="bringAnnotationToFront(${annotationId})">${escapeHtml(i18nText('topology.annotation_bring_to_front'))}</button>
         <button onclick="sendAnnotationToBack(${annotationId})">${escapeHtml(i18nText('topology.annotation_send_to_back'))}</button>
         <button onclick="deleteAnnotationForm(${annotationId})">${escapeHtml(i18nText('topology.delete_btn'))}</button>
         <button onclick="closeTopologyPanel()">${escapeHtml(i18nText('topology.cancel_btn'))}</button>
@@ -4194,6 +4245,53 @@ function openAnnotationPanel(annotationId, renderedPos) {
   `;
   panel.classList.remove('hidden');
   topologyPositionPanel(panel, renderedPos || node.renderedPosition());
+}
+
+// A fixed palette (not theme-derived) so the swatches read the same in
+// light and dark mode, same as draw.io's own style panel always offers
+// the same preset row regardless of the app's own theme.
+const TOPOLOGY_ANNOTATION_COLOR_PRESETS = ['#3ba9ff', '#22c55e', '#f59e0b', '#ef4444', '#a855f7', '#8ea0c0'];
+
+// Right-click quick menu (cxttap on the handle) -- the fast path for the
+// z-order/color actions draw.io puts one right-click away, as opposed to
+// openAnnotationPanel's full rename/resize form (still reachable here via
+// "Editar…", and still the only way to actually rename/resize).
+function openAnnotationContextMenu(annotationId, renderedPos) {
+  const menu = $('#topology-annotation-menu');
+  const node = topologyCy.getElementById(`ann-${annotationId}`);
+  if (!node.length || !isAdmin()) return;
+  closeTopologyPanel();
+  const d = node.data();
+  const swatchesHtml = d.kind === 'box' ? `
+    <label style="margin-top:6px;">${escapeHtml(i18nText('topology.annotation_color'))}</label>
+    <div style="display:flex; flex-wrap:wrap; gap:5px; margin:4px 0;">
+      ${TOPOLOGY_ANNOTATION_COLOR_PRESETS.map(c => `
+        <button type="button" title="${escapeHtml(c)}" onclick="setAnnotationColor(${annotationId}, '${c}')"
+                style="width:22px; height:22px; padding:0; border-radius:5px; border:1px solid var(--border); background:${c};"></button>
+      `).join('')}
+      <input type="color" title="${escapeHtml(i18nText('topology.annotation_custom_color'))}"
+             value="${escapeHtml(d.color || TOPOLOGY_DEFAULT_ANNOTATION_COLOR)}"
+             onchange="setAnnotationColor(${annotationId}, this.value)" style="width:26px; height:22px; padding:0;" />
+    </div>
+  ` : '';
+  menu.innerHTML = `
+    <div class="actions" style="flex-direction:column; margin-top:0;">
+      <button onclick="bringAnnotationToFront(${annotationId})">${escapeHtml(i18nText('topology.annotation_bring_to_front'))}</button>
+      <button onclick="sendAnnotationToBack(${annotationId})">${escapeHtml(i18nText('topology.annotation_send_to_back'))}</button>
+    </div>
+    ${swatchesHtml}
+    <div class="actions" style="flex-direction:column;">
+      <button onclick="closeAnnotationContextMenu(); openAnnotationPanel(${annotationId})">${escapeHtml(i18nText('topology.annotation_edit_ellipsis'))}</button>
+      <button onclick="closeAnnotationContextMenu(); deleteAnnotationForm(${annotationId})">${escapeHtml(i18nText('topology.delete_btn'))}</button>
+    </div>
+  `;
+  menu.classList.remove('hidden');
+  topologyPositionPanel(menu, renderedPos);
+}
+
+function closeAnnotationContextMenu() {
+  const menu = $('#topology-annotation-menu');
+  if (menu) menu.classList.add('hidden');
 }
 
 async function saveAnnotationForm(annotationId) {
@@ -4208,7 +4306,8 @@ async function saveAnnotationForm(annotationId) {
   const pos = node.position();
   try {
     await saveTopologyAnnotation(annotationId, {
-      label, width, height, x: pos.x - width / 2, y: pos.y - height / 2, z_order: node.data('zOrder') || 0,
+      label, width, height, x: pos.x - width / 2, y: pos.y - height / 2,
+      z_order: node.data('zOrder') || 0, color: node.data('color') || null,
     });
     if (previous) topologyUndoPush({ type: 'update_annotation', annotationId, previous });
     closeTopologyPanel();
@@ -4216,22 +4315,53 @@ async function saveAnnotationForm(annotationId) {
   } catch (e) { alert('No se pudo guardar: ' + e.message); }
 }
 
-async function sendAnnotationToBack(annotationId) {
+// Shared by "Enviar al fondo"/"Traer al frente" (both the edit panel's
+// button and the right-click menu use these) -- picks a z_order one past
+// whatever the current min/max among ALL annotations in view is, so the
+// one just changed is unambiguously behind/in front of every other one.
+function topologyAnnotationExtremeZOrder(direction) {
+  const allZ = (topologyLastData.annotations || []).map(a => a.z_order);
+  if (!allZ.length) return 0;
+  return direction === 'back' ? Math.min(...allZ) - 1 : Math.max(...allZ) + 1;
+}
+
+async function reorderAnnotation(annotationId, direction) {
   const node = topologyCy.getElementById(`ann-${annotationId}`);
   const previous = topologyAnnotationSnapshot(annotationId);
-  const allZ = (topologyLastData.annotations || []).map(a => a.z_order);
-  const minZ = allZ.length ? Math.min(...allZ) : 0;
+  const width = node.data('width'), height = node.data('height');
+  const pos = node.position();
+  const errorMessage = direction === 'back' ? 'No se pudo enviar al fondo: ' : 'No se pudo traer al frente: ';
+  try {
+    await saveTopologyAnnotation(annotationId, {
+      label: node.data('label'), width, height,
+      x: pos.x - width / 2, y: pos.y - height / 2,
+      z_order: topologyAnnotationExtremeZOrder(direction), color: node.data('color') || null,
+    });
+    if (previous) topologyUndoPush({ type: 'update_annotation', annotationId, previous });
+    closeTopologyPanel();
+    closeAnnotationContextMenu();
+    loadTopology();
+  } catch (e) { alert(errorMessage + e.message); }
+}
+
+function sendAnnotationToBack(annotationId) { return reorderAnnotation(annotationId, 'back'); }
+function bringAnnotationToFront(annotationId) { return reorderAnnotation(annotationId, 'front'); }
+
+async function setAnnotationColor(annotationId, color) {
+  const node = topologyCy.getElementById(`ann-${annotationId}`);
+  const previous = topologyAnnotationSnapshot(annotationId);
   const width = node.data('width'), height = node.data('height');
   const pos = node.position();
   try {
     await saveTopologyAnnotation(annotationId, {
       label: node.data('label'), width, height,
-      x: pos.x - width / 2, y: pos.y - height / 2, z_order: minZ - 1,
+      x: pos.x - width / 2, y: pos.y - height / 2,
+      z_order: node.data('zOrder') || 0, color,
     });
     if (previous) topologyUndoPush({ type: 'update_annotation', annotationId, previous });
-    closeTopologyPanel();
+    closeAnnotationContextMenu();
     loadTopology();
-  } catch (e) { alert('No se pudo enviar al fondo: ' + e.message); }
+  } catch (e) { alert('No se pudo cambiar el color: ' + e.message); }
 }
 
 async function deleteAnnotationForm(annotationId) {

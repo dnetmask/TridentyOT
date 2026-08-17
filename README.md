@@ -545,6 +545,13 @@ Cytoscape.js ya usado, sin cambiar de motor:
   recuadro/nota, editarlo o enviarlo al fondo -- todo eso ahora empuja una entrada a la misma pila de
   deshacer que ya usaban los enlaces (sin límite de tamaño; "Deshacer" repetido retrocede tantos pasos
   como se hayan hecho en la sesión, no solo el último).
+- **Menú clic-derecho en un recuadro/nota** (al estilo draw.io): tocar el tirador con el botón derecho
+  (o mantener presionado en touch -- `cxttap` de Cytoscape) abre un menú rápido con **Traer al frente**/
+  **Enviar al fondo** y, solo para recuadros, una fila de colores de relleno (`TopologyAnnotation.color`,
+  un hex tipo `#f59e0b`; `null` = el tono neutro de siempre) más un selector de color personalizado --
+  todo sin abrir el panel completo de renombrar/redimensionar, que sigue disponible ahí mismo vía
+  "Editar…". El menú nativo del navegador queda suprimido sobre el lienzo para que el clic derecho
+  siempre abra este menú en vez del de Chrome/Firefox.
 
 ```bash
 curl -X PATCH http://localhost:8000/api/topology/positions \

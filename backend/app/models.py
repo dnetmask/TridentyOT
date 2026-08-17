@@ -554,6 +554,12 @@ class TopologyAnnotation(Base):
     # renderTopologyGraph, which always adds annotation elements to
     # Cytoscape before device/link elements).
     z_order: Mapped[int] = mapped_column(Integer, default=0)
+    # A hex color ("#f5a623") for a "box"'s fill -- null means "use the
+    # dashboard's own default (muted/theme-driven)", matching how a
+    # freshly-created box looked before this column existed. Meaningless
+    # for "text" (no fill to begin with), so the frontend never shows a
+    # color picker for that kind.
+    color: Mapped[str | None] = mapped_column(String(9), nullable=True)
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow)

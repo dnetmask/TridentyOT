@@ -372,6 +372,7 @@ def create_topology_annotation(
         y=payload.y,
         width=payload.width,
         height=payload.height,
+        color=payload.color,
         created_by_user_id=user.id,
     )
     db.add(annotation)
@@ -394,6 +395,7 @@ def update_topology_annotation(
     annotation.width = payload.width
     annotation.height = payload.height
     annotation.z_order = payload.z_order
+    annotation.color = payload.color
     db.commit()
     db.refresh(annotation)
     return annotation

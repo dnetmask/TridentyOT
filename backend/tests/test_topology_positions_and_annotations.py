@@ -94,6 +94,51 @@ def test_create_list_update_delete_annotation(client, db_session, org_id):
     assert client.get("/api/topology").json()["annotations"] == []
 
 
+def test_annotation_color_create_update_and_validation(client, db_session, org_id):
+    """The right-click context menu's fill-color picker -- see
+    app/models.py's TopologyAnnotation.color docstring: null means "use
+    the dashboard's own default", never persisted as a literal string."""
+    created = client.post(
+        "/api/topology/annotations",
+        json={"kind": "box", "label": "DMZ", "x": 0, "y": 0, "color": "#f59e0b"},
+    ).json()
+    assert created["color"] == "#f59e0b"
+
+    updated = client.patch(
+        f"/api/topology/annotations/{created['id']}",
+        json={"label": "DMZ", "x": 0, "y": 0, "width": 220, "height": 140, "z_order": 0, "color": "#3ba9ff"},
+    ).json()
+    assert updated["color"] == "#3ba9ff"
+
+    cleared = client.patch(
+        f"/api/topology/annotations/{created['id']}",
+        json={"label": "DMZ", "x": 0, "y": 0, "width": 220, "height": 140, "z_order": 0, "color": None},
+    ).json()
+    assert cleared["color"] is None
+
+    bad = client.post(
+        "/api/topology/annotations",
+        json={"kind": "box", "label": "nope", "x": 0, "y": 0, "color": "not-a-color"},
+    )
+    assert bad.status_code == 422
+
+
+def test_send_to_back_and_bring_to_front_z_order(client, db_session, org_id):
+    a = client.post("/api/topology/annotations", json={"kind": "box", "label": "A", "x": 0, "y": 0}).json()
+    b = client.post("/api/topology/annotations", json={"kind": "box", "label": "B", "x": 0, "y": 0}).json()
+    assert a["z_order"] == 0 and b["z_order"] == 0
+
+    sent_back = client.patch(
+        f"/api/topology/annotations/{a['id']}",
+        json={"label": "A", "x": 0, "y": 0, "width": 220, "height": 140, "z_order": -1},
+    ).json()
+    brought_front = client.patch(
+        f"/api/topology/annotations/{b['id']}",
+        json={"label": "B", "x": 0, "y": 0, "width": 220, "height": 140, "z_order": 1},
+    ).json()
+    assert sent_back["z_order"] < brought_front["z_order"]
+
+
 def test_annotation_scoped_by_zone_only_shows_in_that_zone(client, db_session, org_id):
     site = Site(organization_id=org_id, name="Site A")
     db_session.add(site)

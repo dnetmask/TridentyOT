@@ -224,12 +224,16 @@ class TopologyAnnotationOut(BaseModel):
     width: float
     height: float
     z_order: int
+    color: str | None = None
 
 
 class TopologyOut(BaseModel):
     nodes: list[TopologyNode]
     edges: list[TopologyEdge]
     annotations: list[TopologyAnnotationOut] = []
+
+
+_HEX_COLOR_PATTERN = r"^#[0-9a-fA-F]{6}$"
 
 
 class TopologyAnnotationCreateRequest(BaseModel):
@@ -241,12 +245,13 @@ class TopologyAnnotationCreateRequest(BaseModel):
     y: float = 0.0
     width: float = Field(default=220.0, gt=0)
     height: float = Field(default=140.0, gt=0)
+    color: str | None = Field(default=None, pattern=_HEX_COLOR_PATTERN)
 
 
 class TopologyAnnotationUpdateRequest(BaseModel):
     """Same "always send the full desired state" convention as
-    NetworkLinkUpdateRequest -- a drag/resize/rename/send-to-back all just
-    PATCH the whole object back."""
+    NetworkLinkUpdateRequest -- a drag/resize/rename/send-to-back/recolor
+    all just PATCH the whole object back."""
 
     label: str = Field(max_length=2000)
     x: float
@@ -254,6 +259,7 @@ class TopologyAnnotationUpdateRequest(BaseModel):
     width: float = Field(gt=0)
     height: float = Field(gt=0)
     z_order: int
+    color: str | None = Field(default=None, pattern=_HEX_COLOR_PATTERN)
 
 
 class TopologyPosition(BaseModel):
