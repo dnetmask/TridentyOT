@@ -168,6 +168,26 @@ def _vendor_category(vendor: str | None) -> str | None:
     return None
 
 
+def vendor_confidently_not_network_device(vendor: str | None) -> bool:
+    """True for the vendor keyword groups whose own comments above call out
+    as a "confident, direct vote" for a specific non-networking category
+    (industrial/PLC, Weintek/HMI, VMware/virtualization) -- as opposed to
+    _NETWORK_VENDOR_KEYWORDS itself (obviously not excluded) or the
+    ambiguous _IT_VENDOR_KEYWORDS/_TRANSPORT_CONTROLLER_VENDOR_KEYWORDS
+    groups, which aren't confident enough either way to rule anything out.
+
+    Used by inventory_service.apply_gateway_detection so its own weaker,
+    purely-behavioral "2+ public IPs share this MAC" heuristic never
+    overrides what the vendor OUI alone already says with high confidence
+    -- a VMware virtual NIC (or a PLC, or an HMI touch panel) sharing a MAC
+    with a couple of public-IP rows is still not a router/NAT gateway just
+    because the traffic pattern looks like one; a hypervisor's own uplink
+    or a device otherwise reusing another host's MAC/vSwitch port explains
+    that just as well, and here the vendor's own evidence should win.
+    """
+    return _vendor_category(vendor) in (PLC, HMI, SERVER)
+
+
 def _model_category(model: str | None) -> str | None:
     if not model:
         return None

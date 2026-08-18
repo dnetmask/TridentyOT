@@ -467,6 +467,18 @@ curl -X POST http://localhost:8000/api/discovery/snmp/switch-walk \
   -d '{"targets": ["10.0.1.2"], "sensor_id": 3, "community": "public", "version": "v2c"}'
 ```
 
+**Fix: el selector "Switch" de esta card ya no mostraba equipos de otras Zonas/Sitios/organizaciones.**
+Reporte real: en un sitio sin ninguna captura, el selector igual listaba decenas de equipos -- de
+otras Zonas del mismo sitio, o de otros sitios de la misma organización. Causa: a diferencia del
+selector "Sensor" de esta misma pantalla (ya scopeado a la Zona activa), el frontend traía la lista
+de switches con `GET /api/inventory/devices` sin ningún filtro `zone_id`/`site_id` -- deliberadamente,
+según su propio comentario, porque en algún momento un switch creado a mano no tenía
+`capture_session_id` y por lo tanto ningún filtro por Zona lo habría mostrado nunca. Ese supuesto ya no
+es cierto: `create_device` (arriba) siempre le da al switch una `CaptureSession` sintética atada al
+Sensor elegido, exactamente la misma cadena Sensor → Zona → Sitio que usa cualquier otro dispositivo.
+El selector ahora reusa el mismo filtro de Zona activa que ya usaba el selector "Sensor" de al lado
+(`zoneFilterQuery()`), así que un switch solo aparece cuando de verdad corresponde a la Zona abierta.
+
 **Uso desde el dashboard** (rol admin): activar "Modo edición", hacer click en un dispositivo y
 luego en otro para crear un enlace nuevo (se abre un formulario con puerto de cada lado, estado y
 notas); hacer click en un enlace existente para editarlo o borrarlo. Un visualizador ve el mismo grafo
@@ -767,6 +779,34 @@ hacia esa IP), no porque sea suya.
   prueba que *alguien* en el camino tiene esa MAC, nunca cuál). Esa fila arranca en 100% de confianza
   con evidencia explícita ("Confirmado por ARP: ...") y nunca se marca `is_mac_shared`.
 
+#### Fix: un equipo de un fabricante de virtualización/PLC/HMI ya no se marca como Router/NAT solo por compartir MAC
+
+Reporte real: una máquina virtual (MAC de fabricante "VMware, Inc.") terminó clasificada como
+Router/NAT. Causa: `apply_gateway_detection` tiene dos vías para elegir "la fila real del gateway"
+dentro de un grupo de MAC compartida -- una `ArpObservation` que confirma la IP (fuerte, la propia
+fila responde "esta MAC es mía") o, en su defecto, un heurístico más débil ("2+ IPs públicas
+comparten esta MAC" -- consistente con un router reenviando tráfico, pero no una prueba). El
+heurístico débil promovía la fila elegida a `network_device`/`router_nat` sin fijarse en qué dice el
+propio fabricante de esa MAC -- y `device_classifier.py` ya tenía, desde antes, un voto de fabricante
+"confiado y directo" para varios casos (VMware → tarjeta de red virtual, un fabricante industrial →
+PLC, Weintek → HMI): ninguno de esos es jamás un router.
+
+- Nueva función pública `vendor_confidently_not_network_device()` (`app/fingerprint/device_classifier.py`)
+  que expone exactamente esos tres casos confiados.
+- `apply_gateway_detection` ahora la consulta antes de aplicar el heurístico débil: si el fabricante
+  de la MAC compartida es uno de esos tres, esa fila (ni ninguna otra del mismo grupo, porque todas
+  comparten la misma MAC y por lo tanto el mismo fabricante) nunca se promueve a Router/NAT por este
+  camino -- sigue marcada `is_mac_shared` (la MAC de verdad no es suya), solo que no se la etiqueta
+  como el gateway. La confirmación por ARP, al ser evidencia directa del propio equipo, sigue
+  ganándole al fabricante sin excepción -- un router corriendo dentro de una VM real existe, y ahí sí
+  hay prueba concreta.
+- **"Ejecutar escaneo completo" ahora también recalcula esto**: antes, una clasificación ya guardada
+  solo se corregía cuando llegaba una captura/descubrimiento nuevo para esa organización -- un sitio
+  que ya no captura tráfico se quedaba con el dato viejo para siempre. El escaneo completo de
+  Vulnerabilidades (`POST /api/vuln/scan` sin `device_id`) vuelve a correr `apply_gateway_detection`
+  antes de evaluar reglas/CVEs, así que un reclasificado como este también aplica sin esperar tráfico
+  nuevo.
+
 ### Ejecutar el escaneo de vulnerabilidades
 
 ```bash
@@ -775,7 +815,9 @@ curl -X POST http://localhost:8000/api/vuln/scan \
   -d '{"use_nvd": true}'
 ```
 
-`use_nvd: false` limita el escaneo a las reglas locales (sin salir a internet).
+`use_nvd: false` limita el escaneo a las reglas locales (sin salir a internet). Además de escanear,
+un escaneo de organización completa (sin `device_id`) recalcula la detección de gateway/Router-NAT
+sobre todos los equipos -- ver el fix de arriba.
 
 ### Idioma (español/inglés)
 
@@ -886,6 +928,20 @@ formulario). Cada organización, después, entra a **Infraestructura** para dar 
 `Site` (sedes) → `Zone` (áreas, con nivel de seguridad IEC&nbsp;62443 opcional) → `Sensor`.
 Cambiá la contraseña del Super Admin cuanto antes desde la pestaña **Usuarios**... salvo que
 prefieras dejarla fija por variable de entorno y rotarla ahí mismo en el próximo despliegue.
+
+**Fix: la Organización/Sitio elegidos ya sobreviven a un refresco de la página.** Reporte real: al
+recargar el navegador (no hay ningún botón "Actualizar" en la UI desde que se sacó el auto-refresh --
+ver más abajo -- así que esto es siempre el propio refresco del navegador), el Super Admin volvía
+siempre a la primera Organización y el primer Sitio por id, sin importar cuál estuviera mirando.
+Causa: `selectedOrgId`/`currentSiteId` eran variables puramente en memoria, reinicializadas a `null`
+en cada carga de la página -- y el propio `renderSidebarRail()` ya tenía, desde siempre, la regla "si
+no hay uno elegido (o el elegido ya no existe), usar el primero de la lista", pensada solo para el
+primer login o para cuando el elegido se borró, no para sobrevivir un refresco entero. Ahora ambos se
+guardan en `localStorage` (`tridentyot_selected_org_id`/`tridentyot_selected_site_id`) cada vez que
+cambian -- al elegirlos desde el switcher, o cuando esa misma regla de "usar el primero" tiene que
+aplicarse de verdad -- y se restauran al cargar la página. Se limpian al cerrar sesión (o si el token
+quedó inválido), para que el siguiente login -- de cualquier usuario -- no herede el contexto de
+otra sesión.
 
 ## Actualizar una instalación existente
 

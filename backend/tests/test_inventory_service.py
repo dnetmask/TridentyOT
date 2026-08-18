@@ -728,6 +728,45 @@ def test_gateway_detection_never_promotes_a_private_ip_sharing_the_mac(db_sessio
     assert primary.is_mac_shared is False
 
 
+def test_gateway_detection_never_promotes_a_virtualization_vendor_mac(db_session, org_id):
+    """The weak "2+ public IPs share this MAC" heuristic must defer to a
+    confident vendor-only signal: a VMware-registered MAC is a virtual
+    NIC (see device_classifier.py's _VIRTUALIZATION_VENDOR_KEYWORDS
+    comment), and sharing it across a couple of public-IP rows -- a
+    hypervisor uplink, a shared vSwitch port -- is not proof it's actually
+    routing/NAT-ing traffic. Real-world report: a VMware guest got flagged
+    router_nat purely from this pattern, with nothing else backing it up."""
+    from app.inventory.inventory_service import apply_gateway_detection
+
+    VMWARE_MAC = "00:50:56:00:00:01"  # 00:50:56 is VMware's own OUI
+    reply1 = Ether(src=VMWARE_MAC) / IP(src="8.8.8.8", dst="10.0.6.7", ttl=64) / TCP(
+        sport=443, dport=51000, flags="SA", window=8192
+    )
+    reply2 = Ether(src=VMWARE_MAC) / IP(src="93.184.216.34", dst="10.0.6.7", ttl=64) / TCP(
+        sport=443, dport=51001, flags="SA", window=8192
+    )
+    ingest_packet_record(db_session, process_packet(reply1), org_id)
+    ingest_packet_record(db_session, process_packet(reply2), org_id)
+    db_session.commit()
+
+    pub1 = db_session.query(Device).filter(Device.ip == "8.8.8.8").one()
+    pub2 = db_session.query(Device).filter(Device.ip == "93.184.216.34").one()
+    assert pub1.vendor == "VMware, Inc."
+
+    apply_gateway_detection(db_session, org_id)
+    db_session.commit()
+
+    db_session.refresh(pub1)
+    db_session.refresh(pub2)
+    assert pub1.display_device_type != "network_device"
+    assert pub2.display_device_type != "network_device"
+    assert db_session.query(Device).filter(Device.device_type_secondary == "router_nat").count() == 0
+    # still correctly flagged as sharing someone/something else's MAC --
+    # just never promoted to "is the gateway" on this evidence alone.
+    assert pub1.is_mac_shared is True
+    assert pub2.is_mac_shared is True
+
+
 def test_gateway_detection_uses_arp_to_identify_the_real_firewall_ip(db_session, org_id):
     """An ArpObservation is the device itself answering "who has this IP" --
     direct self-identification, unlike a forwarded TCP reply's sender MAC

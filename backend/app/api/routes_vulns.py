@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth.deps import get_current_user, is_super_admin, require_admin
 from app.db import get_db
 from app.i18n import message
+from app.inventory.inventory_service import apply_gateway_detection
 from app.models import CaptureSession, Device, Sensor, User, VulnerabilityFinding, Zone
 from app.schemas import ScanRequest, VulnerabilityFindingOut, vulnerability_finding_out
 from app.vuln.engine import scan_all_devices, scan_device
@@ -65,5 +66,12 @@ def trigger_scan(payload: ScanRequest, db: Session = Depends(get_db), user: User
             raise HTTPException(status_code=404, detail=message("vuln.device_not_found", user.locale))
         findings = scan_device(db, device, use_nvd=payload.use_nvd)
     else:
+        # A whole-org rescan is also the one on-demand way to pick up a
+        # fixed/tightened device-classification rule (e.g. a corrected
+        # apply_gateway_detection heuristic) for devices that already exist
+        # from a previous capture -- otherwise that only happens next time
+        # new data comes in for this organization, which could be never for
+        # a site nobody's actively capturing on anymore.
+        apply_gateway_detection(db, user.organization_id)
         findings = scan_all_devices(db, user.organization_id, use_nvd=payload.use_nvd)
     return [vulnerability_finding_out(f, user.locale) for f in findings]

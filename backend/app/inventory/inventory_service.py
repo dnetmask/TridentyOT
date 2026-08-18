@@ -11,7 +11,12 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.capture.packet_processor import PacketRecord
-from app.fingerprint.device_classifier import NETWORK_DEVICE, ROUTER_NAT, classify_device_type
+from app.fingerprint.device_classifier import (
+    NETWORK_DEVICE,
+    ROUTER_NAT,
+    classify_device_type,
+    vendor_confidently_not_network_device,
+)
 from app.fingerprint.dhcp_fingerprint import fingerprint_dhcp_options
 from app.fingerprint.identity_detect import IdentityHint
 from app.fingerprint.ip_scope import is_lan_ip, is_real_unicast_ip
@@ -558,7 +563,17 @@ def apply_gateway_detection(session: Session, organization_id: int) -> None:
         # somehow more than one private IP in the group has one (shouldn't
         # normally happen; a MAC really does belong to one NIC). Falling
         # back to the 2+-public-IP heuristic only when no ARP confirmation
-        # exists at all.
+        # exists at all -- and only then, never for the ARP-confirmed path,
+        # a shared MAC's vendor OUI (same for every member of the group --
+        # it's the same MAC) is cross-checked against classify_device_type's
+        # own confident, vendor-only calls (VMware -> virtual NIC, an
+        # industrial vendor -> PLC, Weintek -> HMI touch panel). A vendor
+        # that confident is never a router/NAT gateway just because a
+        # handful of public-IP rows happen to share its MAC -- a hypervisor
+        # uplink, a shared vSwitch port, or another device borrowing that
+        # same MAC explains the pattern just as well, and unlike ARP
+        # self-identification this heuristic alone was never strong enough
+        # to override it (see vendor_confidently_not_network_device).
         public_members = [d for d in group if not is_lan_ip(d.ip)]
         arp_confirmed = sorted(
             (
@@ -569,8 +584,12 @@ def apply_gateway_detection(session: Session, organization_id: int) -> None:
             ),
             key=lambda d: d.id,
         )
+        weak_heuristic_applies = (
+            len(public_members) >= _GATEWAY_MIN_PUBLIC_IPS
+            and not vendor_confidently_not_network_device(group[0].vendor)
+        )
         primary = arp_confirmed[0] if arp_confirmed else (
-            min(public_members, key=lambda d: d.id) if len(public_members) >= _GATEWAY_MIN_PUBLIC_IPS else None
+            min(public_members, key=lambda d: d.id) if weak_heuristic_applies else None
         )
 
         if primary is not None:

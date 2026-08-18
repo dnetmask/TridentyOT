@@ -1799,8 +1799,17 @@ function getToken() {
 }
 
 function setToken(token) {
-  if (token) localStorage.setItem('tridentyot_token', token);
-  else localStorage.removeItem('tridentyot_token');
+  if (token) {
+    localStorage.setItem('tridentyot_token', token);
+  } else {
+    localStorage.removeItem('tridentyot_token');
+    // Logging out (or an expired/invalid token) clears the remembered org/
+    // site too -- the next login might be a different user entirely, and
+    // renderSidebarRail()'s own fallback would otherwise pick right back up
+    // with whatever org/site id happened to be stored.
+    localStorage.removeItem(SELECTED_ORG_STORAGE_KEY);
+    localStorage.removeItem(SELECTED_SITE_STORAGE_KEY);
+  }
 }
 
 function showLoginScreen() {
@@ -2522,13 +2531,17 @@ let currentDeviceId = null;
 let currentDeviceAutoType = null;
 let currentDeviceData = null;
 let allDevices = [];
-// Deliberately NOT the same list as allDevices: that one is zone-scoped
-// (see loadDevices' own zoneFilterQuery()), but a manually-created switch
-// (POST /api/inventory/devices) has no capture_session_id at all -- and
-// therefore no Zona attribution -- so it would never show up there no
-// matter which Zona's Descubrimiento activo tab is open. This one is
-// always org-wide, so a switch is selectable regardless of the current
-// Zona (or its total lack of one).
+// A separate list from allDevices (not just the same rows filtered down to
+// network_device) purely because this one is fetched without ot_only/
+// hide_external/protocol filters -- a switch that happens to be OT-flagged
+// or "external"-looking must still be selectable here. Both go through the
+// same zone-scoped zoneFilterQuery() (see loadSwitchTopologyDevices below);
+// a switch created manually here always gets a synthetic CaptureSession
+// tied to the currently-selected Sensor (routes_inventory.py's
+// create_device), which is itself already scoped to this Zona
+// (populateDiscoverySensorSelect) -- so it picks up the same Zona/Sitio
+// attribution as any other Device, and leaking into other Zonas/Sitios/
+// organizations here was a real bug, not a deliberate tradeoff.
 let allSwitchDevices = [];
 
 let allSwitchImportHistory = [];
@@ -2556,12 +2569,14 @@ function renderSwitchImportHistory() {
 }
 
 async function loadSwitchTopologyDevices() {
-  // Org-wide (see allSwitchDevices' own comment), but still needs
-  // organization_id for a super admin -- otherwise "org-wide" leaks into
-  // "every organization", same bug as zoneFilterQuery's.
-  const orgId = currentOrgId();
-  const query = isSuperAdmin() && orgId != null ? `?organization_id=${orgId}` : '';
-  allSwitchDevices = await api(`/api/inventory/devices${query}`);
+  // Scoped exactly like the "Sensor" select right above it on this same
+  // screen (populateDiscoverySensorSelect) -- see allSwitchDevices' own
+  // comment for why that's safe now: a manually-created switch always gets
+  // a synthetic CaptureSession tied to whichever Sensor was selected in
+  // #discovery-sensor-select at creation time (routes_inventory.py's
+  // create_device), which is itself already zone-scoped here -- so it has
+  // the same Zona/Sitio attribution as any other Device.
+  allSwitchDevices = await api(`/api/inventory/devices${zoneFilterQuery()}`);
   renderSwitchTopologySelect();
 }
 
@@ -4954,13 +4969,27 @@ let allSites = [];
 let allZones = [];
 let allSensors = [];
 let allOrganizations = [];
+// Persisted across a page reload (plain browser refresh, not the removed-
+// long-ago "Actualizar" button -- see ZONE_LEAVES's own history) so a Super
+// Admin browsing org B / site "Planta X" doesn't get bounced back to
+// whichever org/site happens to be first by id every time the tab reloads.
+const SELECTED_ORG_STORAGE_KEY = 'tridentyot_selected_org_id';
+const SELECTED_SITE_STORAGE_KEY = 'tridentyot_selected_site_id';
+
+function storedSelectedId(key) {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 // Which organization's rail a Super Admin is currently looking at -- picked
 // from the Organización switcher flyout. Irrelevant for admin/viewer, who
 // only ever see their own organization.
-let selectedOrgId = null;
+let selectedOrgId = storedSelectedId(SELECTED_ORG_STORAGE_KEY);
 // Which Sitio's Zonas populate the rail -- picked from the Sitio switcher
 // flyout. Analogous to Meraki's "current network".
-let currentSiteId = null;
+let currentSiteId = storedSelectedId(SELECTED_SITE_STORAGE_KEY);
 // Key of the flyout currently open (null when closed): 'org-switcher',
 // 'site-switcher', 'org-admin', 'reports', or `zone-<id>`.
 let openFlyoutKey = null;
@@ -5198,13 +5227,16 @@ function closeFlyout() {
 
 function selectOrgContext(orgId) {
   selectedOrgId = orgId;
+  localStorage.setItem(SELECTED_ORG_STORAGE_KEY, String(orgId));
   currentSiteId = null; // re-derived to the new org's first site on next render
+  localStorage.removeItem(SELECTED_SITE_STORAGE_KEY);
   homeScope = 'organization';
   activateTab('home'); // switching org invalidates whatever Zona/Sitio tab was on screen
 }
 
 function selectSiteContext(siteId) {
   currentSiteId = siteId;
+  localStorage.setItem(SELECTED_SITE_STORAGE_KEY, String(siteId));
   homeScope = 'site';
   activateTab('home'); // same as above, but for switching Sitio within the same org
 }
@@ -5216,9 +5248,13 @@ function renderSidebarRail() {
 
   const admin = isAdmin();
   // Defaults to the first organization the first time (or after the
-  // previously selected one no longer exists, e.g. right after login).
+  // previously selected one no longer exists, e.g. right after login, or
+  // after it was deleted) -- restored from storedSelectedId() otherwise, so
+  // a plain page reload keeps browsing whichever org/site was on screen
+  // instead of bouncing back to the first one by id every time.
   if (isSuperAdmin() && allOrganizations.length && (selectedOrgId == null || !allOrganizations.some(o => o.id === selectedOrgId))) {
     selectedOrgId = allOrganizations[0].id;
+    localStorage.setItem(SELECTED_ORG_STORAGE_KEY, String(selectedOrgId));
   }
   const orgId = currentOrgId();
 
@@ -5247,6 +5283,8 @@ function renderSidebarRail() {
   const sitesForOrg = orgId != null ? allSites.filter(s => s.organization_id === orgId) : [];
   if (currentSiteId == null || !sitesForOrg.some(s => s.id === currentSiteId)) {
     currentSiteId = sitesForOrg.length ? sitesForOrg[0].id : null;
+    if (currentSiteId != null) localStorage.setItem(SELECTED_SITE_STORAGE_KEY, String(currentSiteId));
+    else localStorage.removeItem(SELECTED_SITE_STORAGE_KEY);
   }
   const currentSite = sitesForOrg.find(s => s.id === currentSiteId) || null;
 
