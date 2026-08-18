@@ -524,15 +524,22 @@ Cytoscape.js ya usado, sin cambiar de motor:
   esté a la vista (no en el centro -- en una topología real y poblada el centro es justo donde ya está
   el clúster de equipos más denso, así que un recuadro nuevo ahí arriba nace tapado y sin espacio para
   agarrarlo). Cada anotación tiene un tirador con ícono de mover (✥) justo afuera de su esquina superior
-  izquierda -- es la única parte "clickeable"; el cuerpo del recuadro/texto es `events: 'no'` a propósito,
-  para que arrastrar un dispositivo que quedó visualmente adentro nunca termine moviendo el recuadro en
-  su lugar (bug real encontrado durante la verificación de este mismo cambio: sin el tirador, un recuadro
-  grande le "robaba" el gesto de arrastre a cualquier equipo dentro suyo). Una primera versión del
-  tirador -- chico, sin ícono, pegado adentro de la esquina -- pasó desapercibida en una topología real
-  ("el recuadro queda fijo, no deja moverlo"); el tirador actual es más grande, con el ícono de mover y
-  un tooltip al pasar el mouse. Tocar el tirador abre un panel para renombrar, redimensionar, **"Enviar
-  al fondo"** (baja su `z_order` por debajo del mínimo actual, para resolver recuadros anidados/
-  superpuestos) o eliminar.
+  izquierda -- es la única parte *arrastrable* (`grabbable: true` solo en el tirador; el cuerpo del
+  recuadro/texto tiene `grabbable: false`), para que arrastrar un dispositivo que quedó visualmente
+  adentro nunca termine moviendo el recuadro en su lugar (bug real encontrado durante la verificación
+  de este mismo cambio: sin el tirador, un recuadro grande le "robaba" el gesto de arrastre a cualquier
+  equipo dentro suyo). Una primera versión del tirador -- chico, sin ícono, pegado adentro de la
+  esquina -- pasó desapercibida en una topología real ("el recuadro queda fijo, no deja moverlo"); se
+  agrandó a 22px con ícono y tooltip, y luego se redujo a 15px al reportarse que quedaba desproporcionado
+  frente a recuadros/notas chicos. A diferencia del arrastre, el simple *tocar* o *clic derecho* sí
+  responde en cualquier punto del cuerpo del recuadro/texto (no solo en el tirador) -- `grabbable: false`
+  bloquea únicamente el gesto de arrastre, no `tap`/`cxttap`, así que no hace falta ubicar el tirador
+  exacto para abrir el panel o el menú rápido. Se verificó explícitamente que esto no reabre el bug
+  original: tocar un dispositivo que quedó visualmente encima/dentro de un recuadro sigue resolviendo al
+  dispositivo (Cytoscape prioriza el elemento más específico bajo el puntero sobre el fondo agrupador),
+  y arrastrar ese mismo dispositivo tampoco mueve el recuadro. Tocar el cuerpo (o el tirador) abre un
+  panel para renombrar, redimensionar, **"Enviar al fondo"** (baja su `z_order` por debajo del mínimo
+  actual, para resolver recuadros anidados/superpuestos) o eliminar.
 - **Las posiciones ahora sobreviven a un refresco**: antes de esto, dónde quedaba cada dispositivo en el
   lienzo vivía solo en una variable del navegador (`topologyPositions`) -- se perdía al recargar la
   página o para cualquier otro usuario. `Device.topology_x`/`topology_y` (nulos = "todavía sin ubicar a
@@ -545,8 +552,9 @@ Cytoscape.js ya usado, sin cambiar de motor:
   recuadro/nota, editarlo o enviarlo al fondo -- todo eso ahora empuja una entrada a la misma pila de
   deshacer que ya usaban los enlaces (sin límite de tamaño; "Deshacer" repetido retrocede tantos pasos
   como se hayan hecho en la sesión, no solo el último).
-- **Menú clic-derecho en un recuadro/nota** (al estilo draw.io): tocar el tirador con el botón derecho
-  (o mantener presionado en touch -- `cxttap` de Cytoscape) abre un menú rápido con **Traer al frente**/
+- **Menú clic-derecho en un recuadro/nota** (al estilo draw.io): clic derecho en cualquier punto del
+  cuerpo del recuadro/texto o de su tirador (o mantener presionado en touch -- `cxttap` de Cytoscape)
+  abre un menú rápido con **Traer al frente**/
   **Enviar al fondo** y, solo para recuadros, una fila de colores de relleno (`TopologyAnnotation.color`,
   un hex tipo `#f59e0b`; `null` = el tono neutro de siempre) más un selector de color personalizado --
   todo sin abrir el panel completo de renombrar/redimensionar, que sigue disponible ahí mismo vía

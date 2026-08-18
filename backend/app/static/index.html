@@ -3474,15 +3474,17 @@ function renderTopology(data) {
   // device/link regardless of z_order's raw value, while still respecting
   // relative order *among* annotations (what "Enviar al fondo" changes).
   // Each annotation is actually TWO cytoscape elements: the box/text body
-  // itself (below, 'events: no' so it never steals a tap/drag meant for a
-  // device that happens to sit visually inside/on top of it -- exactly
-  // the scenario a grouping box exists for), and a small square "handle"
-  // pinned to its top-left corner that's the ONLY way to select, drag, or
-  // open the edit panel for it. A plain full-size hit area (no handle)
-  // was tried first and confirmed broken live: dragging a device sitting
-  // inside a box intermittently grabbed the box instead, since a big
-  // rectangle's hit area has no notion of "yield to whatever's on top of
-  // me" the way a real compound (:parent) node does for its children.
+  // itself (below, 'grabbable: false' so it can never be DRAGGED, but
+  // still taps/right-clicks normally -- see the '.annotation-box' style
+  // comment for why that split matters), and a small "handle" pinned to
+  // its top-left corner that's the only way to actually MOVE it. A plain
+  // full-size hit area with no restriction at all was tried first and
+  // confirmed broken live: dragging a device sitting inside a box
+  // intermittently grabbed the box instead, since a big rectangle's hit
+  // area has no notion of "yield to whatever's on top of me" the way a
+  // real compound (:parent) node does for its children -- ungrabify()ing
+  // the body keeps that fix while still letting a plain click/right-click
+  // reach it directly.
   const annotationNodeId = (a) => `ann-${a.id}`;
   const annotationHandleId = (a) => `ann-handle-${a.id}`;
   const annotationEls = (data.annotations || []).map(a => ({
@@ -3493,6 +3495,7 @@ function renderTopology(data) {
     },
     position: { x: a.x + a.width / 2, y: a.y + a.height / 2 },
     classes: `annotation annotation-${a.kind}`,
+    grabbable: false,
   }));
   const annotationHandleEls = (data.annotations || []).map(a => ({
     data: {
@@ -3619,31 +3622,41 @@ function renderTopology(data) {
       // existed. Opacity is bumped a bit over the old constant (0.10) so
       // a deliberately chosen color actually reads as that color instead
       // of a near-invisible tint.
+      //
+      // 'grabbable: false' (not 'events: no') is deliberate: the body
+      // still fires tap/cxttap normally -- clicking or right-clicking the
+      // box/text itself opens the same panel/menu the handle does, which
+      // is what got asked for after the handle-only version shipped
+      // ("por qué no puedo hacerle clic al recuadro directamente"). Only
+      // *dragging* is disabled on the body -- that's the part that
+      // actually caused the original bug (a device dragged from inside a
+      // box got its gesture stolen by the box's much larger hit area);
+      // grabbable:false stops the box from ever being moved by a drag
+      // without also making it deaf to a plain tap/right-click.
       { selector: '.annotation-box', style: {
           shape: 'round-rectangle', width: 'data(width)', height: 'data(height)',
           'background-color': (ele) => ele.data('color') || mutedColor, 'background-opacity': 0.18,
           'border-width': 1.5, 'border-color': (ele) => ele.data('color') || mutedColor, 'border-style': 'dashed',
           'text-valign': 'top', 'text-halign': 'center', 'text-margin-y': -8, 'font-weight': 600,
-          events: 'no',
       } },
       { selector: '.annotation-text', style: {
           shape: 'round-rectangle', width: 'data(width)', height: 'data(height)',
           'background-opacity': 0, 'border-width': 0,
           'text-valign': 'center', 'text-halign': 'center',
           'text-wrap': 'wrap', 'text-max-width': 'data(width)', 'font-style': 'italic',
-          events: 'no',
       } },
-      // The one interactive part of an annotation -- see annotationHandleEls'
-      // comment above for why the box/text body itself is events:'no'.
-      // Deliberately conspicuous (a move-arrows glyph, high z-index, a
-      // visible border) rather than a small blank square -- an earlier,
-      // more subtle version of this handle read as decorative noise in a
-      // real, busy topology and nobody found it draggable.
+      // The handle is now only needed to MOVE the box/text (the body
+      // itself handles tap/cxttap, see above) -- kept small since it's no
+      // longer the only way to interact with the annotation at all. An
+      // earlier, even smaller (14px) blank-square version of this handle
+      // was genuinely too subtle to notice; this splits the difference
+      // rather than repeating the later, bulkier (22px) one that read as
+      // oversized next to a small box/note.
       { selector: '.annotation-handle', style: {
-          shape: 'round-rectangle', width: 22, height: 22,
+          shape: 'round-rectangle', width: 15, height: 15,
           'background-color': accentColor, 'background-opacity': 0.95,
-          'border-width': 2, 'border-color': textColor,
-          label: 'data(label)', color: '#ffffff', 'font-size': 13, 'text-halign': 'center', 'text-valign': 'center',
+          'border-width': 1.5, 'border-color': textColor,
+          label: 'data(label)', color: '#ffffff', 'font-size': 9, 'text-halign': 'center', 'text-valign': 'center',
           'z-index': 5000,
       } },
       // cytoscape-edgehandles' own style hooks (see /vendor/cytoscape-
@@ -3898,9 +3911,11 @@ function wireTopologyEvents() {
   });
   cy.on('mouseout', 'node.annotation-handle', () => { tooltip.style.display = 'none'; });
 
-  // Only the small corner handle is tappable -- the box/text body itself
-  // is 'events: no' (see annotationHandleEls' comment above).
-  cy.on('tap', 'node.annotation-handle', evt => {
+  // Both the handle AND the box/text body itself respond to a plain tap
+  // (the body is only 'grabbable: false', not deaf to events -- see the
+  // '.annotation-box' style comment above) -- clicking anywhere on a
+  // recuadro/nota opens the same rename/resize panel the handle does.
+  cy.on('tap', 'node.annotation-handle, node.annotation-box, node.annotation-text', evt => {
     const node = evt.target;
     openAnnotationPanel(node.data('annotationId'), node.renderedPosition());
   });
@@ -3908,8 +3923,9 @@ function wireTopologyEvents() {
   // Right-click / long-press -- draw.io's own quick-actions menu
   // (z-order, fill color) one gesture away, instead of the full rename/
   // resize panel above. 'cxttap' is cytoscape's own name for this
-  // gesture (right mouse button, or a long tap on touch).
-  cy.on('cxttap', 'node.annotation-handle', evt => {
+  // gesture (right mouse button, or a long tap on touch). Same body-or-
+  // handle reach as the plain tap above.
+  cy.on('cxttap', 'node.annotation-handle, node.annotation-box, node.annotation-text', evt => {
     const node = evt.target;
     openAnnotationContextMenu(node.data('annotationId'), node.renderedPosition());
   });
