@@ -5,6 +5,15 @@ import tempfile
 # developer's real database or upload directory.
 os.environ.setdefault("TRIDENTYOT_DATA_DIR", tempfile.mkdtemp(prefix="tridentyot-test-data-"))
 os.environ.setdefault("TRIDENTYOT_DATABASE_URL", f"sqlite:///{tempfile.mkdtemp(prefix='tridentyot-test-db-')}/test.db")
+# The whole suite exercises the single-tenant self-hosted scenario (_reset_db
+# below only ever calls seed_default_admin(), never seed_default_super_
+# admin()) -- opt out of the "TridentyOTroot" Super Admin default (see
+# config.py's own comment on SUPER_ADMIN_USERNAME) the same way a real
+# deployment that wants this scenario would, so db.init_db()'s default-org/
+# site/zone/sensor backfill still runs during init_db() as every existing
+# test assumes. test_super_admin_seed.py's own tests monkeypatch the
+# relevant config values directly and are unaffected by this default.
+os.environ.setdefault("TRIDENTYOT_SUPER_ADMIN_USERNAME", "")
 
 import pytest  # noqa: E402
 

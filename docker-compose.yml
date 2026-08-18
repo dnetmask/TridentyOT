@@ -42,17 +42,24 @@ services:
       # requests/30s. Leave unset to use the (slower, still functional)
       # unauthenticated limit.
       NVD_API_KEY: ${NVD_API_KEY:-}
-      # Set both (as actual shell/`.env` variables, not by editing this
-      # file) to boot as a central console serving multiple organizations
-      # (MSP/managed pattern) instead of a single self-hosted client -- see
-      # README.md "Consola central / MSP". No API can ever create a Super
-      # Admin, so this is the only way to get one. Left unset (the
-      # default), both resolve to an empty string, which the app treats
-      # exactly like "not configured" -- same single-client install as
-      # always (TRIDENTYOT_DEFAULT_ADMIN_USERNAME/PASSWORD further up the
-      # README, admin/admin unless overridden).
-      TRIDENTYOT_SUPER_ADMIN_USERNAME: ${TRIDENTYOT_SUPER_ADMIN_USERNAME:-}
-      TRIDENTYOT_SUPER_ADMIN_PASSWORD: ${TRIDENTYOT_SUPER_ADMIN_PASSWORD:-}
+      # Every deployment gets a Super Admin account by default now (see
+      # app/config.py's own comment on SUPER_ADMIN_USERNAME) -- username and
+      # password both "TridentyOTroot" unless overridden below. Change the
+      # password immediately after first login. No API can ever create a
+      # Super Admin, so this bootstrap is the only way to get one.
+      #
+      # IMPORTANT: these must resolve to a real value here, not an empty
+      # string -- Compose always passes an explicit environment variable
+      # into the container once it appears in this file, even when the
+      # `${VAR:-default}` substitution falls back to `default` on the host
+      # side, and the app's own Python-level default only applies when the
+      # variable is completely absent from the container's environment. To
+      # opt back into the old single-tenant-only bootstrap (a ready-to-use
+      # "Default Organization" + admin/admin, no Super Admin at all -- see
+      # README.md "Consola central / MSP"), set an actual empty override in
+      # a host `.env` file: TRIDENTYOT_SUPER_ADMIN_USERNAME=
+      TRIDENTYOT_SUPER_ADMIN_USERNAME: ${TRIDENTYOT_SUPER_ADMIN_USERNAME:-TridentyOTroot}
+      TRIDENTYOT_SUPER_ADMIN_PASSWORD: ${TRIDENTYOT_SUPER_ADMIN_PASSWORD:-TridentyOTroot}
     # Needed only for *live* packet capture and the nmap-based active
     # discovery (both use raw sockets), not for uploading/analyzing .pcap
     # files. Harmless to leave on otherwise.

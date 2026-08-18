@@ -107,12 +107,11 @@ ya capturado, y a partir de eso construye:
    (plataforma, sin organización propia, ve todas las organizaciones), **admin** (control total
    dentro de su propia organización) y **visualizador** (solo lectura)—. Ninguna API puede crear un
    Super Admin (ni `POST /api/users` ni `POST /api/organizations` lo permiten, a propósito, para no
-   abrir un hueco de privilegio) — se arranca por variables de entorno, ver "Consola central /
-   MSP" más abajo. Al primer arranque **sin** esas variables configuradas se crea en cambio el
-   usuario `admin`/`admin` (perfil admin, instalación de un solo cliente autoalojado); cámbialo
-   cuanto antes desde la pestaña **Usuarios**. El nombre de usuario es único por organización para
-   admin/visualizador, y único de forma global solo entre los Super Admin (que no tienen
-   organización de la cual distinguirse).
+   abrir un hueco de privilegio) — **todo despliegue nuevo arranca ya con uno por defecto**,
+   usuario y contraseña `TridentyOTroot`, ver "Consola central / MSP" más abajo. Cambiá la
+   contraseña cuanto antes desde la pestaña **Usuarios**. El nombre de usuario es único por
+   organización para admin/visualizador, y único de forma global solo entre los Super Admin (que no
+   tienen organización de la cual distinguirse).
 7. **Multi-organización e idioma**: el esquema de base de datos está preparado desde ya para dos
    topologías de despliegue -- un cliente grande que **auto-aloja** su propia instancia (una sola
    `Organization`, creada automáticamente en el primer arranque) o una futura **consola central**
@@ -915,33 +914,41 @@ PDF**) ya con esa vista lista -- sin depender de ningún servicio externo de gen
 | `NVD_CACHE_TTL_SECONDS` | Tiempo de vida del caché de resultados de NVD | 86400 (24h) |
 | `TRIDENTYOT_DEFAULT_FILTER` | Filtro BPF por defecto para captura en vivo | `ip or arp` |
 | `TRIDENTYOT_SESSION_LIFETIME_SECONDS` | Duración del token de sesión antes de expirar | 604800 (7 días) |
-| `TRIDENTYOT_DEFAULT_ADMIN_USERNAME` | Usuario admin creado en el primer arranque (si no hay usuarios **y no configuraste un Super Admin, ver abajo**) | `admin` |
+| `TRIDENTYOT_DEFAULT_ADMIN_USERNAME` | Usuario admin creado en el primer arranque (si no hay usuarios **y el Super Admin de abajo está deshabilitado**) | `admin` |
 | `TRIDENTYOT_DEFAULT_ADMIN_PASSWORD` | Contraseña de ese admin inicial — **cámbiala tras el primer login** | `admin` |
-| `TRIDENTYOT_SUPER_ADMIN_USERNAME` | Si se define, arranca en modo consola central: crea un Super Admin en el primer arranque (sin organización, sin `Organization` "Default" de por medio) en vez del admin/organización por defecto de arriba | — (deshabilitado) |
-| `TRIDENTYOT_SUPER_ADMIN_PASSWORD` | Contraseña de ese Super Admin — **obligatoria** si definiste `TRIDENTYOT_SUPER_ADMIN_USERNAME` (el arranque falla con un error claro si falta) | — |
+| `TRIDENTYOT_SUPER_ADMIN_USERNAME` | Usuario del Super Admin creado en el primer arranque de **todo** despliegue (sin organización, sin `Organization` "Default" de por medio) — poné una cadena vacía para deshabilitarlo y volver al admin/organización por defecto de arriba | `TridentyOTroot` |
+| `TRIDENTYOT_SUPER_ADMIN_PASSWORD` | Contraseña de ese Super Admin — **obligatoria** si `TRIDENTYOT_SUPER_ADMIN_USERNAME` no está vacío (el arranque falla con un error claro si falta) | `TridentyOTroot` |
 
-### Consola central / MSP: arrancar con un Super Admin
+### Super Admin por defecto / Consola central / MSP
 
-Un despliegue de un solo cliente (auto-alojado) no necesita nada de esto -- deja las dos
-variables `TRIDENTYOT_SUPER_ADMIN_*` sin definir y el primer arranque crea el usuario
-`admin`/`admin` de siempre. Pero si estás levantando la consola central de Netmask (o cualquier
-instancia pensada para servir a varios clientes desde el día uno, patrón MSP), no hay ningún
-endpoint que pueda crear un Super Admin -- ni `POST /api/users` ni `POST /api/organizations` lo
-permiten, a propósito, para que ninguna cuenta de una organización pueda auto-otorgarse ese rol.
-Definí las dos variables antes del primer arranque:
+Todo despliegue nuevo -- incluido un cliente único autoalojado -- arranca ya con un Super Admin
+(`TridentyOTroot`/`TridentyOTroot`, sin organización propia): no hay ningún endpoint que pueda crear
+uno (ni `POST /api/users` ni `POST /api/organizations` lo permiten, a propósito, para que ninguna
+cuenta de una organización pueda auto-otorgarse ese rol), así que el arranque es la única vía.
+Cambiá esa contraseña cuanto antes desde la pestaña **Usuarios**, o fijá la tuya propia desde el
+primer arranque:
 
 ```bash
 TRIDENTYOT_SUPER_ADMIN_USERNAME=root TRIDENTYOT_SUPER_ADMIN_PASSWORD=cambiame-ya \
   docker compose up -d
 ```
 
-Con eso, el primer login (`root`/`cambiame-ya`) entra directo a la pestaña **Organizaciones** —
-la instancia arranca sin ninguna organización todavía, ni una "Default" de relleno — y desde ahí
-se da de alta la primera organización real (con su propio usuario admin incluido en el mismo
-formulario). Cada organización, después, entra a **Infraestructura** para dar de alta sus propios
-`Site` (sedes) → `Zone` (áreas, con nivel de seguridad IEC&nbsp;62443 opcional) → `Sensor`.
-Cambiá la contraseña del Super Admin cuanto antes desde la pestaña **Usuarios**... salvo que
-prefieras dejarla fija por variable de entorno y rotarla ahí mismo en el próximo despliegue.
+Con eso (o con el valor por defecto), el primer login entra directo a la pestaña
+**Organizaciones** — la instancia arranca sin ninguna organización todavía, ni una "Default" de
+relleno — y desde ahí se da de alta la primera organización real (con su propio usuario admin
+incluido en el mismo formulario). Cada organización, después, entra a **Infraestructura** para dar
+de alta sus propios `Site` (sedes) → `Zone` (áreas, con nivel de seguridad IEC&nbsp;62443 opcional)
+→ `Sensor`. Este es el mismo mecanismo que usa la consola central de Netmask (o cualquier instancia
+pensada para servir a varios clientes desde el día uno, patrón MSP) — ahí no cambia nada más que
+seguramente quieras fijar tu propio usuario/contraseña en vez de dejar los valores por defecto.
+
+**Si preferís el bootstrap de un solo cliente de siempre** (una `Organization` "Default" lista para
+usar + `admin`/`admin`, sin ningún Super Admin), definí `TRIDENTYOT_SUPER_ADMIN_USERNAME` como
+cadena vacía explícita antes del primer arranque -- en Docker Compose esto tiene que ir en un
+archivo `.env` junto al `docker-compose.yml` (`TRIDENTYOT_SUPER_ADMIN_USERNAME=`), no alcanza con
+dejarla "sin definir" en la shell: `docker-compose.yml` ya declara esa variable con
+`${TRIDENTYOT_SUPER_ADMIN_USERNAME:-TridentyOTroot}`, así que una shell sin la variable exportada
+cae igual en el default `TridentyOTroot` -- necesitás la cadena vacía real puesta ahí.
 
 **Fix: la Organización/Sitio elegidos ya sobreviven a un refresco de la página.** Reporte real: al
 recargar el navegador (no hay ningún botón "Actualizar" en la UI desde que se sacó el auto-refresh --

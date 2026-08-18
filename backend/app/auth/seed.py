@@ -11,12 +11,14 @@ from app.models import Organization, User
 
 
 def seed_default_super_admin() -> None:
-    """Creates a Super Admin account on first run, but only if the operator
-    opted in by setting TRIDENTYOT_SUPER_ADMIN_USERNAME -- see config.py.
-    A no-op if unset, or if a super_admin already exists (including one
-    created since, or renamed). Must run before seed_default_admin() in the
-    startup sequence: a central-console deployment that bootstraps a Super
-    Admin this way has no use for the auto-created default
+    """Creates a Super Admin account on first run -- see config.py's
+    SUPER_ADMIN_USERNAME/PASSWORD, which default to "TridentyOTroot" for
+    every deployment unless the operator opts out (empty
+    TRIDENTYOT_SUPER_ADMIN_USERNAME) or overrides them. A no-op if
+    explicitly disabled that way, or if a super_admin already exists
+    (including one created since, or renamed). Must run before
+    seed_default_admin() in the startup sequence: a deployment that gets a
+    Super Admin this way has no use for the auto-created default
     organization/admin either, and seed_default_admin() already skips
     itself once any user exists.
     """

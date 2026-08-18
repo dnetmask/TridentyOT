@@ -42,11 +42,21 @@ DEFAULT_ADMIN_USERNAME = os.environ.get("TRIDENTYOT_DEFAULT_ADMIN_USERNAME", "ad
 DEFAULT_ADMIN_PASSWORD = os.environ.get("TRIDENTYOT_DEFAULT_ADMIN_PASSWORD", "admin")
 
 # Bootstraps a Super Admin (the Netmask platform role -- no organization of
-# its own, administers every organization) on first startup. Unset by
-# default, on purpose: there is no API path that can ever create a
-# super_admin (see routes_organizations.py/routes_users.py), so a central
-# console deployment that wants one must opt in here explicitly. A
-# self-hosted single-client install has no use for this and should leave
-# it unset -- DEFAULT_ADMIN_USERNAME above already covers that case.
-SUPER_ADMIN_USERNAME = os.environ.get("TRIDENTYOT_SUPER_ADMIN_USERNAME")
-SUPER_ADMIN_PASSWORD = os.environ.get("TRIDENTYOT_SUPER_ADMIN_PASSWORD")
+# its own, administers every organization) on first startup. There is no
+# API path that can ever create a super_admin (see routes_organizations.py/
+# routes_users.py's deliberate restriction to admin/viewer), so this is the
+# only way one ever comes to exist.
+#
+# Defaults to username/password "TridentyOTroot" -- every fresh deployment,
+# including a self-hosted single-client install, starts with this account
+# and lands on "create your first organization" on first login (see
+# db.py's _ensure_default_organization_and_backfill: no default
+# Organization/admin get auto-created once a Super Admin is configured,
+# central-console or not). Change the password immediately after first
+# login, same as DEFAULT_ADMIN_PASSWORD above.
+#
+# To opt out entirely and go back to the old single-tenant bootstrap (a
+# ready-to-use "Default Organization" + admin/admin, no Super Admin at
+# all), set TRIDENTYOT_SUPER_ADMIN_USERNAME to an empty string.
+SUPER_ADMIN_USERNAME = os.environ.get("TRIDENTYOT_SUPER_ADMIN_USERNAME", "TridentyOTroot")
+SUPER_ADMIN_PASSWORD = os.environ.get("TRIDENTYOT_SUPER_ADMIN_PASSWORD", "TridentyOTroot")

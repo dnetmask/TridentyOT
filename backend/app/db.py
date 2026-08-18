@@ -118,13 +118,16 @@ def _ensure_default_organization_and_backfill() -> None:
     backfill, same as _add_missing_columns.
 
     A completely fresh database with nothing to backfill only gets this
-    default org if no Super Admin was configured (see config.py's
-    SUPER_ADMIN_USERNAME) -- a central-console deployment that bootstraps
-    one starts with zero organizations on purpose, so its first login lands
-    on an empty "create your first organization" screen, not a
-    pre-populated "Default Organization" nobody asked for. A self-hosted
-    single-client install (no Super Admin) still gets one automatically,
-    same as before this distinction existed.
+    default org if no Super Admin is configured (see config.py's
+    SUPER_ADMIN_USERNAME, which defaults to "TridentyOTroot" for every
+    deployment now, not just a central console) -- a deployment that
+    bootstraps one starts with zero organizations on purpose, so its first
+    login lands on an empty "create your first organization" screen, not a
+    pre-populated "Default Organization" nobody asked for. Only a
+    deployment that explicitly opts out of the Super Admin (empty
+    TRIDENTYOT_SUPER_ADMIN_USERNAME) still gets one automatically, same as
+    every self-hosted single-client install did before this distinction
+    existed.
     """
     from app.config import SUPER_ADMIN_USERNAME
     from app.models import CaptureSession, Device, Organization, User
