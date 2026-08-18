@@ -329,6 +329,56 @@ def test_wipe_database_clears_capture_data_but_keeps_users(client, tmp_path):
     assert {u["username"] for u in client.get("/api/users").json()} == {"admin"}
 
 
+def test_wipe_database_clears_network_links_and_switch_table_imports(client, db_session, org_id):
+    """Same underlying bug as purge_capture_session's own regression test
+    (test_session_management.py), but for the other Device-deleting code
+    path: wipe_all_capture_data must also clear NetworkLink/
+    FlowLinkCandidate/SwitchTableImport(+ its child entry tables) before
+    deleting Device rows, or the DELETE violates a foreign key on Postgres
+    the moment anyone's ever used Topología por switch -- silently
+    tolerated by SQLite, which is why this needs its own explicit check
+    rather than relying on an exception to surface it."""
+    from app.models import Sensor, Site, Zone
+
+    site = Site(organization_id=org_id, name="Site")
+    db_session.add(site)
+    db_session.flush()
+    zone = Zone(site_id=site.id, name="Zone")
+    db_session.add(zone)
+    db_session.flush()
+    sensor = Sensor(zone_id=zone.id, name="Sensor", kind="live")
+    db_session.add(sensor)
+    db_session.commit()
+
+    other_device = client.post(
+        "/api/inventory/devices", json={"custom_name": "plc-core", "device_type": "plc", "sensor_id": sensor.id}
+    ).json()
+    switch = client.post(
+        "/api/inventory/devices",
+        json={"custom_name": "Switch1", "device_type": "network_device",
+              "device_type_secondary": "switch_l2", "sensor_id": sensor.id},
+    ).json()
+    assert client.post(
+        "/api/topology/links",
+        json={"device_a_id": other_device["id"], "device_b_id": switch["id"]},
+    ).status_code == 200
+    assert client.post(
+        "/api/discovery/switch-tables/import",
+        json={
+            "device_id": switch["id"], "table_type": "mac_table", "vendor": "cisco",
+            "raw_text": "Vlan    Mac Address       Type        Ports\n"
+            "   1    0011.2233.4455    DYNAMIC     Gi0/2\n",
+        },
+    ).status_code == 200
+
+    resp = client.delete("/api/capture/wipe")
+    assert resp.status_code == 200, resp.text
+
+    assert client.get("/api/inventory/devices").json() == []
+    assert client.get("/api/topology").json()["edges"] == []
+    assert client.get("/api/discovery/switch-tables/imports").json() == []
+
+
 def test_wipe_database_requires_admin_role(client, make_client):
     client.post("/api/users", json={"username": "viewer_wipe", "password": "secret1", "role": "viewer"})
     viewer = make_client("viewer_wipe", "secret1")

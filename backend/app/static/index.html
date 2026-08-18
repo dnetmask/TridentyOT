@@ -4966,6 +4966,16 @@ $('#create-user-btn').addEventListener('click', async () => {
 // loads the tab; the rail row it came from stays highlighted (activeRailKey)
 // so there's still a visible "you are here" after the flyout closes.
 let allSites = [];
+// True once loadSites() has resolved at least once this session -- see its
+// use in renderSidebarRail(): refreshAllData() fires loadSites/loadZones/
+// loadSensors/loadOrganizations concurrently with no shared ordering, so a
+// render triggered by one of the *other* three can land while allSites is
+// still its initial [] (the fetch simply hasn't come back yet) -- 100%
+// indistinguishable from "this org genuinely has zero sites" without this
+// flag. Mattered here specifically because a restored currentSiteId (see
+// SELECTED_SITE_STORAGE_KEY) would otherwise get wiped by that false
+// "no sites" reading almost every reload, race permitting.
+let sitesLoaded = false;
 let allZones = [];
 let allSensors = [];
 let allOrganizations = [];
@@ -5083,6 +5093,7 @@ function currentOrgId() {
 
 async function loadSites() {
   allSites = await api('/api/sites');
+  sitesLoaded = true;
   populateSiteSelects();
   renderSidebarRail();
 }
@@ -5281,7 +5292,11 @@ function renderSidebarRail() {
   }
 
   const sitesForOrg = orgId != null ? allSites.filter(s => s.organization_id === orgId) : [];
-  if (currentSiteId == null || !sitesForOrg.some(s => s.id === currentSiteId)) {
+  // Gated on sitesLoaded (see its own comment) -- otherwise a render that
+  // fires before loadSites() has resolved would read "0 sites for this
+  // org" from allSites still being [], and wipe a perfectly valid restored
+  // currentSiteId before its own fetch even had a chance to come back.
+  if (sitesLoaded && (currentSiteId == null || !sitesForOrg.some(s => s.id === currentSiteId))) {
     currentSiteId = sitesForOrg.length ? sitesForOrg[0].id : null;
     if (currentSiteId != null) localStorage.setItem(SELECTED_SITE_STORAGE_KEY, String(currentSiteId));
     else localStorage.removeItem(SELECTED_SITE_STORAGE_KEY);

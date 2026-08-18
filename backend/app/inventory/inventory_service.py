@@ -38,6 +38,10 @@ from app.models import (
     Flow,
     FlowLinkCandidate,
     NetworkLink,
+    SwitchArpEntry,
+    SwitchMacTableEntry,
+    SwitchNeighborEntry,
+    SwitchTableImport,
     VulnerabilityFinding,
     utcnow,
 )
@@ -1245,6 +1249,22 @@ def purge_capture_session(session: Session, capture_session_id: int) -> None:
     keeping every session that ever touched a row, only the latest one.
     This is a deliberate simplification -- full multi-session provenance
     would need that audit trail, which this app doesn't keep.
+
+    A device actually being deleted here also needs its NetworkLink/
+    FlowLinkCandidate/SwitchTableImport rows cleared first -- easy to miss
+    because SQLite (every test in this suite) has no FK enforcement by
+    default and silently allows the dangling reference, but Postgres
+    (production, see README) rejects the Device DELETE outright once any of
+    those still point at it. Hit in the wild by the one device type that's
+    guaranteed to have at least one of these: a manually-created switch
+    (routes_inventory.create_device) exists specifically to be the target
+    of "Topología por switch" -- a SwitchTableImport row and the
+    NetworkLinks it derived are the whole point of creating it -- and since
+    a manual switch's only capture_session_id *is* this synthetic one
+    (POST /api/inventory/devices with sensor_id), deleting that session was
+    the only way to remove it from Inventario at all (no standalone
+    DELETE /api/inventory/devices/{id} exists), making this the one and
+    only delete path that a switch would actually reach.
     """
     session.query(DeviceProtocol).filter(DeviceProtocol.capture_session_id == capture_session_id).delete(
         synchronize_session=False
@@ -1282,6 +1302,29 @@ def purge_capture_session(session: Session, capture_session_id: int) -> None:
         session.query(VulnerabilityFinding).filter(VulnerabilityFinding.device_id == device_id).delete(
             synchronize_session=False
         )
+        session.query(NetworkLink).filter(
+            or_(NetworkLink.device_a_id == device_id, NetworkLink.device_b_id == device_id)
+        ).delete(synchronize_session=False)
+        session.query(FlowLinkCandidate).filter(
+            or_(FlowLinkCandidate.device_a_id == device_id, FlowLinkCandidate.device_b_id == device_id)
+        ).delete(synchronize_session=False)
+        import_ids = [
+            row[0]
+            for row in session.query(SwitchTableImport.id).filter(SwitchTableImport.device_id == device_id).all()
+        ]
+        if import_ids:
+            session.query(SwitchMacTableEntry).filter(
+                SwitchMacTableEntry.switch_table_import_id.in_(import_ids)
+            ).delete(synchronize_session=False)
+            session.query(SwitchArpEntry).filter(SwitchArpEntry.switch_table_import_id.in_(import_ids)).delete(
+                synchronize_session=False
+            )
+            session.query(SwitchNeighborEntry).filter(
+                SwitchNeighborEntry.switch_table_import_id.in_(import_ids)
+            ).delete(synchronize_session=False)
+            session.query(SwitchTableImport).filter(SwitchTableImport.id.in_(import_ids)).delete(
+                synchronize_session=False
+            )
         session.query(Device).filter(Device.id == device_id).delete(synchronize_session=False)
 
 
@@ -1298,9 +1341,17 @@ def wipe_all_capture_data(session: Session, organization_id: int) -> dict[str, i
     "does something else still reference this" case to check when
     everything for this org is going away at once. Child tables
     (DeviceProtocol/Flow/VulnerabilityFinding) have no organization_id of
-    their own, so they're scoped via a subquery of this org's device ids.
+    their own, so they're scoped via a subquery of this org's device ids;
+    NetworkLink/FlowLinkCandidate/SwitchTableImport do have their own and
+    are scoped directly. These three are just as load-bearing here as in
+    purge_capture_session (see its own docstring on why) -- SQLite (every
+    test) has no FK enforcement to catch leaving them out, Postgres
+    (production) does.
     """
     device_ids = session.query(Device.id).filter(Device.organization_id == organization_id).scalar_subquery()
+    import_ids = session.query(SwitchTableImport.id).filter(
+        SwitchTableImport.organization_id == organization_id
+    ).scalar_subquery()
     counts = {
         "findings": session.query(VulnerabilityFinding)
         .filter(VulnerabilityFinding.device_id.in_(device_ids))
@@ -1310,6 +1361,26 @@ def wipe_all_capture_data(session: Session, organization_id: int) -> dict[str, i
         .delete(synchronize_session=False),
         "flows": session.query(Flow)
         .filter(or_(Flow.device_a_id.in_(device_ids), Flow.device_b_id.in_(device_ids)))
+        .delete(synchronize_session=False),
+        "network_links": session.query(NetworkLink)
+        .filter(NetworkLink.organization_id == organization_id)
+        .delete(synchronize_session=False),
+        "flow_link_candidates": session.query(FlowLinkCandidate)
+        .filter(FlowLinkCandidate.organization_id == organization_id)
+        .delete(synchronize_session=False),
+        "switch_table_entries": (
+            session.query(SwitchMacTableEntry)
+            .filter(SwitchMacTableEntry.switch_table_import_id.in_(import_ids))
+            .delete(synchronize_session=False)
+            + session.query(SwitchArpEntry)
+            .filter(SwitchArpEntry.switch_table_import_id.in_(import_ids))
+            .delete(synchronize_session=False)
+            + session.query(SwitchNeighborEntry)
+            .filter(SwitchNeighborEntry.switch_table_import_id.in_(import_ids))
+            .delete(synchronize_session=False)
+        ),
+        "switch_table_imports": session.query(SwitchTableImport)
+        .filter(SwitchTableImport.organization_id == organization_id)
         .delete(synchronize_session=False),
         "devices": session.query(Device).filter(Device.organization_id == organization_id).delete(
             synchronize_session=False

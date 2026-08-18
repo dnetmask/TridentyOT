@@ -880,6 +880,20 @@ curl -X DELETE http://localhost:8000/api/capture/wipe \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+**Fix: borrar la sesión de un switch manual (o toda la base) ya no tira 500 Internal Server Error.**
+Reporte real: crear un switch manual en Descubrimiento activo (que registra su propia
+`CaptureSession` sintética, tipo `manual_device` -- ver "Enlaces reales desde un switch" más arriba)
+y después importarle una tabla dejaba imposible borrar esa sesión (y por lo tanto el switch: no
+existe un `DELETE /api/inventory/devices/{id}` aparte, la única baja posible es borrando su sesión).
+Causa: al borrar un `Device`, `purge_capture_session`/`wipe_all_capture_data` nunca limpiaban sus
+filas de `NetworkLink`, `FlowLinkCandidate` ni `SwitchTableImport` (+ sus tablas hijas de MAC/ARP/
+vecinos) -- una violación de llave foránea en Postgres (producción) en cuanto ese switch tenía
+*cualquier* enlace o import a su nombre, que es exactamente el motivo por el que se crea uno. SQLite
+(toda la suite de tests) tolera en silencio esa referencia colgante por defecto, así que ningún test
+existente lo detectaba; se agregaron dos que sí, verificando el estado final de la base en vez de
+solo un código de estado, y confirmados contra SQLite con `PRAGMA foreign_keys=ON` (mismo
+comportamiento estricto que Postgres) para reproducir el 500 real antes del fix.
+
 ### Reporte automático de vulnerabilidades y exportación a PDF
 
 Además del refresco general de 15 segundos, la pestaña **Vulnerabilidades** ejecuta por su cuenta
@@ -942,6 +956,18 @@ cambian -- al elegirlos desde el switcher, o cuando esa misma regla de "usar el 
 aplicarse de verdad -- y se restauran al cargar la página. Se limpian al cerrar sesión (o si el token
 quedó inválido), para que el siguiente login -- de cualquier usuario -- no herede el contexto de
 otra sesión.
+
+**Fix de seguimiento: seguía pasando, incluso con lo anterior ya en producción.** Causa: una
+condición de carrera, no la falta de persistencia en sí. `refreshAllData()` dispara `loadSites()`,
+`loadZones()`, `loadSensors()` y (para un Super Admin) `loadOrganizations()` en paralelo, sin ningún
+orden garantizado entre ellas. Si `renderSidebarRail()` se ejecuta (disparado por *cualquiera* de
+esas cuatro) antes de que `loadSites()` en particular haya vuelto, `allSites` todavía es su `[]`
+inicial -- indistinguible, para el código, de "esta organización de verdad no tiene sitios" -- y esa
+lectura falsa terminaba borrando el `currentSiteId` recién restaurado (y su copia en `localStorage`)
+en el instante mismo de la carga, casi siempre, según qué tan rápido respondiera cada request. Ahora
+un flag `sitesLoaded` (`true` solo después de que `loadSites()` resolvió al menos una vez en la
+sesión) evita que esa regla de "sin sitios, usar ninguno" se aplique mientras la lista real todavía
+viene en camino -- verificado con 8 recargas reales seguidas de un navegador real, todas consistentes.
 
 ## Actualizar una instalación existente
 

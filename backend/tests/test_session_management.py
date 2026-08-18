@@ -87,6 +87,69 @@ def test_deleting_session_keeps_a_device_still_referenced_by_another_session(cli
     assert flows_after[0]["port"] == 23
 
 
+def test_deleting_a_manual_switchs_session_also_removes_its_network_links_and_imports(client, db_session, org_id):
+    """Regression test: a manually-created switch (POST /api/inventory/
+    devices, the only path Descubrimiento activo > Topología por switch
+    uses to add one) gets a synthetic CaptureSession tied to whichever
+    Sensor was picked -- its only capture_session_id, and therefore the
+    only way to ever remove it from Inventario at all (no standalone
+    DELETE /api/inventory/devices/{id} exists). Real-world report: once
+    that switch had a NetworkLink and a switch-table import against it --
+    the entire point of creating one -- deleting its session started
+    failing with a 500 Internal Server Error. Cause: purge_capture_session
+    deleted the Device row without first clearing NetworkLink/
+    FlowLinkCandidate/SwitchTableImport rows still pointing at it -- a
+    foreign-key violation on Postgres (production), silently tolerated by
+    SQLite (every other test in this suite), which is why nothing caught
+    it until now."""
+    site = Site(organization_id=org_id, name="Planta Yucateca")
+    db_session.add(site)
+    db_session.flush()
+    zone = Zone(site_id=site.id, name="General")
+    db_session.add(zone)
+    db_session.flush()
+    sensor = Sensor(zone_id=zone.id, name="Sensor A", kind="live")
+    db_session.add(sensor)
+    db_session.commit()
+
+    other_device = client.post(
+        "/api/inventory/devices",
+        json={"custom_name": "plc-core", "device_type": "plc", "sensor_id": sensor.id},
+    ).json()
+    switch = client.post(
+        "/api/inventory/devices",
+        json={"custom_name": "Switch_Core1", "device_type": "network_device",
+              "device_type_secondary": "switch_l2", "sensor_id": sensor.id},
+    ).json()
+
+    link = client.post(
+        "/api/topology/links",
+        json={"device_a_id": other_device["id"], "device_b_id": switch["id"], "source_port": "Gi0/1"},
+    )
+    assert link.status_code == 200, link.text
+
+    imported = client.post(
+        "/api/discovery/switch-tables/import",
+        json={
+            "device_id": switch["id"], "table_type": "mac_table", "vendor": "cisco",
+            "raw_text": "Vlan    Mac Address       Type        Ports\n"
+            "   1    0011.2233.4455    DYNAMIC     Gi0/2\n",
+        },
+    )
+    assert imported.status_code == 200, imported.text
+
+    sessions = client.get("/api/capture/sessions").json()
+    switch_session = next(s for s in sessions if s["source_type"] == "manual_device" and "Switch_Core1" in s["name"])
+
+    resp = client.delete(f"/api/capture/sessions/{switch_session['id']}")
+    assert resp.status_code == 204, resp.text
+
+    remaining_ids = {d["id"] for d in client.get("/api/inventory/devices").json()}
+    assert switch["id"] not in remaining_ids
+    assert client.get("/api/topology").json()["edges"] == []
+    assert client.get("/api/discovery/switch-tables/imports").json() == []
+
+
 def test_stopping_a_session_the_manager_no_longer_tracks_still_succeeds(client, db_session, org_id):
     """Regression test: previously, if the in-process live_capture_manager
     had lost track of a session (e.g. after a server restart left it stuck
