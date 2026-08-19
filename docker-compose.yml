@@ -48,18 +48,17 @@ services:
       # password immediately after first login. No API can ever create a
       # Super Admin, so this bootstrap is the only way to get one.
       #
-      # IMPORTANT: these must resolve to a real value here, not an empty
-      # string -- Compose always passes an explicit environment variable
-      # into the container once it appears in this file, even when the
-      # `${VAR:-default}` substitution falls back to `default` on the host
-      # side, and the app's own Python-level default only applies when the
-      # variable is completely absent from the container's environment. To
-      # opt back into the old single-tenant-only bootstrap (a ready-to-use
-      # "Default Organization" + admin/admin, no Super Admin at all -- see
-      # README.md "Consola central / MSP"), set an actual empty override in
-      # a host `.env` file: TRIDENTYOT_SUPER_ADMIN_USERNAME=
-      TRIDENTYOT_SUPER_ADMIN_USERNAME: ${TRIDENTYOT_SUPER_ADMIN_USERNAME:-TridentyOTroot}
-      TRIDENTYOT_SUPER_ADMIN_PASSWORD: ${TRIDENTYOT_SUPER_ADMIN_PASSWORD:-TridentyOTroot}
+      # Uses ${VAR-default} (no colon) on purpose, NOT ${VAR:-default}: with
+      # a colon, Compose treats an explicit empty value the same as unset
+      # and would still fall back to "TridentyOTroot", making the opt-out
+      # below impossible to express. Without the colon, an explicit empty
+      # override in a host `.env` file is preserved as empty and actually
+      # reaches the container that way, restoring the old single-tenant-only
+      # bootstrap (a ready-to-use "Default Organization" + admin/admin, no
+      # Super Admin at all -- see README.md "Consola central / MSP"):
+      #   TRIDENTYOT_SUPER_ADMIN_USERNAME=
+      TRIDENTYOT_SUPER_ADMIN_USERNAME: ${TRIDENTYOT_SUPER_ADMIN_USERNAME-TridentyOTroot}
+      TRIDENTYOT_SUPER_ADMIN_PASSWORD: ${TRIDENTYOT_SUPER_ADMIN_PASSWORD-TridentyOTroot}
     # Needed only for *live* packet capture and the nmap-based active
     # discovery (both use raw sockets), not for uploading/analyzing .pcap
     # files. Harmless to leave on otherwise.
